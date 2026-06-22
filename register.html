@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="it" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WaxTree — Registrati</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+[data-theme=dark]{--bg:#07100A;--bg-s:#0B160D;--bg-e:#0F1C11;--bg-h:#152516;--text:#E8EDEA;--text-m:#8FB09A;--text-f:#4A6A56;--accent:#5EC47B;--accent-light:#90E0AA;--border:#152516;--shadow:0 8px 32px rgba(0,0,0,.65);--input-bg:#0F1C11;--err:#F47B5E;--ok:#5EC47B}
+[data-theme=light]{--bg:#E8F0EA;--bg-s:#F4FBF6;--bg-e:#EAF2EC;--bg-h:#D4E8D8;--text:#1B2D22;--text-m:#3D6B4E;--text-f:#8FB09A;--accent:#3DAE5A;--accent-light:#5EC47B;--border:#C0D9C7;--shadow:0 8px 32px rgba(0,0,0,.12);--input-bg:#fff;--err:#D94F2E;--ok:#3DAE5A}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+.card{background:var(--bg-s);border:1px solid var(--border);border-radius:20px;padding:44px 40px 36px;width:100%;max-width:420px;box-shadow:var(--shadow)}
+.brand{text-align:center;margin-bottom:32px}
+.brand-name{font-size:26px;font-weight:700;letter-spacing:-.4px}
+.brand-name em{font-style:normal;color:var(--accent-light)}
+.brand-sub{font-size:13px;color:var(--text-m);margin-top:6px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--text-m);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
+.field-wrap{position:relative}
+.field input{width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:12px;padding:11px 14px;font-size:14px;color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s;font-family:inherit}
+.field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(94,196,123,.14)}
+.field input.error{border-color:var(--err)}
+.field input.ok{border-color:var(--ok)}
+.field-eye{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-f);font-size:15px;padding:2px;line-height:1;transition:color .15s}
+.field-eye:hover{color:var(--text-m)}
+.err-msg{font-size:12px;color:var(--err);margin-top:5px;min-height:16px}
+.form-err{background:rgba(244,123,94,.1);border:1px solid rgba(244,123,94,.3);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--err);margin-bottom:16px;display:none}
+.form-err.show{display:block}
+/* password strength bar */
+.pw-strength{margin-top:8px}
+.pw-bar-wrap{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.pw-bar{height:100%;width:0%;border-radius:2px;transition:width .3s,background .3s}
+.pw-label{font-size:11px;color:var(--text-f);margin-top:4px}
+.btn-main{width:100%;padding:13px;border-radius:12px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:opacity .15s,transform .1s;font-family:inherit;margin-top:8px}
+.btn-main:hover{opacity:.9}
+.btn-main:active{transform:scale(.98)}
+.btn-main:disabled{opacity:.5;cursor:default}
+.card-footer{text-align:center;margin-top:24px;font-size:13px;color:var(--text-m)}
+.card-footer a{color:var(--accent);text-decoration:none;font-weight:500;transition:opacity .15s}
+.card-footer a:hover{opacity:.8}
+.theme-btn{position:fixed;top:16px;right:16px;width:32px;height:32px;border-radius:50%;background:var(--bg-s);border:1px solid var(--border);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;transition:background .15s}
+.theme-btn:hover{background:var(--bg-h)}
+.spinner{display:inline-block;width:16px;height:16px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.divider{height:1px;background:var(--border);margin:4px 0 14px}
+.section-label{font-size:11px;font-weight:600;color:var(--text-f);letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px}
+</style>
+</head>
+<body>
+
+<button class="theme-btn" id="themeBtn" title="Cambia tema">🌙</button>
+
+<div class="card">
+  <div class="brand">
+    <div class="brand-name"><em>Wax</em>Tree</div>
+    <div class="brand-sub">Crea il tuo account</div>
+  </div>
+
+  <div class="form-err" id="formErr"></div>
+
+  <form id="regForm" novalidate>
+    <div class="section-label">Profilo</div>
+    <div class="field">
+      <label for="username">Nome utente</label>
+      <input type="text" id="username" placeholder="es. djluca" autocomplete="username" maxlength="32">
+      <div class="err-msg" id="usernameErr"></div>
+    </div>
+
+    <div class="field">
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="la-tua@email.com" autocomplete="email">
+      <div class="err-msg" id="emailErr"></div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="section-label">Sicurezza</div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <div class="field-wrap">
+        <input type="password" id="password" placeholder="Min. 8 caratteri" autocomplete="new-password" style="padding-right:40px">
+        <button type="button" class="field-eye" id="eyeBtn1" aria-label="Mostra password">👁</button>
+      </div>
+      <div class="pw-strength" id="pwStrength">
+        <div class="pw-bar-wrap"><div class="pw-bar" id="pwBar"></div></div>
+        <div class="pw-label" id="pwLabel"></div>
+      </div>
+      <div class="err-msg" id="passErr"></div>
+    </div>
+
+    <div class="field">
+      <label for="confirm">Conferma password</label>
+      <div class="field-wrap">
+        <input type="password" id="confirm" placeholder="Ripeti la password" autocomplete="new-password" style="padding-right:40px">
+        <button type="button" class="field-eye" id="eyeBtn2" aria-label="Mostra conferma">👁</button>
+      </div>
+      <div class="err-msg" id="confirmErr"></div>
+    </div>
+
+    <button type="submit" class="btn-main" id="submitBtn">Crea account</button>
+  </form>
+
+  <div class="card-footer">
+    Hai già un account? <a href="login.html">Accedi</a>
+  </div>
+</div>
+
+<script>
+const SK='wt-users', SESSION='wt-session';
+
+// Theme
+const html=document.documentElement;
+const saved=localStorage.getItem('wt-theme');
+if(saved)html.setAttribute('data-theme',saved);
+const themeBtn=document.getElementById('themeBtn');
+themeBtn.textContent=html.dataset.theme==='dark'?'☀':'🌙';
+themeBtn.addEventListener('click',()=>{
+  const next=html.dataset.theme==='dark'?'light':'dark';
+  html.setAttribute('data-theme',next);
+  localStorage.setItem('wt-theme',next);
+  themeBtn.textContent=next==='dark'?'☀':'🌙';
+});
+
+// Already logged in?
+if(localStorage.getItem(SESSION)){window.location.href='preview.html';}
+
+// Eye toggles
+function makeEye(btnId, inputId){
+  const btn=document.getElementById(btnId), inp=document.getElementById(inputId);
+  btn.addEventListener('click',()=>{
+    const show=inp.type==='password';
+    inp.type=show?'text':'password';
+    btn.textContent=show?'🙈':'👁';
+  });
+}
+makeEye('eyeBtn1','password');
+makeEye('eyeBtn2','confirm');
+
+// Password strength
+const pwInput=document.getElementById('password');
+const pwBar=document.getElementById('pwBar');
+const pwLabel=document.getElementById('pwLabel');
+function calcStrength(pw){
+  let s=0;
+  if(pw.length>=8)s++;
+  if(pw.length>=12)s++;
+  if(/[A-Z]/.test(pw))s++;
+  if(/[0-9]/.test(pw))s++;
+  if(/[^A-Za-z0-9]/.test(pw))s++;
+  return s;
+}
+const LEVELS=[
+  {label:'',color:''},
+  {label:'Debole',color:'#F47B5E'},
+  {label:'Discreta',color:'#F4C15E'},
+  {label:'Buona',color:'#90E0AA'},
+  {label:'Ottima',color:'#5EC47B'},
+  {label:'Forte',color:'#3DAE5A'},
+];
+pwInput.addEventListener('input',()=>{
+  const pw=pwInput.value;
+  if(!pw){pwBar.style.width='0';pwLabel.textContent='';return;}
+  const s=Math.max(1,calcStrength(pw));
+  const lvl=LEVELS[Math.min(s,5)];
+  pwBar.style.width=(s/5*100)+'%';
+  pwBar.style.background=lvl.color;
+  pwLabel.textContent=lvl.label;
+  pwLabel.style.color=lvl.color;
+});
+
+// Helpers
+function getUsers(){try{return JSON.parse(localStorage.getItem(SK)||'[]');}catch{return[];}}
+function saveUsers(u){localStorage.setItem(SK,JSON.stringify(u));}
+function showFieldErr(fieldId,errId,msg){
+  const inp=document.getElementById(fieldId), err=document.getElementById(errId);
+  err.textContent=msg;
+  inp.classList.toggle('error',!!msg);
+  if(!msg)inp.classList.remove('ok');
+}
+function clearErrs(){
+  [['username','usernameErr'],['email','emailErr'],['password','passErr'],['confirm','confirmErr']]
+    .forEach(([f,e])=>showFieldErr(f,e,''));
+  document.getElementById('formErr').classList.remove('show');
+}
+function showFormErr(msg){const el=document.getElementById('formErr');el.textContent=msg;el.classList.add('show');}
+
+// Submit
+document.getElementById('regForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  clearErrs();
+  const username=document.getElementById('username').value.trim();
+  const email=document.getElementById('email').value.trim();
+  const pass=document.getElementById('password').value;
+  const confirm=document.getElementById('confirm').value;
+  let ok=true;
+
+  if(!username){showFieldErr('username','usernameErr','Inserisci un nome utente');ok=false;}
+  else if(username.length<3){showFieldErr('username','usernameErr','Minimo 3 caratteri');ok=false;}
+  else if(!/^[a-zA-Z0-9_.-]+$/.test(username)){showFieldErr('username','usernameErr','Solo lettere, numeri, _ . -');ok=false;}
+
+  if(!email){showFieldErr('email','emailErr','Inserisci la tua email');ok=false;}
+  else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showFieldErr('email','emailErr','Email non valida');ok=false;}
+
+  if(!pass){showFieldErr('password','passErr','Inserisci una password');ok=false;}
+  else if(pass.length<8){showFieldErr('password','passErr','Minimo 8 caratteri');ok=false;}
+
+  if(!confirm){showFieldErr('confirm','confirmErr','Conferma la password');ok=false;}
+  else if(pass&&confirm&&pass!==confirm){showFieldErr('confirm','confirmErr','Le password non corrispondono');ok=false;}
+
+  if(!ok)return;
+
+  const users=getUsers();
+  if(users.find(u=>u.email.toLowerCase()===email.toLowerCase())){
+    showFieldErr('email','emailErr','Email già registrata');
+    return;
+  }
+  if(users.find(u=>u.username.toLowerCase()===username.toLowerCase())){
+    showFieldErr('username','usernameErr','Nome utente già in uso');
+    return;
+  }
+
+  const btn=document.getElementById('submitBtn');
+  btn.disabled=true;
+  btn.innerHTML='<span class="spinner"></span>Creazione account…';
+  await new Promise(r=>setTimeout(r,700));
+
+  const newUser={username,email,password:pass,createdAt:Date.now()};
+  users.push(newUser);
+  saveUsers(users);
+  localStorage.setItem(SESSION,JSON.stringify({username,email,loginAt:Date.now()}));
+  localStorage.setItem('wt-theme',html.dataset.theme);
+  window.location.href='preview.html';
+});
+</script>
+</body>
+</html>

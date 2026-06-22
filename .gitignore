@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Local dev config (Claude Code, paths locali)
+.claude/
+
+# Dipendenze
+node_modules/
+
+# Variabili d'ambiente reali (mai nel repo)
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+dist/
+build/
