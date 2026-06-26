@@ -322,6 +322,12 @@ input,select{font:inherit;color:inherit}
 .toast-title{font-size:13.5px;font-weight:700;margin-bottom:3px}
 .toast-tagline{font-size:11.5px;color:var(--text-m);line-height:1.45}
 .own-badge{font-size:10.5px;font-weight:600;color:var(--accent);background:rgba(94,196,123,.1);border:1px solid rgba(94,196,123,.28);border-radius:20px;padding:2px 8px;white-space:nowrap;flex-shrink:0}
+.coll-badge{font-size:10.5px;font-weight:600;color:#E8A04A;background:rgba(232,160,74,.12);border:1px solid rgba(232,160,74,.35);border-radius:20px;padding:2px 8px;white-space:nowrap;flex-shrink:0}
+.want-badge{font-size:10.5px;font-weight:600;color:#4A8AFF;background:rgba(74,138,255,.1);border:1px solid rgba(74,138,255,.3);border-radius:20px;padding:2px 8px;white-space:nowrap;flex-shrink:0}
+.discogs-btn{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;padding:11px 18px;border-radius:12px;background:#333;color:#fff;font-size:13.5px;font-weight:600;border:1.5px solid #555;transition:background .15s,border-color .15s;margin-top:12px;cursor:pointer}
+.discogs-btn:hover{background:#444;border-color:#888}
+.discogs-btn:disabled{opacity:.5;cursor:default}
+.discogs-connected-info{background:var(--bg-e);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0;font-size:12.5px;color:var(--text-m);line-height:1.7}
 .btn-sec{padding:7px 14px;border-radius:20px;border:1px solid var(--border);font-size:12.5px;color:var(--text-m);transition:border-color .15s,color .15s}
 .btn-sec:hover{border-color:var(--accent);color:var(--accent)}
 .btn-pri{padding:7px 16px;border-radius:20px;background:var(--accent);color:#fff;font-size:12.5px;font-weight:600;transition:opacity .15s}
@@ -490,6 +496,92 @@ async function extractAllMetadata(handles,onProgress){
   return results;
 }
 
+function inDiscogsCollection(track){
+  if(!st.discogsCollReleaseIds.length&&!st.discogsCollMasterIds.length)return false;
+  const raw=track.id?.split('-')[0];if(!raw)return false;
+  if(raw.startsWith('m'))return st.discogsCollMasterIds.includes(parseInt(raw.slice(1)));
+  return st.discogsCollReleaseIds.includes(parseInt(raw));
+}
+function inDiscogsWantlist(track){
+  if(!st.discogsWantReleaseIds.length&&!st.discogsWantMasterIds.length)return false;
+  const raw=track.id?.split('-')[0];if(!raw)return false;
+  if(raw.startsWith('m'))return st.discogsWantMasterIds.includes(parseInt(raw.slice(1)));
+  return st.discogsWantReleaseIds.includes(parseInt(raw));
+}
+async function dOAuthProxy(path,params={}){
+  let retries=0;
+  while(true){
+    const{data,error}=await sb.functions.invoke('discogs-oauth',{body:{
+      action:'proxy',path,
+      params:JSON.stringify(params),
+      access_token:st.discogsOAuthToken,
+      token_secret:st.discogsOAuthSecret,
+    }});
+    if(error)throw new Error(error.message);
+    if(data?.error==='rate_limited'){
+      if(retries++<2){await new Promise(r=>setTimeout(r,65000));continue;}
+      throw new Error('Rate limited by Discogs — try again in a minute');
+    }
+    if(data?.error)throw new Error(data.error);
+    return data;
+  }
+}
+
+async function syncDiscogsAccount(){
+  if(!st.discogsOAuthToken||!st.discogsOAuthSecret)throw new Error('Not connected to Discogs');
+  st.discogsSyncing=true;rr();
+  const username=st.discogsUser;
+  try{
+    let page=1,collRIds=[],collMIds=[];
+    while(true){
+      const d=await dOAuthProxy(`/users/${username}/collection/folders/0/releases`,{per_page:'100',page:String(page),sort:'added',sort_order:'desc'});
+      d.releases.forEach(r=>{collRIds.push(r.basic_information.id);if(r.basic_information.master_id)collMIds.push(r.basic_information.master_id);});
+      if(page>=d.pagination.pages)break;page++;
+    }
+    let wp=1,wantRIds=[],wantMIds=[];
+    while(true){
+      const d=await dOAuthProxy(`/users/${username}/wants`,{per_page:'100',page:String(wp)});
+      d.wants.forEach(r=>{wantRIds.push(r.basic_information.id);if(r.basic_information.master_id)wantMIds.push(r.basic_information.master_id);});
+      if(wp>=d.pagination.pages)break;wp++;
+    }
+    st.discogsCollReleaseIds=collRIds;st.discogsCollMasterIds=collMIds;
+    st.discogsWantReleaseIds=wantRIds;st.discogsWantMasterIds=wantMIds;
+    st.discogsCollSyncedAt=new Date().toISOString();
+    saveSt();
+  }catch(e){st.discogsSyncing=false;rr();throw e;}
+  st.discogsSyncing=false;rr();
+}
+
+async function handleDiscogsCallback(){
+  const params=new URLSearchParams(location.search);
+  const oauthToken=params.get('oauth_token');
+  const oauthVerifier=params.get('oauth_verifier');
+  if(!oauthToken||!oauthVerifier)return;
+  history.replaceState(null,'',location.pathname);
+  const pendingSecret=sessionStorage.getItem('discogs_oauth_secret');
+  sessionStorage.removeItem('discogs_oauth_secret');
+  if(!pendingSecret){alert('Discogs login session expired. Please try again.');return;}
+  st.discogsModal=true;st.discogsSyncing=true;rr();
+  try{
+    const{data,error}=await sb.functions.invoke('discogs-oauth',{body:{
+      action:'access_token',
+      oauth_token:oauthToken,
+      oauth_token_secret:pendingSecret,
+      oauth_verifier:oauthVerifier,
+    }});
+    if(error)throw new Error(error.message);
+    if(data?.error)throw new Error(data.error);
+    st.discogsOAuthToken=data.access_token;
+    st.discogsOAuthSecret=data.token_secret;
+    st.discogsUser=data.username;
+    saveSt();rr();
+    await syncDiscogsAccount();
+  }catch(e){
+    st.discogsSyncing=false;rr();
+    alert('Discogs connection failed: '+e.message);
+  }
+}
+
 function isOwned(trackTitle,trackArtist){
   if(!st.ownedTracks.length)return false;
   const tN=normalizeStr(trackTitle);
@@ -548,7 +640,7 @@ const DEMO_NODES=[{
 // ── State ──────────────────────────────────────────────────
 const SK='ct-v5';
 function loadSt(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}}
-function saveSt(){try{localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:st.nodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,history:st.history,follows:st.follows}));}catch{}}
+function saveSt(){try{localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:st.nodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));}catch{}}
 
 const saved=loadSt();
 const st={
@@ -567,8 +659,16 @@ const st={
   nowPlaying:null,
   dasAscoltare:saved?.dasAscoltare||[],daqModal:false,
   profileOpen:false,
-  likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,
+  likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,discogsModal:false,discogsSyncing:false,
   follows:saved?.follows||[],
+  discogsUser:saved?.discogsUser||'',
+  discogsOAuthToken:saved?.discogsOAuthToken||'',
+  discogsOAuthSecret:saved?.discogsOAuthSecret||'',
+  discogsCollReleaseIds:saved?.discogsCollReleaseIds||[],
+  discogsCollMasterIds:saved?.discogsCollMasterIds||[],
+  discogsWantReleaseIds:saved?.discogsWantReleaseIds||[],
+  discogsWantMasterIds:saved?.discogsWantMasterIds||[],
+  discogsCollSyncedAt:saved?.discogsCollSyncedAt||null,
   searchCount:0,ownedTracks:[],
   history:saved?.history||[],
 };
@@ -1268,6 +1368,8 @@ function trackCard(track,parentNodeId,displayArtist){
     ),
     d('t-actions',{},
       owned?s('own-badge','You own it'):null,
+      inDiscogsCollection(track)?s('coll-badge','In collection'):null,
+      inDiscogsWantlist(track)?s('want-badge','On wantlist'):null,
       badged?s('t-badge','✓ played'):null,
       daqBtn,
       b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'),
@@ -1594,9 +1696,15 @@ function buildApp(){
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.settingsModal=true;rr();}},'My Settings'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.likesModal=true;rr();}},'My Likes'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.followsModal=true;rr();}},'My Follows'));
+        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.discogsModal=true;rr();}},'Discogs Collection'+(st.discogsCollSyncedAt?' ✓':'')));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.historyModal=true;rr();}},'History'));
         menu.appendChild(d('profile-sep',{}));
-        menu.appendChild(b('profile-item danger',{onClick:()=>sb.auth.signOut()},'Sign out'));
+        menu.appendChild(b('profile-item danger',{onClick:async()=>{
+          st.profileOpen=false;rr();
+          try{await sb.auth.signOut();}catch{}
+          Object.keys(localStorage).filter(k=>k.startsWith('sb-')).forEach(k=>localStorage.removeItem(k));
+          window.location.href='login.html';
+        }},'Sign out'));
         wrap.appendChild(menu);
         setTimeout(()=>{const h=()=>{st.profileOpen=false;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
       }
@@ -1679,7 +1787,7 @@ function buildApp(){
         info.appendChild(s('daq-meta',meta));
         item.appendChild(info);
         if(track.videoId){
-          const pb=b('daq-play has-video',{title:'Play in player',onClick:()=>{playTrack(track);st.daqModal=false;rr();}});
+          const pb=b('daq-play has-video',{title:'Play in player',onClick:()=>{doPlay(track.id,track.videoId,track.title,track.artistName);st.daqModal=false;rr();}});
           pb.textContent='▶';item.appendChild(pb);
         }
         item.appendChild(b('daq-rm',{title:'Remove',onClick:()=>{st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);rr();}},'×'));
@@ -1795,6 +1903,71 @@ function buildApp(){
       });
     }
     modal.appendChild(list);
+    overlay.appendChild(modal);root.appendChild(overlay);
+  }
+
+  // ── Discogs Collection modal ────────────────────────────────
+  if(st.discogsModal){
+    const overlay=d('overlay',{onClick:()=>{if(!st.discogsSyncing){st.discogsModal=false;rr();}}});
+    const modal=d('modal daq-modal',{onClick:e=>e.stopPropagation()});
+    modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'4px'}},
+      el('h2',{cls:'modal-title'},'🎵 Discogs Collection'),
+      b('btn-sec',{onClick:()=>{if(!st.discogsSyncing){st.discogsModal=false;rr();}}}, '×')
+    ));
+
+    if(!st.discogsUser){
+      // Not connected — show connect button
+      modal.appendChild(el('p',{cls:'modal-sub'},'Connect your Discogs account to sync your collection and wantlist. You\'ll be redirected to Discogs to log in.'));
+      const connectBtn=el('button',{cls:'discogs-btn',onClick:async()=>{
+        connectBtn.disabled=true;connectBtn.textContent='Connecting…';
+        try{
+          const cbUrl=location.origin+location.pathname;
+          const{data,error}=await sb.functions.invoke('discogs-oauth',{body:{action:'request_token',callback_url:cbUrl}});
+          if(error)throw new Error(error.message);
+          if(data?.error)throw new Error(data.error);
+          sessionStorage.setItem('discogs_oauth_secret',data.oauth_token_secret);
+          window.location.href=`https://www.discogs.com/oauth/authorize?oauth_token=${data.oauth_token}`;
+        }catch(e){
+          connectBtn.disabled=false;connectBtn.textContent='Connect with Discogs';
+          alert('Connection failed: '+e.message);
+        }
+      }});
+      connectBtn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4"/></svg> Connect with Discogs';
+      modal.appendChild(connectBtn);
+    } else {
+      // Connected — show info + sync options
+      const info=d('discogs-connected-info',{});
+      info.appendChild(el('div',{style:'font-weight:600;color:var(--text);margin-bottom:4px'},'Connected as @'+st.discogsUser));
+      if(st.discogsCollSyncedAt){
+        info.appendChild(el('div',{},'Last synced: '+new Date(st.discogsCollSyncedAt).toLocaleString()));
+        info.appendChild(el('div',{},'Collection: '+st.discogsCollReleaseIds.length+' releases · Wantlist: '+st.discogsWantReleaseIds.length));
+      } else {
+        info.appendChild(el('div',{style:'color:var(--accent)'},'Not synced yet'));
+      }
+      modal.appendChild(info);
+
+      if(st.discogsSyncing){
+        modal.appendChild(d('',{style:'font-size:13px;color:var(--accent);padding:6px 0;font-style:italic'},'Syncing… this may take a moment'));
+      }
+
+      const syncBtn=b('s-btn',{style:'width:100%;margin-top:4px',onClick:async()=>{
+        try{await syncDiscogsAccount();}
+        catch(e){alert('Sync failed: '+e.message);}
+      }},st.discogsSyncing?'Syncing…':'Sync now');
+      if(st.discogsSyncing)syncBtn.setAttribute('disabled','');
+      modal.appendChild(syncBtn);
+
+      if(!st.discogsSyncing){
+        const disconnectBtn=b('btn-sec',{style:'width:100%;margin-top:8px',onClick:()=>{
+          st.discogsOAuthToken='';st.discogsOAuthSecret='';st.discogsUser='';
+          st.discogsCollReleaseIds=[];st.discogsCollMasterIds=[];
+          st.discogsWantReleaseIds=[];st.discogsWantMasterIds=[];
+          st.discogsCollSyncedAt=null;saveSt();rr();
+        }},'Disconnect Discogs account');
+        modal.appendChild(disconnectBtn);
+      }
+    }
+
     overlay.appendChild(modal);root.appendChild(overlay);
   }
 
@@ -1973,6 +2146,7 @@ sb.auth.getSession().then(({data:{session}})=>{
   st.ownedTracks=wtSession.user.user_metadata?.owned_tracks||[];
   paint();
   loadFollows();
+  handleDiscogsCallback();
 });
 
 </script>
