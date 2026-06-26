@@ -508,22 +508,29 @@ function inDiscogsWantlist(track){
   if(raw.startsWith('m'))return st.discogsWantMasterIds.includes(parseInt(raw.slice(1)));
   return st.discogsWantReleaseIds.includes(parseInt(raw));
 }
+async function edgeFn(body){
+  const{data:{session}}=await sb.auth.getSession();
+  const tok=session?.access_token||'sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ';
+  const res=await fetch('https://asmnqlqvlpcwcaaughuu.supabase.co/functions/v1/discogs-oauth',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok,'apikey':'sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ'},
+    body:JSON.stringify(body),
+  });
+  const json=await res.json().catch(()=>({}));
+  if(!res.ok||json.error)throw new Error(json.error||'Edge function error '+res.status);
+  return json;
+}
 async function dOAuthProxy(path,params={}){
   let retries=0;
   while(true){
-    const{data,error}=await sb.functions.invoke('discogs-oauth',{body:{
-      action:'proxy',path,
-      params:JSON.stringify(params),
-      access_token:st.discogsOAuthToken,
-      token_secret:st.discogsOAuthSecret,
-    }});
-    if(error)throw new Error(error.message);
-    if(data?.error==='rate_limited'){
-      if(retries++<2){await new Promise(r=>setTimeout(r,65000));continue;}
-      throw new Error('Rate limited by Discogs — try again in a minute');
-    }
-    if(data?.error)throw new Error(data.error);
-    return data;
+    try{
+      const data=await edgeFn({action:'proxy',path,params:JSON.stringify(params),access_token:st.discogsOAuthToken,token_secret:st.discogsOAuthSecret});
+      if(data?.error==='rate_limited'){
+        if(retries++<2){await new Promise(r=>setTimeout(r,65000));continue;}
+        throw new Error('Rate limited by Discogs — try again in a minute');
+      }
+      return data;
+    }catch(e){throw e;}
   }
 }
 
@@ -563,14 +570,7 @@ async function handleDiscogsCallback(){
   if(!pendingSecret){alert('Discogs login session expired. Please try again.');return;}
   st.discogsModal=true;st.discogsSyncing=true;rr();
   try{
-    const{data,error}=await sb.functions.invoke('discogs-oauth',{body:{
-      action:'access_token',
-      oauth_token:oauthToken,
-      oauth_token_secret:pendingSecret,
-      oauth_verifier:oauthVerifier,
-    }});
-    if(error)throw new Error(error.message);
-    if(data?.error)throw new Error(data.error);
+    const data=await edgeFn({action:'access_token',oauth_token:oauthToken,oauth_token_secret:pendingSecret,oauth_verifier:oauthVerifier});
     st.discogsOAuthToken=data.access_token;
     st.discogsOAuthSecret=data.token_secret;
     st.discogsUser=data.username;
@@ -1922,9 +1922,7 @@ function buildApp(){
         connectBtn.disabled=true;connectBtn.textContent='Connecting…';
         try{
           const cbUrl=location.origin+location.pathname;
-          const{data,error}=await sb.functions.invoke('discogs-oauth',{body:{action:'request_token',callback_url:cbUrl}});
-          if(error)throw new Error(error.message);
-          if(data?.error)throw new Error(data.error);
+          const data=await edgeFn({action:'request_token',callback_url:cbUrl});
           sessionStorage.setItem('discogs_oauth_secret',data.oauth_token_secret);
           window.location.href=`https://www.discogs.com/oauth/authorize?oauth_token=${data.oauth_token}`;
         }catch(e){
