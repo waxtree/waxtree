@@ -1294,7 +1294,7 @@ function trackCard(track,parentNodeId,displayArtist){
     }
   },`Explore label: ${track.label} ›`):null;
 
-  const espBtn=track.exploreName?b('esplora-btn',{
+  const espBtn=track.exploreName?b('esplora-btn'+(track.fromLabel?' esplora-label':''),{
     onClick:()=>addNode(track.exploreType||'artist',track.exploreId,track.exploreName,parentNodeId,getNode(parentNodeId)?.branchId)
   },`${track.exploreLabel||'Explore'}: ${track.exploreName} ›`):null;
 
