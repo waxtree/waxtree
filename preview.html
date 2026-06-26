@@ -635,7 +635,6 @@ const st={
   chips:saved?.chips?.length?saved.chips:['Larry Heard','Trax Records'],
   likes:saved?.likes||{},listens:saved?.listens||{},
   q:'',results:[],loading:false,err:'',
-  modal:false,tokenDraft:getToken(),
   bioOpen:{},renameId:null,renameVal:'',tagNodeId:null,tagVal:'',
   filterOpen:false,filterTitle:'',filterFormat:'all',filterSort:'default',filterGenres:[],
   sbPinFirst:saved?.sbPinFirst||false,sbFilterTag:'',
@@ -1661,11 +1660,10 @@ function buildContent(){
 function buildApp(){
   const root=d('',{style:{height:'100dvh',display:'flex',flexDirection:'column',overflow:'hidden'}});
   root.setAttribute('translate','no');
-  const tokenSet=!!getToken();const activeBranch=getBranch(st.activeBranchId);
+  const activeBranch=getBranch(st.activeBranchId);
   root.appendChild(d('hdr',{},
     el('span',{cls:'logo'},el('span',{cls:'logo-brand'},el('em',{},'Wax'),'Tree'),el('span',{cls:'logo-sub'},'— prototype')),s('sp'),
     (()=>{const cnt=st.dasAscoltare.length;const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Listen later',onClick:()=>{st.daqModal=true;rr();}},'🔖');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
-    b('hdr-pill',{onClick:()=>{st.modal=true;st.tokenDraft=getToken();rr();}},tokenSet?'🔑 Token active':'🔑 Add Token'),
     (()=>{
       if(!wtSession)return null;
       const wrap=d('profile-wrap',{});
@@ -1700,7 +1698,7 @@ function buildApp(){
   const swrap=d('search-wrap',{});
   swrap.appendChild(d('search-field',{},s('s-icon','🔍'),
     activeBranch?s('s-badge',activeBranch.name):null,
-    el('input',{cls:'s-input',type:'text',placeholder:tokenSet?'Search artist or label...':'Add Token for live search',value:st.q,
+    el('input',{cls:'s-input',type:'text',placeholder:'Search artist or label...',value:st.q,
       onInput:e=>{st.q=e.target.value;if(!e.target.value){st.results=[];st.err='';rr();}},
       onKeydown:e=>{if(e.key==='Enter')doSearch();if(e.key==='Escape'){st.results=[];st.err='';rr();}},
     }),
@@ -1741,15 +1739,6 @@ function buildApp(){
 
   const main=d('main',{});main.appendChild(buildSidebar());main.appendChild(buildContent());root.appendChild(main);
 
-  if(st.modal){
-    const overlay=d('overlay',{onClick:()=>{st.modal=false;rr();}});
-    const modal=d('modal',{onClick:e=>e.stopPropagation()},
-      el('h2',{cls:'modal-title'},'Token Discogs'),
-      el('p',{cls:'modal-sub'},'Get your token at discogs.com/settings/developers → "Personal Access Tokens". Saved only in your browser.'),
-      el('input',{cls:'modal-input',type:'text',placeholder:'Paste your token here...',value:st.tokenDraft,onInput:e=>{st.tokenDraft=e.target.value;}}),
-      d('modal-row',{},b('btn-sec',{onClick:()=>{st.modal=false;rr();}},'Cancel'),b('btn-pri',{onClick:()=>{saveToken(st.tokenDraft);st.modal=false;rr();}},'Save')),
-    );overlay.appendChild(modal);root.appendChild(overlay);
-  }
 
   if(st.daqModal){
     const overlay=d('overlay',{onClick:()=>{st.daqModal=false;rr();}});
