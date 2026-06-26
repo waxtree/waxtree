@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="it" data-theme="dark">
+<html lang="en" data-theme="dark" translate="no">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WaxTree — Registrati</title>
+<meta name="google" content="notranslate">
+<title>WaxTree — Sign Up</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 [data-theme=dark]{--bg:#07100A;--bg-s:#0B160D;--bg-e:#0F1C11;--bg-h:#152516;--text:#E8EDEA;--text-m:#8FB09A;--text-f:#4A6A56;--accent:#5EC47B;--accent-light:#90E0AA;--border:#152516;--shadow:0 8px 32px rgba(0,0,0,.65);--input-bg:#0F1C11;--err:#F47B5E;--ok:#5EC47B}
@@ -55,38 +56,38 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 </head>
 <body>
 
-<button class="theme-btn" id="themeBtn" title="Cambia tema">🌙</button>
+<button class="theme-btn" id="themeBtn" title="Toggle theme">🌙</button>
 
 <div class="card">
   <div class="brand">
     <div class="brand-name"><em>Wax</em>Tree</div>
-    <div class="brand-sub" id="brandSub">Crea il tuo account</div>
+    <div class="brand-sub" id="brandSub">Create your account</div>
   </div>
 
   <div class="form-err" id="formErr"></div>
 
   <form id="regForm" novalidate>
-    <div class="section-label">Profilo</div>
+    <div class="section-label">Profile</div>
     <div class="field">
-      <label for="username">Nome utente</label>
-      <input type="text" id="username" placeholder="es. djluca" autocomplete="username" maxlength="32">
+      <label for="username">Username</label>
+      <input type="text" id="username" placeholder="e.g. djluca" autocomplete="username" maxlength="32">
       <div class="err-msg" id="usernameErr"></div>
     </div>
 
     <div class="field">
       <label for="email">Email</label>
-      <input type="email" id="email" placeholder="la-tua@email.com" autocomplete="email">
+      <input type="email" id="email" placeholder="your@email.com" autocomplete="email">
       <div class="err-msg" id="emailErr"></div>
     </div>
 
     <div class="divider"></div>
-    <div class="section-label">Sicurezza</div>
+    <div class="section-label">Security</div>
 
     <div class="field">
       <label for="password">Password</label>
       <div class="field-wrap">
-        <input type="password" id="password" placeholder="Min. 8 caratteri" autocomplete="new-password" style="padding-right:40px">
-        <button type="button" class="field-eye" id="eyeBtn1" aria-label="Mostra password">👁</button>
+        <input type="password" id="password" placeholder="Min. 8 characters" autocomplete="new-password" style="padding-right:40px">
+        <button type="button" class="field-eye" id="eyeBtn1" aria-label="Show password">👁</button>
       </div>
       <div class="pw-strength">
         <div class="pw-bar-wrap"><div class="pw-bar" id="pwBar"></div></div>
@@ -96,30 +97,30 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     </div>
 
     <div class="field">
-      <label for="confirm">Conferma password</label>
+      <label for="confirm">Confirm password</label>
       <div class="field-wrap">
-        <input type="password" id="confirm" placeholder="Ripeti la password" autocomplete="new-password" style="padding-right:40px">
-        <button type="button" class="field-eye" id="eyeBtn2" aria-label="Mostra conferma">👁</button>
+        <input type="password" id="confirm" placeholder="Repeat password" autocomplete="new-password" style="padding-right:40px">
+        <button type="button" class="field-eye" id="eyeBtn2" aria-label="Show confirm">👁</button>
       </div>
       <div class="err-msg" id="confirmErr"></div>
     </div>
 
-    <button type="submit" class="btn-main" id="submitBtn">Crea account</button>
+    <button type="submit" class="btn-main" id="submitBtn">Create account</button>
   </form>
 
   <!-- shown if Supabase requires email confirmation -->
   <div class="confirm-state" id="confirmState">
     <div class="confirm-icon">📬</div>
-    <div class="confirm-title">Controlla la tua email</div>
+    <div class="confirm-title">Check your email</div>
     <div class="confirm-body">
-      Abbiamo inviato un link di conferma a <span class="confirm-email" id="confirmEmail"></span>.<br>
-      Clicca il link per attivare il tuo account.
+      We've sent a confirmation link to <span class="confirm-email" id="confirmEmail"></span>.<br>
+      Click the link to activate your account.
     </div>
-    <a href="login.html" class="btn-secondary">Vai al login</a>
+    <a href="login.html" class="btn-secondary">Go to sign in</a>
   </div>
 
   <div class="card-footer" id="cardFooter">
-    Hai già un account? <a href="login.html">Accedi</a>
+    Already have an account? <a href="login.html">Sign in</a>
   </div>
 </div>
 
@@ -170,7 +171,7 @@ function calcStrength(pw){
   if(/[A-Z]/.test(pw))s++;if(/[0-9]/.test(pw))s++;if(/[^A-Za-z0-9]/.test(pw))s++;
   return s;
 }
-const LEVELS=[{label:'',color:''},{label:'Debole',color:'#F47B5E'},{label:'Discreta',color:'#F4C15E'},{label:'Buona',color:'#90E0AA'},{label:'Ottima',color:'#5EC47B'},{label:'Forte',color:'#3DAE5A'}];
+const LEVELS=[{label:'',color:''},{label:'Weak',color:'#F47B5E'},{label:'Fair',color:'#F4C15E'},{label:'Good',color:'#90E0AA'},{label:'Great',color:'#5EC47B'},{label:'Strong',color:'#3DAE5A'}];
 pwInput.addEventListener('input',()=>{
   const pw=pwInput.value;
   if(!pw){pwBar.style.width='0';pwLabel.textContent='';return;}
@@ -207,20 +208,20 @@ document.getElementById('regForm').addEventListener('submit',async e=>{
   const confirm=document.getElementById('confirm').value;
   let ok=true;
 
-  if(!username){showFieldErr('usernameErr','Inserisci un nome utente');ok=false;}
-  else if(username.length<3){showFieldErr('usernameErr','Minimo 3 caratteri');ok=false;}
-  else if(!/^[a-zA-Z0-9_.-]+$/.test(username)){showFieldErr('usernameErr','Solo lettere, numeri, _ . -');ok=false;}
-  if(!email){showFieldErr('emailErr','Inserisci la tua email');ok=false;}
-  else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showFieldErr('emailErr','Email non valida');ok=false;}
-  if(!pass){showFieldErr('passErr','Inserisci una password');ok=false;}
-  else if(pass.length<8){showFieldErr('passErr','Minimo 8 caratteri');ok=false;}
-  if(!confirm){showFieldErr('confirmErr','Conferma la password');ok=false;}
-  else if(pass&&confirm&&pass!==confirm){showFieldErr('confirmErr','Le password non corrispondono');ok=false;}
+  if(!username){showFieldErr('usernameErr','Enter a username');ok=false;}
+  else if(username.length<3){showFieldErr('usernameErr','At least 3 characters');ok=false;}
+  else if(!/^[a-zA-Z0-9_.-]+$/.test(username)){showFieldErr('usernameErr','Letters, numbers, _ . - only');ok=false;}
+  if(!email){showFieldErr('emailErr','Enter your email');ok=false;}
+  else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showFieldErr('emailErr','Invalid email');ok=false;}
+  if(!pass){showFieldErr('passErr','Enter a password');ok=false;}
+  else if(pass.length<8){showFieldErr('passErr','At least 8 characters');ok=false;}
+  if(!confirm){showFieldErr('confirmErr','Confirm your password');ok=false;}
+  else if(pass&&confirm&&pass!==confirm){showFieldErr('confirmErr','Passwords do not match');ok=false;}
   if(!ok)return;
 
   const btn=document.getElementById('submitBtn');
   btn.disabled=true;
-  btn.innerHTML='<span class="spinner"></span>Creazione account…';
+  btn.innerHTML='<span class="spinner"></span>Creating account…';
 
   const {data,error}=await sb.auth.signUp({
     email,
@@ -229,9 +230,9 @@ document.getElementById('regForm').addEventListener('submit',async e=>{
   });
 
   if(error){
-    btn.disabled=false;btn.textContent='Crea account';
+    btn.disabled=false;btn.textContent='Create account';
     const msg=error.message.includes('already registered')
-      ?'Email già registrata. <a href="login.html">Accedi</a>'
+      ?'Email already registered. <a href="login.html">Sign in</a>'
       :error.message;
     showFormErr(msg);
     return;
@@ -247,7 +248,7 @@ document.getElementById('regForm').addEventListener('submit',async e=>{
     document.getElementById('regForm').style.display='none';
     document.getElementById('confirmEmail').textContent=email;
     document.getElementById('confirmState').classList.add('show');
-    document.getElementById('brandSub').textContent='Quasi fatto!';
+    document.getElementById('brandSub').textContent='Almost done!';
     document.getElementById('cardFooter').style.display='none';
   }
 });

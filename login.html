@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="it" data-theme="dark">
+<html lang="en" data-theme="dark" translate="no">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WaxTree — Accedi</title>
+<meta name="google" content="notranslate">
+<title>WaxTree — Sign In</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 [data-theme=dark]{--bg:#07100A;--bg-s:#0B160D;--bg-e:#0F1C11;--bg-h:#152516;--text:#E8EDEA;--text-m:#8FB09A;--text-f:#4A6A56;--accent:#5EC47B;--accent-light:#90E0AA;--border:#152516;--shadow:0 8px 32px rgba(0,0,0,.65);--input-bg:#0F1C11;--err:#F47B5E}
@@ -43,12 +44,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 </head>
 <body>
 
-<button class="theme-btn" id="themeBtn" title="Cambia tema">🌙</button>
+<button class="theme-btn" id="themeBtn" title="Toggle theme">🌙</button>
 
 <div class="card">
   <div class="brand">
     <div class="brand-name"><em>Wax</em>Tree</div>
-    <div class="brand-sub">Accedi al tuo account</div>
+    <div class="brand-sub">Sign in to your account</div>
   </div>
 
   <div class="form-err" id="formErr"></div>
@@ -56,7 +57,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   <form id="loginForm" novalidate>
     <div class="field">
       <label for="email">Email</label>
-      <input type="email" id="email" placeholder="la-tua@email.com" autocomplete="email">
+      <input type="email" id="email" placeholder="your@email.com" autocomplete="email">
       <div class="err-msg" id="emailErr"></div>
     </div>
 
@@ -64,18 +65,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <label for="password">Password</label>
       <div class="field-wrap">
         <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" style="padding-right:40px">
-        <button type="button" class="field-eye" id="eyeBtn" aria-label="Mostra password">👁</button>
+        <button type="button" class="field-eye" id="eyeBtn" aria-label="Show password">👁</button>
       </div>
       <div class="err-msg" id="passErr"></div>
     </div>
 
-    <div class="forgot"><a href="forgot-password.html">Password dimenticata?</a></div>
+    <div class="forgot"><a href="forgot-password.html">Forgot password?</a></div>
 
-    <button type="submit" class="btn-main" id="submitBtn">Accedi</button>
+    <button type="submit" class="btn-main" id="submitBtn">Sign in</button>
   </form>
 
   <div class="card-footer">
-    Non hai un account? <a href="register.html">Registrati</a>
+    Don't have an account? <a href="register.html">Sign up</a>
   </div>
 </div>
 
@@ -131,21 +132,21 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
   const email=document.getElementById('email').value.trim();
   const pass=document.getElementById('password').value;
   let ok=true;
-  if(!email){showFieldErr('emailErr','Inserisci la tua email');ok=false;}
-  else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showFieldErr('emailErr','Email non valida');ok=false;}
-  if(!pass){showFieldErr('passErr','Inserisci la tua password');ok=false;}
+  if(!email){showFieldErr('emailErr','Enter your email');ok=false;}
+  else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showFieldErr('emailErr','Invalid email');ok=false;}
+  if(!pass){showFieldErr('passErr','Enter your password');ok=false;}
   if(!ok)return;
 
   const btn=document.getElementById('submitBtn');
   btn.disabled=true;
-  btn.innerHTML='<span class="spinner"></span>Accesso in corso…';
+  btn.innerHTML='<span class="spinner"></span>Signing in…';
 
   const {error}=await sb.auth.signInWithPassword({email,password:pass});
   if(error){
     btn.disabled=false;
-    btn.textContent='Accedi';
+    btn.textContent='Sign in';
     const msg=error.message.includes('Invalid login credentials')
-      ?'Email o password non corretti. Riprova.'
+      ?'Incorrect email or password. Try again.'
       :error.message;
     showFormErr(msg);
   } else {
