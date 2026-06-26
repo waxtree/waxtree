@@ -601,7 +601,7 @@ const sb=createClient('https://asmnqlqvlpcwcaaughuu.supabase.co','sb_publishable
 let wtSession=null;
 
 // ── Demo data ──────────────────────────────────────────────
-const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
+const DEMO_BRANCHES=[{id:'b1',name:'Wood 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
   parentId:null,pinned:false,tags:[],loaded:true,loading:false,error:null,
@@ -1126,7 +1126,7 @@ function addTag(nodeId,tag){
 function removeTag(nodeId,tag){const n=getNode(nodeId);if(n)n.tags=n.tags.filter(t=>t!==tag);rr();}
 function toggleLike(id){st.likes[id]=!st.likes[id];rr();}
 function removeChip(name){st.chips=st.chips.filter(c=>c!==name);rr();}
-function addBranch(){const id='b'+Date.now();st.branches=[...st.branches,{id,name:'Branch '+(st.branches.length+1)}];st.activeBranchId=id;rr();}
+function addBranch(){const id='b'+Date.now();st.branches=[...st.branches,{id,name:'Wood '+(st.branches.length+1)}];st.activeBranchId=id;rr();}
 function removeBranch(id){
   if(st.branches.length<=1)return;
   st.branches=st.branches.filter(b=>b.id!==id);st.nodes=st.nodes.filter(n=>n.branchId!==id);
@@ -1391,7 +1391,7 @@ function buildSidebar(){
     if(st.branches.length>1){const rm=b('br-tab-rm',{title:'Delete',onClick:e=>{e.stopPropagation();if(confirm(`Delete "${branch.name}"?`))removeBranch(branch.id);}});rm.textContent='×';tab.appendChild(rm);}
     strip.appendChild(tab);
   });
-  strip.appendChild(b('br-add',{title:'New branch',onClick:addBranch},'+'));
+  strip.appendChild(b('br-add',{title:'New wood',onClick:addBranch},'+'));
   bar.appendChild(strip);
 
   // Filter bar
@@ -1443,7 +1443,7 @@ function buildSidebar(){
   }
 
   if(!branchNodes.length){
-    nodesWrap.appendChild(d('sb-empty',{},'Empty branch — search for an artist or label to start'));
+    nodesWrap.appendChild(d('sb-empty',{},'Empty wood — search for an artist or label to start'));
   } else if(st.sbFilterTag&&!filteredNodes.length){
     nodesWrap.appendChild(d('sb-empty',{},'No nodes with this tag.'));
   } else if(st.sbFilterTag){
@@ -2096,7 +2096,7 @@ function buildApp(){
       b('btn-sec',{onClick:()=>{ytPos=null;localStorage.removeItem('wt-player-pos');rr();}},'Reset')
     ));
     body.appendChild(d('st-row',{},
-      d('',{},s('st-lbl st-danger','⚠ Reset all data'),s('st-sub','Erase all branches, nodes, likes and history')),
+      d('',{},s('st-lbl st-danger','⚠ Reset all data'),s('st-sub','Erase all woods, nodes, likes and history')),
       b('btn-sec',{style:{borderColor:'#F47B5E',color:'#F47B5E'},onClick:()=>{if(confirm('Erase all data? This cannot be undone.')){localStorage.removeItem(SK);location.reload();}}},'Reset')
     ));
 
