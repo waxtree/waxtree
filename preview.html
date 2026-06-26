@@ -118,6 +118,17 @@ input,select{font:inherit;color:inherit}
 .sb-filter-input:disabled{opacity:.4;cursor:default}
 /* Drag & drop */
 .br-tab.drag-over{background:rgba(94,196,123,.14);color:var(--accent)}
+.br-tab.locked{opacity:.45;cursor:pointer;pointer-events:all;position:relative}
+.br-tab.locked:hover{opacity:.65}
+.br-tab-lock{font-size:9px;line-height:1}
+.sb-locked-row{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;border-radius:8px;margin:4px 8px;background:var(--bg-e);border:1px dashed var(--border);color:var(--text-f);font-size:12px;transition:background .15s}
+.sb-locked-row:hover{background:var(--bg-s);border-color:var(--accent);color:var(--text)}
+.sb-locked-badge{background:var(--accent);color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;letter-spacing:.04em;margin-left:auto}
+.premium-modal{max-width:400px;text-align:center}
+.premium-modal-icon{font-size:36px;margin-bottom:6px}
+.premium-modal-perks{list-style:none;padding:0;margin:14px 0 18px;text-align:left;font-size:13px;color:var(--text-m);display:flex;flex-direction:column;gap:8px}
+.premium-modal-perks li::before{content:'✓  ';color:var(--accent);font-weight:700}
+.btn-premium{background:linear-gradient(135deg,#3DAE79,#5EC47B);color:#fff;border:none;padding:12px 24px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;width:100%}
 .sb-item[draggable]{cursor:grab}
 .sb-item.dragging{opacity:.35}
 .tag-row{padding:3px 10px 6px;display:flex;align-items:center;gap:6px}
@@ -601,6 +612,8 @@ const sb=createClient('https://asmnqlqvlpcwcaaughuu.supabase.co','sb_publishable
 let wtSession=null;
 
 // ── Demo data ──────────────────────────────────────────────
+const FREE_WOOD_LIMIT=3;
+const FREE_NODE_LIMIT=15;
 const DEMO_BRANCHES=[{id:'b1',name:'Wood 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
@@ -651,7 +664,7 @@ const st={
   discogsWantReleaseIds:saved?.discogsWantReleaseIds||[],
   discogsWantMasterIds:saved?.discogsWantMasterIds||[],
   discogsCollSyncedAt:saved?.discogsCollSyncedAt||null,
-  searchCount:0,ownedTracks:[],
+  searchCount:0,ownedTracks:[],isPremium:false,premiumModal:false,
   history:saved?.history||[],
 };
 document.documentElement.setAttribute('data-theme',st.theme);
@@ -1126,7 +1139,7 @@ function addTag(nodeId,tag){
 function removeTag(nodeId,tag){const n=getNode(nodeId);if(n)n.tags=n.tags.filter(t=>t!==tag);rr();}
 function toggleLike(id){st.likes[id]=!st.likes[id];rr();}
 function removeChip(name){st.chips=st.chips.filter(c=>c!==name);rr();}
-function addBranch(){const id='b'+Date.now();st.branches=[...st.branches,{id,name:'Wood '+(st.branches.length+1)}];st.activeBranchId=id;rr();}
+function addBranch(){if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){st.premiumModal=true;rr();return;}const id='b'+Date.now();st.branches=[...st.branches,{id,name:'Wood '+(st.branches.length+1)}];st.activeBranchId=id;rr();}
 function removeBranch(id){
   if(st.branches.length<=1)return;
   st.branches=st.branches.filter(b=>b.id!==id);st.nodes=st.nodes.filter(n=>n.branchId!==id);
@@ -1391,7 +1404,8 @@ function buildSidebar(){
     if(st.branches.length>1){const rm=b('br-tab-rm',{title:'Delete',onClick:e=>{e.stopPropagation();if(confirm(`Delete "${branch.name}"?`))removeBranch(branch.id);}});rm.textContent='×';tab.appendChild(rm);}
     strip.appendChild(tab);
   });
-  strip.appendChild(b('br-add',{title:'New wood',onClick:addBranch},'+'));
+  if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){const lt=d('br-tab locked',{title:'Upgrade to Premium to add more woods',onClick:()=>{st.premiumModal=true;rr();}});lt.appendChild(s('br-tab-name','Wood '+(FREE_WOOD_LIMIT+1)));lt.appendChild(s('br-tab-lock','🔒'));strip.appendChild(lt);}
+  if(st.isPremium||st.branches.length<FREE_WOOD_LIMIT)strip.appendChild(b('br-add',{title:'New wood',onClick:addBranch},'+'));
   bar.appendChild(strip);
 
   // Filter bar
@@ -1414,7 +1428,10 @@ function buildSidebar(){
   // Apply tag filter
   const filteredNodes=st.sbFilterTag?branchNodes.filter(n=>n.tags?.includes(st.sbFilterTag)):branchNodes;
 
+  let _nodeCount=0;
   function renderNode(node,depth){
+    if(!st.isPremium&&_nodeCount>=FREE_NODE_LIMIT)return;
+    _nodeCount++;
     const isActive=node.id===st.selectedId,isPinned=node.pinned;
     const item=d('sb-item'+(isActive?' active':'')+(isPinned?' pinned':''),{onClick:()=>selectNode(node.id)});
     item.style.paddingLeft=(8+depth*14)+'px';
@@ -1460,6 +1477,7 @@ function buildSidebar(){
     }
     recurse(null,0);
   }
+  if(!st.isPremium&&branchNodes.length>FREE_NODE_LIMIT){const lr=d('sb-locked-row',{onClick:()=>{st.premiumModal=true;rr();}});lr.appendChild(s('','🔒'));const extra=branchNodes.length-FREE_NODE_LIMIT;lr.appendChild(s('',extra+' more result'+(extra!==1?'s':'')+' locked'));lr.appendChild(s('sb-locked-badge','PRO'));nodesWrap.appendChild(lr);}
   bar.appendChild(nodesWrap);return bar;
 }
 
@@ -2104,6 +2122,20 @@ function buildApp(){
     overlay.appendChild(modal);root.appendChild(overlay);
   }
 
+  if(st.premiumModal){
+    const overlay=d('overlay',{onClick:()=>{st.premiumModal=false;rr();}});
+    const modal=d('modal premium-modal',{onClick:e=>e.stopPropagation()});
+    modal.appendChild(d('premium-modal-icon',{},'🌿'));
+    modal.appendChild(el('h2',{cls:'modal-title',style:{textAlign:'center',fontSize:'17px'}},'Upgrade to WaxTree Pro'));
+    modal.appendChild(s('modal-sub','Unlock the full creative space for your music research.'));
+    const perks=el('ul',{cls:'premium-modal-perks'});
+    [['Unlimited woods','No cap on how many Woods you can create'],['Unlimited nodes','Add as many artists and labels as you want per Wood'],['Discogs OAuth sync','Connect your collection and wantlist'],['Priority support','Direct access to the WaxTree team']].forEach(([t,d_])=>{const li=document.createElement('li');li.innerHTML=`<strong>${t}</strong> — ${d_}`;perks.appendChild(li);});
+    modal.appendChild(perks);
+    modal.appendChild(el('button',{cls:'btn-premium',onClick:()=>alert('Upgrade coming soon — stay tuned!')},'Upgrade to Pro'));
+    modal.appendChild(el('button',{cls:'btn-sec',style:{width:'100%',marginTop:'8px'},onClick:()=>{st.premiumModal=false;rr();}},'Maybe later'));
+    overlay.appendChild(modal);root.appendChild(overlay);
+  }
+
   return root;
 }
 
@@ -2116,6 +2148,7 @@ sb.auth.getSession().then(({data:{session}})=>{
   wtSession=session;
   st.searchCount=wtSession.user.user_metadata?.search_count||0;
   st.ownedTracks=wtSession.user.user_metadata?.owned_tracks||[];
+  st.isPremium=wtSession.user.user_metadata?.premium===true;
   paint();
   loadFollows();
   handleDiscogsCallback();
