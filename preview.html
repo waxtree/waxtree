@@ -286,7 +286,12 @@ input,select{font:inherit;color:inherit}
 .empty-icon{font-size:44px;opacity:.25}
 .empty-title{font-size:15px;font-weight:600;color:var(--text-m)}
 .empty-hint{font-size:13px;color:var(--text-f);line-height:1.6;max-width:260px}
-.err-line{font-size:12px;color:#5EC47B;padding:6px 0}
+.err-panel{display:flex;flex-direction:column;align-items:center;padding:52px 28px 44px;gap:12px;text-align:center}
+.err-icon{width:68px;height:68px;flex-shrink:0}
+.err-title{font-size:14px;font-weight:600;color:var(--text);line-height:1.4}
+.err-sub{font-size:12px;color:var(--text-m);line-height:1.6;max-width:230px}
+.err-retry{padding:8px 22px;border-radius:20px;border:1px solid var(--border);font-size:12.5px;color:var(--text-m);cursor:pointer;background:none;font-family:inherit;margin-top:4px;transition:border-color .15s,color .15s}
+.err-retry:hover{border-color:var(--accent);color:var(--accent)}
 
 /* Modal */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:500;display:flex;align-items:center;justify-content:center;padding:20px}
@@ -849,7 +854,16 @@ function stripBio(t){return t.replace(/\[a\d*=([^\]]+)\]/g,'$1').replace(/\[l=([
 let rqN=0,rqW=Date.now();
 async function dReq(path,p={},_retry=0){
   const tok=getToken();
-  if(!tok)return edgeFn({action:'search',path,params:JSON.stringify(p)});
+  if(!tok){
+    try{return await edgeFn({action:'search',path,params:JSON.stringify(p)});}
+    catch(e){
+      if(_retry<3&&(e.message==='rate_limited'||e.message.includes('rate_limit'))){
+        await new Promise(r=>setTimeout(r,15000*(1+_retry)));
+        return dReq(path,p,_retry+1);
+      }
+      throw e;
+    }
+  }
   const now=Date.now();if(now-rqW>60000){rqN=0;rqW=now;}
   if(rqN>=45){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqW)));rqN=0;rqW=Date.now();}rqN++;
   const url=new URL('https://api.discogs.com'+path);
@@ -968,7 +982,7 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
   };});
 }
 
-async function fetchArtistData(discogsId){
+async function fetchArtistData(discogsId,isCancelled=()=>false){
   const c=lsGet('a7:'+discogsId);if(c&&c.tracks?.length)return c;
   const[artData,relData]=await Promise.all([
     dReq('/artists/'+discogsId),
@@ -982,6 +996,7 @@ async function fetchArtistData(discogsId){
   const mainRels=relData.releases.filter(r=>r.role==='Main');
   const relList=mainRels.length>0?mainRels:relData.releases;
   for(const rel of relList){
+    if(isCancelled())break;
     try{
       let fetchId,releaseUrl,rd;
       if(rel.type==='master'){
@@ -992,6 +1007,7 @@ async function fetchArtistData(discogsId){
         fetchId=rel.id;releaseUrl=`https://www.discogs.com/release/${rel.id}`;
         rd=await dReq('/releases/'+fetchId);
       }
+      if(isCancelled())break;
       const entries=buildTrackEntries(rd,fetchId,releaseUrl,rel.year,rel.label,rel.thumb||'');
       if(entries.length&&!entries[0].thumbUrl){
         const mbUrl=await fetchMbCoverUrl(artData.name,rd.title||rel.title||'',rd.year||rel.year);
@@ -1030,7 +1046,7 @@ async function fetchArtistData(discogsId){
   lsSet('a7:'+discogsId,nd);return nd;
 }
 
-async function fetchLabelData(discogsId){
+async function fetchLabelData(discogsId,isCancelled=()=>false){
   const c=lsGet('l7:'+discogsId);if(c)return c;
   const[labData,relData]=await Promise.all([
     dReq('/labels/'+discogsId),
@@ -1042,8 +1058,10 @@ async function fetchLabelData(discogsId){
 
   const rawTracks=[];
   for(const rel of relData.releases){
+    if(isCancelled())break;
     try{
       const rd=await dReq('/releases/'+rel.id);
+      if(isCancelled())break;
       const artistId=rd.artists?.[0]?.id||null;
       const artistName=rd.artists?.[0]?.name||rel.artist||'';
       const entries=buildTrackEntries(rd,rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,artistName,rel.thumb||'');
@@ -1093,6 +1111,7 @@ async function fetchBandcamp(nodeId,artistName){
   rr();
 }
 
+let _loadGen=0;
 function addNode(type,discogsId,name,parentId,branchId){
   const bid=branchId||st.activeBranchId;
   const existing=st.nodes.find(n=>n.discogsId===discogsId&&n.branchId===bid);
@@ -1103,11 +1122,32 @@ function addNode(type,discogsId,name,parentId,branchId){
   st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
   if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
   rr();
+  const myGen=++_loadGen;
+  const cancelled=()=>_loadGen!==myGen;
   const fn=type==='label'?fetchLabelData:fetchArtistData;
-  fn(discogsId).then(d=>{
+  fn(discogsId,cancelled).then(d=>{
+    if(cancelled())return;
     const n=getNode(id);if(n){n.data=d;n.loaded=true;n.loading=false;}rr();
     fetchBandcamp(id,d?.name||name);
-  }).catch(e=>{const n=getNode(id);if(n){n.error=e.message;n.loading=false;}rr();});
+  }).catch(e=>{
+    if(cancelled())return;
+    const n=getNode(id);if(n){n.error=e.message;n.loading=false;}rr();
+  });
+}
+function retryNode(nodeId){
+  const node=getNode(nodeId);if(!node)return;
+  node.error=null;node.loading=true;rr();
+  const myGen=++_loadGen;
+  const cancelled=()=>_loadGen!==myGen;
+  const fn=node.type==='label'?fetchLabelData:fetchArtistData;
+  fn(node.discogsId,cancelled).then(d=>{
+    if(cancelled())return;
+    const n=getNode(nodeId);if(n){n.data=d;n.loaded=true;n.loading=false;}rr();
+    fetchBandcamp(nodeId,d?.name||node.name);
+  }).catch(e=>{
+    if(cancelled())return;
+    const n=getNode(nodeId);if(n){n.error=e.message;n.loading=false;}rr();
+  });
 }
 function removeNode(nodeId){
   st.nodes.forEach(n=>{if(n.parentId===nodeId)n.parentId=null;});
@@ -1235,6 +1275,50 @@ function buildPlantLoader(label='Loading…'){
 </g>`;
   wrap.appendChild(svg);
   if(label)wrap.appendChild(s('plant-loader-label',label));
+  return wrap;
+}
+
+function classifyError(msg){
+  const m=(msg||'').toLowerCase();
+  if(m.includes('rate_limit')||m.includes('rate limit')||m.includes('too many'))
+    return{title:'Discogs è occupato',sub:'Troppi artisti aperti di fila. Aspetta un secondo e riprova.',retry:true};
+  if(m.includes('failed to fetch')||m.includes('networkerror')||m.includes('network')||m.includes('load failed'))
+    return{title:'Nessuna connessione',sub:'Controlla la rete e riprova.',retry:true};
+  if(m.includes('timeout')||m.includes('timed out')||m.includes('aborted'))
+    return{title:'Risposta troppo lenta',sub:'La richiesta ha impiegato troppo tempo. Riprova tra un momento.',retry:true};
+  if(m.includes('503')||m.includes('502')||m.includes('500')||m.includes('offline'))
+    return{title:'Discogs non risponde',sub:'Il servizio è momentaneamente offline. Riprova tra poco.',retry:true};
+  if(m.includes('404')||m.includes('not found'))
+    return{title:'Non trovato su Discogs',sub:'Questo artista o label potrebbe non esistere più.',retry:false};
+  return{title:'Qualcosa è andato storto',sub:'Riprova, o cerca un altro artista.',retry:true};
+}
+
+function buildErrorPanel(node){
+  const{title,sub,retry}=classifyError(node.error);
+  const wrap=d('err-panel',{});
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 68 68');
+  svg.setAttribute('class','err-icon');
+  svg.setAttribute('aria-hidden','true');
+  svg.innerHTML=`
+<line x1="16" y1="58" x2="52" y2="58" stroke="var(--text-f)" stroke-width="1" opacity="0.2"/>
+<circle cx="34" cy="58" r="2.5" fill="var(--text-f)" opacity="0.18"/>
+<line x1="34" y1="58" x2="34" y2="18" stroke="var(--text-f)" stroke-width="1.5" stroke-linecap="round" opacity="0.32"/>
+<path d="M34,44 Q27,48 22,54" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.38"/>
+<path d="M22,54 C17,53 16,49 18,47 C19,51 21,53 22,54Z" fill="var(--accent)" opacity="0.28"/>
+<path d="M34,32 Q41,36 45,43" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.32"/>
+<path d="M45,43 C50,42 51,38 49,36 C48,40 47,42 45,43Z" fill="var(--accent)" opacity="0.24"/>
+<path d="M34,18 Q31,12 33,9 Q36,12 34,18Z" fill="var(--accent)" opacity="0.18"/>`;
+  wrap.appendChild(svg);
+  wrap.appendChild(s('err-title',title));
+  wrap.appendChild(s('err-sub',sub));
+  if(retry){
+    const btn=document.createElement('button');
+    btn.className='err-retry';
+    btn.textContent='Riprova';
+    btn.onclick=()=>retryNode(node.id);
+    wrap.appendChild(btn);
+  }
   return wrap;
 }
 
@@ -1404,7 +1488,7 @@ function buildSidebar(){
     if(st.branches.length>1){const rm=b('br-tab-rm',{title:'Delete',onClick:e=>{e.stopPropagation();if(confirm(`Delete "${branch.name}"?`))removeBranch(branch.id);}});rm.textContent='×';tab.appendChild(rm);}
     strip.appendChild(tab);
   });
-  if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){const lt=d('br-tab locked',{title:'Upgrade to Premium to add more woods',onClick:()=>{st.premiumModal=true;rr();}});lt.appendChild(s('br-tab-name','Wood '+(FREE_WOOD_LIMIT+1)));lt.appendChild(s('br-tab-lock','🔒'));strip.appendChild(lt);}
+  if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){const lt=d('br-tab locked',{title:'Feature soon unlocked',onClick:()=>{st.premiumModal=true;rr();}});lt.appendChild(s('br-tab-name','Wood '+(FREE_WOOD_LIMIT+1)));lt.appendChild(s('br-tab-lock','🔒'));strip.appendChild(lt);}
   if(st.isPremium||st.branches.length<FREE_WOOD_LIMIT)strip.appendChild(b('br-add',{title:'New wood',onClick:addBranch},'+'));
   bar.appendChild(strip);
 
@@ -1477,7 +1561,7 @@ function buildSidebar(){
     }
     recurse(null,0);
   }
-  if(!st.isPremium&&branchNodes.length>FREE_NODE_LIMIT){const lr=d('sb-locked-row',{onClick:()=>{st.premiumModal=true;rr();}});lr.appendChild(s('','🔒'));const extra=branchNodes.length-FREE_NODE_LIMIT;lr.appendChild(s('',extra+' more result'+(extra!==1?'s':'')+' locked'));lr.appendChild(s('sb-locked-badge','PRO'));nodesWrap.appendChild(lr);}
+  if(!st.isPremium&&branchNodes.length>FREE_NODE_LIMIT){const lr=d('sb-locked-row',{onClick:()=>{st.premiumModal=true;rr();}});lr.appendChild(s('','🔒'));const extra=branchNodes.length-FREE_NODE_LIMIT;lr.appendChild(s('',extra+' more — soon unlocked'));lr.appendChild(s('sb-locked-badge','SOON'));nodesWrap.appendChild(lr);}
   bar.appendChild(nodesWrap);return bar;
 }
 
@@ -1510,7 +1594,7 @@ function buildContent(){
   panel.appendChild(hdr);
 
   if(node.loading){panel.appendChild(buildPlantLoader());return panel;}
-  if(node.error){panel.appendChild(s('err-line','Error: '+node.error));return panel;}
+  if(node.error){panel.appendChild(buildErrorPanel(node));return panel;}
   if(!node.data)return panel;
 
   // Auto-trigger Bandcamp fetch for any loaded node (including demo node)
@@ -2125,14 +2209,10 @@ function buildApp(){
   if(st.premiumModal){
     const overlay=d('overlay',{onClick:()=>{st.premiumModal=false;rr();}});
     const modal=d('modal premium-modal',{onClick:e=>e.stopPropagation()});
-    modal.appendChild(d('premium-modal-icon',{},'🌿'));
-    modal.appendChild(el('h2',{cls:'modal-title',style:{textAlign:'center',fontSize:'17px'}},'Upgrade to WaxTree Pro'));
-    modal.appendChild(s('modal-sub','Unlock the full creative space for your music research.'));
-    const perks=el('ul',{cls:'premium-modal-perks'});
-    [['Unlimited woods','No cap on how many Woods you can create'],['Unlimited nodes','Add as many artists and labels as you want per Wood'],['Discogs OAuth sync','Connect your collection and wantlist'],['Priority support','Direct access to the WaxTree team']].forEach(([t,d_])=>{const li=document.createElement('li');li.innerHTML=`<strong>${t}</strong> — ${d_}`;perks.appendChild(li);});
-    modal.appendChild(perks);
-    modal.appendChild(el('button',{cls:'btn-premium',onClick:()=>alert('Upgrade coming soon — stay tuned!')},'Upgrade to Pro'));
-    modal.appendChild(el('button',{cls:'btn-sec',style:{width:'100%',marginTop:'8px'},onClick:()=>{st.premiumModal=false;rr();}},'Maybe later'));
+    modal.appendChild(d('premium-modal-icon',{},'🔒'));
+    modal.appendChild(el('h2',{cls:'modal-title',style:{textAlign:'center',fontSize:'17px'}},'Feature coming soon'));
+    modal.appendChild(s('modal-sub','We\'re still working on this — it\'ll be available soon. Thanks for testing WaxTree!'));
+    modal.appendChild(el('button',{cls:'btn-premium',onClick:()=>{st.premiumModal=false;rr();}},'Got it'));
     overlay.appendChild(modal);root.appendChild(overlay);
   }
 
