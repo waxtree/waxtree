@@ -1393,8 +1393,20 @@ async function uploadAvatar(file){
   if(file.size>10*1024*1024)throw new Error('Photo must be under 10 MB');
   const ext=file.name.split('.').pop().toLowerCase()||'jpg';
   const path=`${wtSession.user.id}/avatar.${ext}`;
-  const{error:upErr}=await sb.storage.from('avatars').upload(path,file,{upsert:true,contentType:file.type});
-  if(upErr)throw upErr;
+  // Upload via raw fetch to avoid SDK quirks with new key format
+  const uploadRes=await fetch(
+    `https://asmnqlqvlpcwcaaughuu.supabase.co/storage/v1/object/avatars/${path}`,
+    {method:'POST',headers:{
+      'Authorization':`Bearer ${wtSession.access_token}`,
+      'apikey':'sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ',
+      'Content-Type':file.type||'application/octet-stream',
+      'x-upsert':'true'
+    },body:file}
+  );
+  if(!uploadRes.ok){
+    const errBody=await uploadRes.json().catch(()=>({}));
+    throw new Error(errBody.message||errBody.error||`Storage error ${uploadRes.status}`);
+  }
   const{data}=sb.storage.from('avatars').getPublicUrl(path);
   const url=data.publicUrl+'?t='+Date.now();
   const{error:metaErr}=await sb.auth.updateUser({data:{avatar_url:url}});
