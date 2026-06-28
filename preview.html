@@ -1212,19 +1212,21 @@ function applyFilters(tracks){
     }
     return true;
   });
+  const videoScore=t=>(!t.videoId||invalidYtIds.has(t.videoId))?0:(t.digital?3:2);
   switch(st.filterSort){
     case 'chrono':     r=[...r].sort((a,b)=>(a.year||0)-(b.year||0));break;
     case 'antichrono': r=[...r].sort((a,b)=>(b.year||0)-(a.year||0));break;
     case 'az':         r=[...r].sort((a,b)=>a.title.localeCompare(b.title,'en'));break;
     case 'za':         r=[...r].sort((a,b)=>b.title.localeCompare(a.title,'en'));break;
     case 'genre':      r=[...r].sort((a,b)=>(a.genre||'zzz').localeCompare(b.genre||'zzz','en'));break;
-  }
-  // In default order only: video tracks float to top (doesn't override explicit user sort)
-  if(st.filterSort==='default'){
-    r.sort((a,b)=>{
-      const sc=t=>(!t.videoId||invalidYtIds.has(t.videoId))?0:(t.digital?3:2);
-      return sc(b)-sc(a);
-    });
+    default:
+      // Video tracks first (with player > without), then newest within each group
+      r=[...r].sort((a,b)=>{
+        const sd=videoScore(b)-videoScore(a);
+        if(sd!==0)return sd;
+        return (b.year||0)-(a.year||0);
+      });
+      break;
   }
   return r;
 }
