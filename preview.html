@@ -1390,7 +1390,7 @@ function buildAvatarEl(size=36){
 }
 
 async function uploadAvatar(file){
-  if(file.size>2*1024*1024)throw new Error('Photo must be under 2 MB');
+  if(file.size>10*1024*1024)throw new Error('Photo must be under 10 MB');
   const ext=file.name.split('.').pop().toLowerCase()||'jpg';
   const path=`${wtSession.user.id}/avatar.${ext}`;
   const{error:upErr}=await sb.storage.from('avatars').upload(path,file,{upsert:true,contentType:file.type});
