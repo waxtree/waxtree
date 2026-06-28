@@ -26,7 +26,9 @@ input,select{font:inherit;color:inherit}
 .hdr-pill-static{padding:4px 12px;border-radius:20px;border:1px solid var(--accent);background:rgba(94,196,123,.08);font-size:11.5px;color:var(--accent-light);letter-spacing:.02em;pointer-events:none;user-select:none}
 .profile-wrap{position:relative}
 .profile-menu{position:absolute;top:calc(100% + 6px);right:0;min-width:175px;background:var(--bg-s);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);z-index:500;overflow:hidden;padding:4px}
-.profile-who{display:block;padding:10px 14px 8px;font-size:12px;color:var(--text-f);font-weight:500;pointer-events:none;border-bottom:1px solid var(--border);margin-bottom:4px}
+.profile-who{display:flex;align-items:center;gap:10px;padding:10px 14px 8px;pointer-events:none;border-bottom:1px solid var(--border);margin-bottom:4px}
+.profile-who-name{font-size:12px;color:var(--text);font-weight:600}
+.profile-who-email{font-size:11px;color:var(--text-f);margin-top:1px}
 .profile-item{display:block;width:100%;padding:9px 14px;font-size:13px;color:var(--text);background:none;border:none;cursor:pointer;text-align:left;font-family:inherit;border-radius:8px;transition:background .1s}
 .profile-item:hover{background:var(--bg-h)}
 .profile-item.danger{color:#F47B5E}
@@ -1369,6 +1371,39 @@ function toggleFollow(node){
   saveSt();rr();
 }
 
+function buildAvatarEl(size=36){
+  const url=wtSession?.user?.user_metadata?.avatar_url;
+  const uname=wtSession?.user?.user_metadata?.username||wtSession?.user?.email?.split('@')[0]||'?';
+  const initials=uname.slice(0,2).toUpperCase();
+  const wrap=document.createElement('div');
+  wrap.style.cssText=`width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:${Math.round(size*0.38)}px;font-weight:700;color:#fff;border:2px solid var(--border);box-sizing:border-box`;
+  if(url){
+    const img=document.createElement('img');
+    img.src=url;img.alt='';
+    img.style.cssText='width:100%;height:100%;object-fit:cover;display:block';
+    img.onerror=()=>{img.remove();wrap.appendChild(document.createTextNode(initials));};
+    wrap.appendChild(img);
+  }else{
+    wrap.appendChild(document.createTextNode(initials));
+  }
+  return wrap;
+}
+
+async function uploadAvatar(file){
+  if(file.size>2*1024*1024)throw new Error('Photo must be under 2 MB');
+  const ext=file.name.split('.').pop().toLowerCase()||'jpg';
+  const path=`${wtSession.user.id}/avatar.${ext}`;
+  const{error:upErr}=await sb.storage.from('avatars').upload(path,file,{upsert:true,contentType:file.type});
+  if(upErr)throw upErr;
+  const{data}=sb.storage.from('avatars').getPublicUrl(path);
+  const url=data.publicUrl+'?t='+Date.now();
+  const{error:metaErr}=await sb.auth.updateUser({data:{avatar_url:url}});
+  if(metaErr)throw metaErr;
+  const{data:{session}}=await sb.auth.getSession();
+  if(session)wtSession=session;
+  return url;
+}
+
 // ── Track card ─────────────────────────────────────────────
 function trackCard(track,parentNodeId,displayArtist){
   const liked=!!st.likes[track.id],badged=!!st.listens[track.id]?.badged;
@@ -1779,7 +1814,13 @@ function buildApp(){
       wrap.appendChild(b('hdr-pill',{onClick:(e)=>{e.stopPropagation();st.profileOpen=!st.profileOpen;rr();}},'Profile'));
       if(st.profileOpen){
         const menu=d('profile-menu',{onClick:(e)=>e.stopPropagation()});
-        menu.appendChild(s('profile-who',uname));
+        const whoRow=d('profile-who',{});
+        whoRow.appendChild(buildAvatarEl(36));
+        const whoMeta=d('',{});
+        whoMeta.appendChild(s('profile-who-name',uname));
+        whoMeta.appendChild(s('profile-who-email',wtSession.user.email||''));
+        whoRow.appendChild(whoMeta);
+        menu.appendChild(whoRow);
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.profileModal=true;rr();}},'My Profile'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.settingsModal=true;rr();}},'My Settings'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.likesModal=true;rr();}},'My Likes'));
@@ -2112,6 +2153,35 @@ function buildApp(){
     body.appendChild(d('st-row',{},
       d('',{},s('st-lbl','Email'),s('st-sub',email))
     ));
+    // Profile photo row
+    const avUrl=wtSession?.user?.user_metadata?.avatar_url;
+    const avInput=el('input',{type:'file',accept:'image/jpeg,image/png,image/webp',style:{display:'none'}});
+    const avMsg=el('p',{style:{fontSize:'12px',margin:'4px 0 0',minHeight:'0',color:'var(--text-m)'}});
+    const avBtn=b('btn-sec',{},avUrl?'Change photo':'Add photo');
+    avBtn.onclick=()=>avInput.click();
+    avInput.addEventListener('change',async()=>{
+      const file=avInput.files[0];if(!file)return;
+      avBtn.disabled=true;avBtn.textContent='Uploading…';avMsg.style.color='var(--text-m)';avMsg.textContent='';
+      try{
+        await uploadAvatar(file);
+        avMsg.style.color='var(--accent)';avMsg.textContent='Photo updated!';
+        avBtn.disabled=false;avBtn.textContent='Change photo';
+        rr();
+      }catch(e){
+        avMsg.style.color='#F47B5E';avMsg.textContent=e.message||'Upload failed.';
+        avBtn.disabled=false;avBtn.textContent=avUrl?'Change photo':'Add photo';
+      }
+    });
+    const avRow=d('st-row',{style:{gap:'12px',alignItems:'center'}});
+    avRow.appendChild(buildAvatarEl(48));
+    const avLeft=d('',{style:{flex:'1',minWidth:'0'}});
+    avLeft.appendChild(s('st-lbl','Profile photo'));
+    avLeft.appendChild(s('st-sub',avUrl?'Linked to your account':'No photo yet'));
+    avLeft.appendChild(avMsg);
+    avRow.appendChild(avLeft);
+    avRow.appendChild(avInput);
+    avRow.appendChild(avBtn);
+    body.appendChild(avRow);
     // Change password row — expands into an inline form
     const pwRow=d('st-row',{style:{flexWrap:'wrap',gap:'10px'}},
       d('',{},s('st-lbl','Password'),s('st-sub','Set a new password for your account'))
