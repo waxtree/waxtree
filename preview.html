@@ -1219,12 +1219,13 @@ function applyFilters(tracks){
     case 'za':         r=[...r].sort((a,b)=>b.title.localeCompare(a.title,'en'));break;
     case 'genre':      r=[...r].sort((a,b)=>(a.genre||'zzz').localeCompare(b.genre||'zzz','en'));break;
   }
-  // Video-available tracks always float to top (stable sort preserves secondary order)
-  // Sort: video+digital(Bandcamp) > video only > no video
-  r.sort((a,b)=>{
-    const sc=t=>(!t.videoId||invalidYtIds.has(t.videoId))?0:(t.digital?3:2);
-    return sc(b)-sc(a);
-  });
+  // In default order only: video tracks float to top (doesn't override explicit user sort)
+  if(st.filterSort==='default'){
+    r.sort((a,b)=>{
+      const sc=t=>(!t.videoId||invalidYtIds.has(t.videoId))?0:(t.digital?3:2);
+      return sc(b)-sc(a);
+    });
+  }
   return r;
 }
 
