@@ -1372,7 +1372,7 @@ function toggleFollow(node){
 }
 
 function buildAvatarEl(size=36){
-  const url=wtSession?.user?.user_metadata?.avatar_url;
+  const url=getAvatarUrl();
   const uname=wtSession?.user?.user_metadata?.username||wtSession?.user?.email?.split('@')[0]||'?';
   const initials=uname.slice(0,2).toUpperCase();
   const wrap=document.createElement('div');
@@ -1389,9 +1389,9 @@ function buildAvatarEl(size=36){
   return wrap;
 }
 
+const AVATAR_KEY='wt-avatar';
 async function uploadAvatar(file){
   if(file.size>10*1024*1024)throw new Error('Photo must be under 10 MB');
-  // Resize to 200×200 via canvas → base64 JPEG stored in user_metadata
   const dataUrl=await new Promise((resolve,reject)=>{
     const reader=new FileReader();
     reader.onerror=reject;
@@ -1411,12 +1411,10 @@ async function uploadAvatar(file){
     };
     reader.readAsDataURL(file);
   });
-  const{error:metaErr}=await sb.auth.updateUser({data:{avatar_url:dataUrl}});
-  if(metaErr)throw metaErr;
-  const{data:{session}}=await sb.auth.getSession();
-  if(session)wtSession=session;
+  localStorage.setItem(AVATAR_KEY,dataUrl);
   return dataUrl;
 }
+function getAvatarUrl(){return localStorage.getItem(AVATAR_KEY)||null;}
 
 // ── Track card ─────────────────────────────────────────────
 function trackCard(track,parentNodeId,displayArtist){
@@ -2168,7 +2166,7 @@ function buildApp(){
       d('',{},s('st-lbl','Email'),s('st-sub',email))
     ));
     // Profile photo row
-    const avUrl=wtSession?.user?.user_metadata?.avatar_url;
+    const avUrl=getAvatarUrl();
     const avInput=el('input',{type:'file',accept:'image/jpeg,image/png,image/webp',style:{display:'none'}});
     const avMsg=el('p',{style:{fontSize:'12px',margin:'4px 0 0',minHeight:'0',color:'var(--text-m)'}});
     const avBtn=b('btn-sec',{},avUrl?'Change photo':'Add photo');
