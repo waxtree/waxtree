@@ -1830,7 +1830,6 @@ function buildApp(){
         whoRow.appendChild(buildAvatarEl(36));
         const whoMeta=d('',{});
         whoMeta.appendChild(s('profile-who-name',uname));
-        whoMeta.appendChild(s('profile-who-email',wtSession.user.email||''));
         whoRow.appendChild(whoMeta);
         menu.appendChild(whoRow);
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.profileModal=true;rr();}},'My Profile'));
