@@ -17,7 +17,7 @@ input,select{font:inherit;color:inherit}
 /* ── Header ──────────────────── */
 .hdr{display:flex;align-items:center;gap:10px;padding:0 18px;height:48px;flex-shrink:0;background:var(--bg-s);border-bottom:1px solid var(--border)}
 .logo{display:flex;align-items:center;gap:10px}
-.logo-brand{font-size:26px;font-weight:700;letter-spacing:-.4px}
+.logo-brand{font-size:22px;font-weight:700;letter-spacing:-.4px}
 .logo-brand em{font-style:normal;color:var(--accent-light)}
 .logo-sub{font-size:12px;font-weight:400;color:var(--text-f)}
 .sp{flex:1}
@@ -1827,7 +1827,7 @@ function buildApp(){
   root.setAttribute('translate','no');
   const activeBranch=getBranch(st.activeBranchId);
   root.appendChild(d('hdr',{},
-    el('span',{cls:'logo'},el('img',{src:'./logo.svg',height:'30',alt:'',cls:'logo-img'}),el('span',{cls:'logo-brand'},el('em',{},'Wax'),'Tree'),el('span',{cls:'logo-sub'},'— prototype')),s('sp'),
+    el('span',{cls:'logo'},el('img',{src:'./logo.svg',height:'33',alt:'',cls:'logo-img'}),el('span',{cls:'logo-brand'},el('em',{},'Wax'),'Tree'),el('span',{cls:'logo-sub'},'Beta v.1')),s('sp'),
     (()=>{const cnt=st.dasAscoltare.length;const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Listen later',onClick:()=>{st.daqModal=true;rr();}},'🔖');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
     (()=>{
       if(!wtSession)return null;
