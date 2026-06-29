@@ -1516,14 +1516,14 @@ function trackCard(track,parentNodeId,displayArtist){
       )
     ),
     d('t-actions',{},
-      (owned||inDiscogsCollection(track)||inDiscogsWantlist(track)||badged||track.bpm)?d('t-act-badges',{},
+      d('t-act-explore',{},
+        labelBtn,espBtn,
         owned?s('own-badge','You own it'):null,
         inDiscogsCollection(track)?s('coll-badge','In collection'):null,
         inDiscogsWantlist(track)?s('want-badge','On wantlist'):null,
         badged?s('t-badge','✓ played'):null,
         track.bpm?s('t-bpm',track.bpm+' BPM'):null,
-      ):null,
-      (labelBtn||espBtn)?d('t-act-explore',{},labelBtn,espBtn):null,
+      ),
       buyBtns.length?d('t-act-buy',{},...buyBtns):null,
     ),
   );
