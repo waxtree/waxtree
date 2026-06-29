@@ -292,6 +292,21 @@ input,select{font:inherit;color:inherit}
 .daq-play:hover,.daq-play.has-video{color:var(--accent)}.daq-play.has-video:hover{background:var(--accent);color:#fff}
 .daq-rm{font-size:16px;color:var(--text-f);padding:3px 5px;border-radius:4px;flex-shrink:0;transition:color .15s;line-height:1}
 .daq-rm:hover{color:#5EC47B}
+/* ── Playlist dropdown ─────── */
+.pl-wrap{position:relative;flex-shrink:0}
+.pl-drop{position:absolute;top:calc(100% + 4px);right:0;background:var(--bg-s);border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.28);z-index:300;min-width:176px;overflow:hidden}
+.pl-drop-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--text);cursor:pointer;transition:background .1s;white-space:nowrap;border:none;background:none;width:100%;text-align:left;font-family:inherit}
+.pl-drop-item:hover{background:var(--bg-h)}
+.pl-drop-item.checked{color:var(--accent)}
+.pl-drop-sep{height:1px;background:var(--border);margin:2px 0}
+.pl-drop-new{color:var(--accent);font-weight:600}
+/* ── Playlist modal ─────── */
+.pl-modal{max-width:520px}
+.pl-section-hd{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding:12px 0 6px;border-bottom:1px solid var(--border);margin-bottom:4px}
+.pl-section-cnt{font-size:11px;color:var(--text-f);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:8px}
+.pl-new-row{display:flex;gap:8px;margin:8px 0 16px}
+.pl-new-input{flex:1;padding:7px 12px;border-radius:8px;background:var(--bg-e);border:1.5px solid var(--border);color:var(--text);font-size:13px;font-family:inherit;outline:none}
+.pl-new-input:focus{border-color:var(--accent)}
 
 /* Empty / err */
 .empty-panel{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;padding:40px;text-align:center}
@@ -659,7 +674,7 @@ const DEMO_NODES=[{
 // ── State ──────────────────────────────────────────────────
 const SK='ct-v5';
 function loadSt(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}}
-function saveSt(){try{localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:st.nodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));}catch{}}
+function saveSt(){try{localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:st.nodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));}catch{}}
 
 const saved=loadSt();
 const st={
@@ -675,7 +690,9 @@ const st={
   filterOpen:false,filterTitle:'',filterFormat:'all',filterSort:'default',filterGenres:[],
   sbPinFirst:saved?.sbPinFirst||false,sbFilterTag:'',
   nowPlaying:null,
-  dasAscoltare:saved?.dasAscoltare||[],daqModal:false,
+  dasAscoltare:saved?.dasAscoltare||[],
+  playlists:saved?.playlists||[],
+  playlistDropId:null,playlistsModal:false,
   profileOpen:false,
   likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,discogsModal:false,discogsSyncing:false,
   follows:saved?.follows||[],
@@ -1491,16 +1508,45 @@ function trackCard(track,parentNodeId,displayArtist){
   const yearLabel=[track.year,track.label].filter(Boolean).join(' · ');
   const genres=track.genre?track.genre.split(' · '):[];
 
-  // Da ascoltare
+  // Playlist button + dropdown
   const inDaq=st.dasAscoltare.some(q=>q.id===track.id);
-  const daqBtn=b('t-daq'+(inDaq?' queued':''),{
-    title:inDaq?'Remove from Listen later':'Add to Listen later',
-    onClick:()=>{
-      if(inDaq){st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);}
-      else{st.dasAscoltare=[...st.dasAscoltare,{...track,artistName:getNode(parentNodeId)?.name||''}];}
-      rr();
-    }
-  },inDaq?'🔖':'🏷');
+  const isDropOpen=st.playlistDropId===track.id;
+  const trackWithArtist={...track,artistName:getNode(parentNodeId)?.name||''};
+  const plWrap=d('pl-wrap',{});
+  const plBtn=b('t-daq'+(inDaq?' queued':''),{
+    title:'Add to playlist',
+    onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:track.id;rr();}
+  },'🎵');
+  plWrap.appendChild(plBtn);
+  if(isDropOpen){
+    const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
+    // Listen Later
+    const llItem=b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
+      if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);
+      else st.dasAscoltare=[...st.dasAscoltare,trackWithArtist];
+      st.playlistDropId=null;rr();
+    }},inDaq?'✓ Listen Later':'Listen Later');
+    drop.appendChild(llItem);
+    // Custom playlists
+    st.playlists.forEach(pl=>{
+      const inPl=pl.tracks.some(t=>t.id===track.id);
+      const plItem=b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
+        if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==track.id);
+        else pl.tracks=[...pl.tracks,trackWithArtist];
+        st.playlistDropId=null;rr();
+      }},inPl?'✓ '+pl.name:pl.name);
+      drop.appendChild(plItem);
+    });
+    drop.appendChild(d('pl-drop-sep',{}));
+    drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
+      const name=prompt('Playlist name:','');
+      if(!name?.trim())return;
+      st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackWithArtist]}];
+      st.playlistDropId=null;rr();
+    }},'+ New playlist'));
+    plWrap.appendChild(drop);
+    setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
+  }
 
   return d('t-card',{},playBtn,art,
     d('t-info',{},
@@ -1508,7 +1554,7 @@ function trackCard(track,parentNodeId,displayArtist){
         s('t-title',track.title),
         track.duration?s('t-dur',track.duration):null,
         b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'),
-        daqBtn,
+        plWrap,
       ),
       d('t-meta-row',{},
         yearLabel?s('t-meta',yearLabel):null,
@@ -1849,7 +1895,7 @@ function buildApp(){
   const activeBranch=getBranch(st.activeBranchId);
   root.appendChild(d('hdr',{},
     el('span',{cls:'logo'},el('img',{src:'./logo.svg',height:'33',alt:'',cls:'logo-img'}),el('span',{cls:'logo-brand'},el('em',{},'Wax'),'Tree'),el('span',{cls:'logo-sub'},'Beta v.1')),s('sp'),
-    (()=>{const cnt=st.dasAscoltare.length;const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Listen later',onClick:()=>{st.daqModal=true;rr();}},'🔖');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
+    (()=>{const cnt=st.dasAscoltare.length+st.playlists.reduce((s,p)=>s+p.tracks.length,0);const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Playlists',onClick:()=>{st.playlistsModal=true;rr();}},'🎵 Playlists');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
     (()=>{
       if(!wtSession)return null;
       const wrap=d('profile-wrap',{});
@@ -1955,38 +2001,80 @@ function buildApp(){
   root.appendChild(main);
 
 
-  if(st.daqModal){
-    const overlay=d('overlay',{onClick:()=>{st.daqModal=false;rr();}});
-    const modal=d('modal daq-modal',{onClick:e=>e.stopPropagation()});
-    modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'0'}},
-      el('h2',{cls:'modal-title'},'🔖 Listen later'),
-      b('btn-sec',{onClick:()=>{st.daqModal=false;rr();}},'×')
+  if(st.playlistsModal){
+    const close=()=>{st.playlistsModal=false;rr();};
+    const overlay=d('overlay',{onClick:close});
+    const modal=d('modal pl-modal',{onClick:e=>e.stopPropagation()});
+    modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'12px'}},
+      el('h2',{cls:'modal-title'},'🎵 Playlists'),
+      b('btn-sec',{onClick:close},'×')
     ));
-    const list=d('daq-list',{});
-    if(!st.dasAscoltare.length){list.appendChild(d('daq-empty',{},'No tracks queued — use 🏷 on tracks to add them'));}
-    else{
-      st.dasAscoltare.forEach(track=>{
-        const item=d('daq-item',{});
-        if(track.thumbUrl)item.appendChild(el('img',{cls:'daq-art',src:track.thumbUrl,alt:'',loading:'lazy'}));
-        else item.appendChild(d('daq-art-ph',{},'♫'));
-        const info=d('daq-info',{});
-        info.appendChild(s('daq-title',track.title));
-        const meta=[track.artistName,track.year,track.label].filter(Boolean).join(' · ');
-        info.appendChild(s('daq-meta',meta));
-        item.appendChild(info);
-        if(track.videoId){
-          const pb=b('daq-play has-video',{title:'Play in player',onClick:()=>{doPlay(track.id,track.videoId,track.title,track.artistName);st.daqModal=false;rr();}});
-          pb.textContent='▶';item.appendChild(pb);
-        }
-        item.appendChild(b('daq-rm',{title:'Remove',onClick:()=>{st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);rr();}},'×'));
-        list.appendChild(item);
+    const body=d('',{style:{overflowY:'auto',maxHeight:'68vh'}});
+
+    // ── Listen Later
+    const buildDaqRow=track=>{
+      const item=d('daq-item',{});
+      if(track.thumbUrl)item.appendChild(el('img',{cls:'daq-art',src:track.thumbUrl,alt:'',loading:'lazy'}));
+      else item.appendChild(d('daq-art-ph',{},'♫'));
+      const info=d('daq-info',{});
+      info.appendChild(s('daq-title',track.title));
+      info.appendChild(s('daq-meta',[track.artistName,track.year,track.label].filter(Boolean).join(' · ')));
+      item.appendChild(info);
+      if(track.videoId){const pb=b('daq-play has-video',{title:'Play',onClick:()=>{doPlay(track.id,track.videoId,track.title,track.artistName);close();}});pb.textContent='▶';item.appendChild(pb);}
+      return item;
+    };
+    const llHd=d('pl-section-hd',{});
+    llHd.appendChild(document.createTextNode('🔖 Listen Later'));
+    const llRight=d('pl-section-cnt',{});
+    llRight.appendChild(document.createTextNode(st.dasAscoltare.length+' tracks'));
+    if(st.dasAscoltare.length)llRight.appendChild(b('btn-sec',{style:{fontSize:'11px',padding:'2px 8px'},onClick:()=>{if(confirm('Clear Listen Later?')){st.dasAscoltare=[];rr();}}},'Clear'));
+    llHd.appendChild(llRight);
+    body.appendChild(llHd);
+    const llList=d('daq-list',{style:{marginBottom:'16px'}});
+    if(!st.dasAscoltare.length){llList.appendChild(d('daq-empty',{},'No tracks — use 🎵 on any track to add'));}
+    else st.dasAscoltare.forEach(track=>{
+      const item=buildDaqRow(track);
+      item.appendChild(b('daq-rm',{title:'Remove',onClick:()=>{st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);rr();}},'×'));
+      llList.appendChild(item);
+    });
+    body.appendChild(llList);
+
+    // ── Custom playlists header + create
+    const plHd=d('pl-section-hd',{});
+    plHd.appendChild(document.createTextNode('My Playlists'));
+    plHd.appendChild(s('pl-section-cnt',st.playlists.length+(st.playlists.length===1?' playlist':' playlists')));
+    body.appendChild(plHd);
+    const newRow=d('pl-new-row',{});
+    const newInput=el('input',{type:'text',cls:'pl-new-input',placeholder:'New playlist name…'});
+    newRow.appendChild(newInput);
+    newRow.appendChild(b('btn-pri',{onClick:()=>{
+      const name=newInput.value.trim();if(!name)return;
+      st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name,tracks:[]}];rr();
+    }},'Create'));
+    body.appendChild(newRow);
+
+    // ── Each playlist
+    st.playlists.forEach(pl=>{
+      const sec=d('',{style:{marginBottom:'14px'}});
+      const phd=d('pl-section-hd',{});
+      phd.appendChild(document.createTextNode(pl.name));
+      const pRight=d('pl-section-cnt',{});
+      pRight.appendChild(document.createTextNode(pl.tracks.length+' tracks'));
+      pRight.appendChild(b('btn-sec',{style:{fontSize:'11px',padding:'2px 8px'},onClick:()=>{if(confirm(`Delete "${pl.name}"?`)){st.playlists=st.playlists.filter(p=>p.id!==pl.id);rr();}}},'Delete'));
+      phd.appendChild(pRight);
+      sec.appendChild(phd);
+      const pList=d('daq-list',{});
+      if(!pl.tracks.length){pList.appendChild(d('daq-empty',{},'No tracks yet'));}
+      else pl.tracks.forEach(track=>{
+        const item=buildDaqRow(track);
+        item.appendChild(b('daq-rm',{title:'Remove',onClick:()=>{pl.tracks=pl.tracks.filter(t=>t.id!==track.id);rr();}},'×'));
+        pList.appendChild(item);
       });
-      const clrRow=d('modal-row',{style:{marginTop:'10px'}});
-      clrRow.appendChild(b('btn-sec',{onClick:()=>{if(confirm('Clear the entire queue?')){st.dasAscoltare=[];rr();}}},'Clear all'));
-      modal.appendChild(list);modal.appendChild(clrRow);
-    }
-    if(!st.dasAscoltare.length)modal.appendChild(list);
-    overlay.appendChild(modal);root.appendChild(overlay);
+      sec.appendChild(pList);
+      body.appendChild(sec);
+    });
+
+    modal.appendChild(body);overlay.appendChild(modal);root.appendChild(overlay);
   }
 
   // ── My Likes modal ─────────────────────────────────────────
