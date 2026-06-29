@@ -1516,7 +1516,7 @@ function trackCard(track,parentNodeId,displayArtist){
   const plBtn=b('t-daq'+(inDaq?' queued':''),{
     title:'Add to playlist',
     onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:track.id;rr();}
-  },'🎵');
+  },'🏷️');
   plWrap.appendChild(plBtn);
   if(isDropOpen){
     const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
@@ -1895,7 +1895,7 @@ function buildApp(){
   const activeBranch=getBranch(st.activeBranchId);
   root.appendChild(d('hdr',{},
     el('span',{cls:'logo'},el('img',{src:'./logo.svg',height:'33',alt:'',cls:'logo-img'}),el('span',{cls:'logo-brand'},el('em',{},'Wax'),'Tree'),el('span',{cls:'logo-sub'},'Beta v.1')),s('sp'),
-    (()=>{const cnt=st.dasAscoltare.length+st.playlists.reduce((s,p)=>s+p.tracks.length,0);const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Playlists',onClick:()=>{st.playlistsModal=true;rr();}},'🎵 Playlists');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
+    (()=>{const cnt=st.dasAscoltare.length+st.playlists.reduce((s,p)=>s+p.tracks.length,0);const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Playlists',onClick:()=>{st.playlistsModal=true;rr();}},'🏷️ Playlists');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
     (()=>{
       if(!wtSession)return null;
       const wrap=d('profile-wrap',{});
@@ -2006,7 +2006,7 @@ function buildApp(){
     const overlay=d('overlay',{onClick:close});
     const modal=d('modal pl-modal',{onClick:e=>e.stopPropagation()});
     modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'12px'}},
-      el('h2',{cls:'modal-title'},'🎵 Playlists'),
+      el('h2',{cls:'modal-title'},'🏷️ Playlists'),
       b('btn-sec',{onClick:close},'×')
     ));
     const body=d('',{style:{overflowY:'auto',maxHeight:'68vh'}});
@@ -2031,7 +2031,7 @@ function buildApp(){
     llHd.appendChild(llRight);
     body.appendChild(llHd);
     const llList=d('daq-list',{style:{marginBottom:'16px'}});
-    if(!st.dasAscoltare.length){llList.appendChild(d('daq-empty',{},'No tracks — use 🎵 on any track to add'));}
+    if(!st.dasAscoltare.length){llList.appendChild(d('daq-empty',{},'No tracks — use 🏷️ on any track to add'));}
     else st.dasAscoltare.forEach(track=>{
       const item=buildDaqRow(track);
       item.appendChild(b('daq-rm',{title:'Remove',onClick:()=>{st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);rr();}},'×'));
