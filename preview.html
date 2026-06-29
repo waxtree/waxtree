@@ -1529,11 +1529,11 @@ function buildRightPanel(){
   const panel=d('rp',{});
   const playerSlot=el('div',{id:'rp-player-slot'});
   if(!st.nowPlaying){
-    playerSlot.appendChild(d('rp-np-empty',{},'▶  Nessun brano in riproduzione'));
+    playerSlot.appendChild(d('rp-np-empty',{},'▶  Nothing playing'));
   }
   panel.appendChild(playerSlot);
   const corr=d('rp-corr',{});
-  corr.appendChild(s('rp-corr-hd','Tracce correlate'));
+  corr.appendChild(s('rp-corr-hd','Related Tracks'));
   panel.appendChild(corr);
   return panel;
 }
