@@ -75,10 +75,10 @@ input,select{font:inherit;color:inherit}
 .sidebar{display:flex;flex-direction:column;background:var(--bg-s);border-right:1px solid var(--border);overflow:hidden}
 .br-strip{display:flex;align-items:flex-end;padding:8px 8px 0;gap:2px;overflow-x:auto;flex-shrink:0;scrollbar-width:none;border-bottom:1px solid var(--border)}
 .br-strip::-webkit-scrollbar{display:none}
-.br-tab{display:flex;align-items:center;gap:5px;padding:6px 10px 5px;border-radius:8px 8px 0 0;background:var(--bg-e);border:1px solid var(--border);border-bottom:none;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-m);cursor:pointer;white-space:nowrap;flex-shrink:0;position:relative;bottom:-1px;transition:background .15s,color .15s;user-select:none}
+.br-tab{display:flex;align-items:center;gap:3px;padding:4px 7px 3px;border-radius:7px 7px 0 0;background:var(--bg-e);border:1px solid var(--border);border-bottom:none;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-m);cursor:pointer;white-space:nowrap;flex-shrink:0;position:relative;bottom:-1px;transition:background .15s,color .15s;user-select:none}
 .br-tab.active{background:var(--bg-s);border-bottom-color:var(--bg-s);color:var(--accent)}
-.br-tab-name{max-width:72px;overflow:hidden;text-overflow:ellipsis}
-.br-tab-rename{background:none;border:none;outline:none;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);width:72px}
+.br-tab-name{max-width:54px;overflow:hidden;text-overflow:ellipsis}
+.br-tab-rename{background:none;border:none;outline:none;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);width:54px}
 .br-tab-rm,.br-tab-edit{font-size:11px;color:var(--text-f);opacity:0;line-height:1;padding:0 1px;transition:opacity .15s,color .15s}
 .br-tab:hover .br-tab-rm,.br-tab:hover .br-tab-edit{opacity:1}
 .br-tab-rm:hover,.br-tab-edit:hover{color:var(--accent)}
@@ -626,7 +626,7 @@ let wtSession=null;
 // ── Demo data ──────────────────────────────────────────────
 const FREE_WOOD_LIMIT=3;
 const FREE_NODE_LIMIT=15;
-const DEMO_BRANCHES=[{id:'b1',name:'Wood 1'}];
+const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
   parentId:null,pinned:false,tags:[],loaded:true,loading:false,error:null,
@@ -1186,7 +1186,7 @@ function addTag(nodeId,tag){
 function removeTag(nodeId,tag){const n=getNode(nodeId);if(n)n.tags=n.tags.filter(t=>t!==tag);rr();}
 function toggleLike(id){st.likes[id]=!st.likes[id];rr();}
 function removeChip(name){st.chips=st.chips.filter(c=>c!==name);rr();}
-function addBranch(){if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){st.premiumModal=true;rr();return;}const id='b'+Date.now();st.branches=[...st.branches,{id,name:'Wood '+(st.branches.length+1)}];st.activeBranchId=id;rr();}
+function addBranch(){if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){st.premiumModal=true;rr();return;}const id='b'+Date.now();st.branches=[...st.branches,{id,name:'Branch '+(st.branches.length+1)}];st.activeBranchId=id;rr();}
 function removeBranch(id){
   if(st.branches.length<=1)return;
   st.branches=st.branches.filter(b=>b.id!==id);st.nodes=st.nodes.filter(n=>n.branchId!==id);
@@ -1548,8 +1548,8 @@ function buildSidebar(){
     }
     strip.appendChild(tab);
   });
-  if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){const lt=d('br-tab locked',{title:'Feature soon unlocked',onClick:()=>{st.premiumModal=true;rr();}});lt.appendChild(s('br-tab-name','Wood '+(FREE_WOOD_LIMIT+1)));lt.appendChild(s('br-tab-lock','🔒'));strip.appendChild(lt);}
-  if(st.isPremium||st.branches.length<FREE_WOOD_LIMIT)strip.appendChild(b('br-add',{title:'New wood',onClick:addBranch},'+'));
+  if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){const lt=d('br-tab locked',{title:'Feature soon unlocked',onClick:()=>{st.premiumModal=true;rr();}});lt.appendChild(s('br-tab-name','Branch '+(FREE_WOOD_LIMIT+1)));lt.appendChild(s('br-tab-lock','🔒'));strip.appendChild(lt);}
+  if(st.isPremium||st.branches.length<FREE_WOOD_LIMIT)strip.appendChild(b('br-add',{title:'New branch',onClick:addBranch},'+'));
   bar.appendChild(strip);
 
   // Filter bar
@@ -1604,7 +1604,7 @@ function buildSidebar(){
   }
 
   if(!branchNodes.length){
-    nodesWrap.appendChild(d('sb-empty',{},'Empty wood — search for an artist or label to start'));
+    nodesWrap.appendChild(d('sb-empty',{},'Empty branch — search for an artist or label to start'));
   } else if(st.sbFilterTag&&!filteredNodes.length){
     nodesWrap.appendChild(d('sb-empty',{},'No nodes with this tag.'));
   } else if(st.sbFilterTag){
@@ -2300,7 +2300,7 @@ function buildApp(){
       b('btn-sec',{onClick:()=>{ytPos=null;localStorage.removeItem('wt-player-pos');rr();}},'Reset')
     ));
     body.appendChild(d('st-row',{},
-      d('',{},s('st-lbl st-danger','⚠ Reset all data'),s('st-sub','Erase all woods, nodes, likes and history')),
+      d('',{},s('st-lbl st-danger','⚠ Reset all data'),s('st-sub','Erase all branches, nodes, likes and history')),
       b('btn-sec',{style:{borderColor:'#F47B5E',color:'#F47B5E'},onClick:()=>{if(confirm('Erase all data? This cannot be undone.')){localStorage.removeItem(SK);location.reload();}}},'Reset')
     ));
 
