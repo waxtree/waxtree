@@ -317,8 +317,8 @@ input,select{font:inherit;color:inherit}
 .st-section:first-child{margin-top:4px}
 .st-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0}
 .st-row+.st-row{border-top:1px solid var(--border)}
-.st-lbl{font-size:13px;color:var(--text)}
-.st-sub{font-size:11.5px;color:var(--text-m);margin-top:2px}
+.st-lbl{display:block;font-size:13px;color:var(--text)}
+.st-sub{display:block;font-size:11.5px;color:var(--text-m);margin-top:2px}
 .tog-btn{width:38px;height:22px;border-radius:11px;background:var(--bg-e);border:1.5px solid var(--border);cursor:pointer;position:relative;flex-shrink:0;transition:background .2s,border-color .2s;padding:0}
 .tog-btn::after{content:'';position:absolute;width:15px;height:15px;border-radius:50%;background:var(--text-f);top:2.5px;left:2.5px;transition:transform .2s,background .2s}
 .tog-btn.on{background:var(--accent);border-color:var(--accent)}
@@ -327,8 +327,8 @@ input,select{font:inherit;color:inherit}
 /* ── Gamification ─────── */
 .profile-modal{max-width:500px}
 .lvl-hero{text-align:center;padding:18px 0 10px;border-bottom:1px solid var(--border);margin-bottom:4px}
-.lvl-hero-title{font-size:21px;font-weight:700;margin-bottom:6px}
-.lvl-hero-tagline{font-size:13px;color:var(--text-m);line-height:1.55}
+.lvl-hero-title{display:block;font-size:21px;font-weight:700;margin-bottom:6px}
+.lvl-hero-tagline{display:block;font-size:13px;color:var(--text-m);line-height:1.55}
 .lvl-bar-wrap{height:6px;background:var(--bg-e);border-radius:4px;overflow:hidden;margin:14px 0 5px}
 .lvl-bar{height:100%;background:var(--accent);border-radius:4px;transition:width .5s}
 .lvl-bar-info{display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-m);margin-bottom:16px}
@@ -338,8 +338,8 @@ input,select{font:inherit;color:inherit}
 .lvl-item.locked{opacity:.3}
 .lvl-num{font-size:11px;font-weight:700;color:var(--text-f);width:18px;flex-shrink:0;padding-top:1px}
 .lvl-item.active .lvl-num{color:var(--accent)}
-.lvl-item-title{font-size:13px;font-weight:600}
-.lvl-item-tag{font-size:11.5px;color:var(--text-m);margin-top:2px;line-height:1.4}
+.lvl-item-title{display:block;font-size:13px;font-weight:600}
+.lvl-item-tag{display:block;font-size:11.5px;color:var(--text-m);margin-top:2px;line-height:1.4}
 /* Level-up toast */
 .level-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--bg-s);border:1.5px solid var(--accent);border-radius:14px;padding:14px 18px;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:1000;display:flex;align-items:center;gap:13px;min-width:270px;max-width:380px;opacity:0;transition:opacity .3s,transform .3s;pointer-events:none}
 .level-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
