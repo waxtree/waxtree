@@ -1212,19 +1212,21 @@ function applyFilters(tracks){
     }
     return true;
   });
-  const videoScore=t=>(!t.videoId||invalidYtIds.has(t.videoId))?0:(t.digital?3:2);
+  // yr() treats year=0 or missing as -1 so those sort last (not first) when descending
+  const yr=t=>(t.year&&t.year>0)?t.year:-1;
   switch(st.filterSort){
-    case 'chrono':     r=[...r].sort((a,b)=>(a.year||0)-(b.year||0));break;
-    case 'antichrono': r=[...r].sort((a,b)=>(b.year||0)-(a.year||0));break;
+    case 'chrono':     r=[...r].sort((a,b)=>yr(a)-yr(b));break;
+    case 'antichrono': r=[...r].sort((a,b)=>yr(b)-yr(a));break;
     case 'az':         r=[...r].sort((a,b)=>a.title.localeCompare(b.title,'en'));break;
     case 'za':         r=[...r].sort((a,b)=>b.title.localeCompare(a.title,'en'));break;
     case 'genre':      r=[...r].sort((a,b)=>(a.genre||'zzz').localeCompare(b.genre||'zzz','en'));break;
     default:
-      // Video tracks first (with player > without), then newest within each group
+      // Newest first. Within same year, tracks with a video ID come before those without.
+      // Does NOT read invalidYtIds (mutated async) — keeps the comparator pure and consistent.
       r=[...r].sort((a,b)=>{
-        const sd=videoScore(b)-videoScore(a);
-        if(sd!==0)return sd;
-        return (b.year||0)-(a.year||0);
+        const yd=yr(b)-yr(a);
+        if(yd!==0)return yd;
+        return (b.videoId?1:0)-(a.videoId?1:0);
       });
       break;
   }
