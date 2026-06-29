@@ -69,7 +69,9 @@ input,select{font:inherit;color:inherit}
 .chip:hover .chip-rm,.chip-rm:hover{opacity:1;color:var(--accent)}
 
 /* ── Main layout ─────────────── */
-.main{display:grid;grid-template-columns:252px 1fr;flex:1;overflow:hidden;min-height:0}
+.main{display:grid;grid-template-columns:var(--sb-w,252px) 4px 1fr;flex:1;overflow:hidden;min-height:0}
+.sb-resize{cursor:col-resize;background:var(--border);transition:background .15s;flex-shrink:0}
+.sb-resize:hover,.sb-resize.dragging{background:var(--accent)}
 
 /* ── Sidebar ─────────────────── */
 .sidebar{display:flex;flex-direction:column;background:var(--bg-s);border-right:1px solid var(--border);overflow:hidden}
@@ -77,11 +79,11 @@ input,select{font:inherit;color:inherit}
 .br-strip::-webkit-scrollbar{display:none}
 .br-tab{display:flex;align-items:center;gap:4px;padding:6px 7px 5px;border-radius:8px 8px 0 0;background:var(--bg-e);border:1px solid var(--border);border-bottom:none;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-m);cursor:pointer;white-space:nowrap;flex-shrink:0;position:relative;bottom:-1px;transition:background .15s,color .15s;user-select:none}
 .br-tab.active{background:var(--bg-s);border-bottom-color:var(--bg-s);color:var(--accent)}
-.br-tab-name{max-width:58px;overflow:hidden;text-overflow:ellipsis}
-.br-tab-rename{background:none;border:none;outline:none;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);width:58px}
-.br-tab-rm,.br-tab-edit{font-size:11px;color:var(--text-f);opacity:0;line-height:1;padding:0 1px;transition:opacity .15s,color .15s}
-.br-tab:hover .br-tab-rm,.br-tab:hover .br-tab-edit{opacity:1}
-.br-tab-rm:hover,.br-tab-edit:hover{color:var(--accent)}
+.br-tab-name{max-width:80px;overflow:hidden;text-overflow:ellipsis}
+.br-tab-rename{background:none;border:none;outline:none;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);width:80px}
+.br-tab-rm,.br-tab-edit{font-size:11px;color:var(--text-f);line-height:1;padding:0 2px;transition:color .15s}
+.br-tab-rm:hover{color:var(--err)}
+.br-tab-edit:hover{color:var(--accent)}
 .br-add{padding:6px 8px 5px;border-radius:8px 8px 0 0;background:transparent;border:1px solid transparent;font-size:16px;color:var(--text-f);cursor:pointer;flex-shrink:0;position:relative;bottom:-1px;transition:color .15s}
 .br-add:hover{color:var(--accent)}
 .sb-nodes{flex:1;overflow-y:auto;padding:8px 0}
@@ -686,6 +688,7 @@ let tracksPageMap={};  // nodeId → page index (0-based)
 let bcCacheMap={};     // nodeId → {tracks,loading,err}
 
 // ── Render ─────────────────────────────────────────────────
+{const sw=parseInt(localStorage.getItem('wt-sb-w'));if(sw>=160&&sw<=520)document.documentElement.style.setProperty('--sb-w',sw+'px');}
 let pending=false;
 function rr(){saveSt();if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;paint();});}
 function paint(){
@@ -1904,7 +1907,30 @@ function buildApp(){
     root.appendChild(row);
   }
 
-  const main=d('main',{});main.appendChild(buildSidebar());main.appendChild(buildContent());root.appendChild(main);
+  const main=d('main',{});
+  main.appendChild(buildSidebar());
+  const sbHandle=d('sb-resize',{});
+  sbHandle.addEventListener('mousedown',e=>{
+    e.preventDefault();
+    sbHandle.classList.add('dragging');
+    const startX=e.clientX;
+    const startW=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sb-w'))||252;
+    const onMove=mv=>{
+      const nw=Math.max(160,Math.min(520,startW+mv.clientX-startX));
+      document.documentElement.style.setProperty('--sb-w',nw+'px');
+    };
+    const onUp=()=>{
+      sbHandle.classList.remove('dragging');
+      localStorage.setItem('wt-sb-w',parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sb-w')));
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+    };
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+  });
+  main.appendChild(sbHandle);
+  main.appendChild(buildContent());
+  root.appendChild(main);
 
 
   if(st.daqModal){
