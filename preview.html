@@ -1147,6 +1147,7 @@ function addNode(type,discogsId,name,parentId,branchId){
   const bid=branchId||st.activeBranchId;
   const existing=st.nodes.find(n=>n.discogsId===discogsId&&n.branchId===bid);
   if(existing){selectNode(existing.id);return;}
+  if(!st.isPremium&&st.nodes.filter(n=>n.branchId===bid).length>=FREE_NODE_LIMIT){st.premiumModal=true;rr();return;}
   const id='n'+Date.now();
   const node={id,branchId:bid,type,discogsId,name,parentId:parentId||null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null};
   st.nodes=[...st.nodes,node];st.selectedId=id;st.activeBranchId=bid;
@@ -1220,6 +1221,8 @@ function removeBranch(id){
 function renameBranch(id,name){const b=getBranch(id);if(b&&name.trim())b.name=name.trim();st.renameId=null;rr();}
 function doSearch(){
   const q=st.q.trim();if(!q)return;
+  const branchNodeCount=st.nodes.filter(n=>n.branchId===st.activeBranchId).length;
+  if(!st.isPremium&&branchNodeCount>=FREE_NODE_LIMIT){st.premiumModal=true;rr();return;}
   st.loading=true;st.err='';st.results=[];rr();
   searchDiscogs(q).then(res=>{st.loading=false;incrementSearch();if(!res.length){st.err='No results';rr();return;}if(res.length===1){pickResult(res[0]);return;}st.results=res;rr();}).catch(e=>{st.loading=false;st.err=e.message;rr();});
 }
