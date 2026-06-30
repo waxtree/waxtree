@@ -759,11 +759,14 @@ function positionYtHost(){
   if(!host)return;
   const slot=document.getElementById('rp-player-slot');
   if(!slot||!document.getElementById('yt-wrap')){host.style.visibility='hidden';return;}
-  const r=slot.getBoundingClientRect();
+  // Set width first so aspect-ratio video height is calculated correctly
+  host.style.width=slot.getBoundingClientRect().width+'px';
+  const h=host.offsetHeight; // force layout to get real player height
+  if(h>0)slot.style.height=h+'px'; // sync slot so Related Tracks is pushed down
+  const r=slot.getBoundingClientRect(); // re-read after height sync
   host.style.visibility='';
   host.style.top=r.top+'px';
   host.style.left=r.left+'px';
-  host.style.width=r.width+'px';
 }
 window.addEventListener('resize',positionYtHost);
 
