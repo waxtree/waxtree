@@ -399,6 +399,7 @@ input,select{font:inherit;color:inherit}
 #related-tracks{flex:1;overflow-y:auto;padding:12px;min-height:0}
 /* .rp is an invisible grid spacer — visual content is in #right-panel */
 .rp{min-height:0}
+#rp-np-empty{padding:18px 12px;font-size:12px;color:var(--text-f);text-align:center;line-height:1.5;display:none}
 .rp-corr-hd{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px;display:block}
 
 /* ── Plant grow loader ─────── */
@@ -418,6 +419,7 @@ input,select{font:inherit;color:inherit}
 <body>
 <div id="root"></div>
 <div id="right-panel">
+  <div id="rp-np-empty">▶&nbsp;&nbsp;Nothing playing</div>
   <div id="yt-host"></div>
   <div id="related-tracks"><span class="rp-corr-hd">Related Tracks</span></div>
 </div>
@@ -764,8 +766,11 @@ function positionYtHost(){
   if(!main)return;
   panel.style.display='flex';
   panel.style.top=main.getBoundingClientRect().top+'px';
+  const playing=!!(st.nowPlaying&&document.getElementById('yt-wrap'));
   const ytHost=document.getElementById('yt-host');
-  if(ytHost) ytHost.style.display=(st.nowPlaying&&document.getElementById('yt-wrap'))?'block':'none';
+  if(ytHost) ytHost.style.display=playing?'block':'none';
+  const np=document.getElementById('rp-np-empty');
+  if(np) np.style.display=playing?'none':'block';
 }
 
 // ── YouTube ────────────────────────────────────────────────
