@@ -382,8 +382,11 @@ input,select{font:inherit;color:inherit}
 .yt-info{flex:1;min-width:0}
 .yt-title{display:block;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .yt-artist{display:block;font-size:11px;color:var(--text-m);margin-top:1px}
-.yt-close{width:26px;height:26px;border-radius:50%;background:var(--bg-e);color:var(--text-m);font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,color .15s}
-.yt-close:hover{background:var(--bg-h);color:var(--text)}
+.yt-close,.yt-nav{width:26px;height:26px;border-radius:50%;background:var(--bg-e);color:var(--text-m);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,color .15s}
+.yt-close{font-size:15px}
+.yt-close:hover,.yt-nav:hover:not(:disabled){background:var(--bg-h);color:var(--text)}
+.yt-nav{font-size:11px;border:1px solid var(--border)}
+.yt-nav:disabled{opacity:.25;cursor:default}
 #yt-iframe-host{display:block;width:100%;aspect-ratio:16/9}
 #yt-iframe-host iframe{display:block;width:100%;height:100%}
 .yt-fallback{width:100%;aspect-ratio:16/9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--bg-e);padding:20px;text-align:center;box-sizing:border-box}
@@ -733,6 +736,24 @@ function paint(){
   });
 }
 
+function getPlaylistTracks(){
+  const node=getNode(st.selectedId);
+  if(!node?.data?.tracks?.length)return[];
+  return applyFilters(node.data.tracks);
+}
+function playAdjacentTrack(dir){
+  if(!st.nowPlaying)return;
+  const tracks=getPlaylistTracks();
+  if(!tracks.length)return;
+  const idx=tracks.findIndex(t=>t.id===st.nowPlaying.trackId);
+  if(idx===-1)return;
+  const next=tracks[idx+dir];
+  if(!next)return;
+  const node=getNode(st.selectedId);
+  const artist=node?.type==='label'?next.artistName||'':node?.name||'';
+  doPlay(next.id,next.videoId,next.title,artist);
+}
+
 function positionYtHost(){
   const host=document.getElementById('yt-host');
   if(!host)return;
@@ -867,8 +888,12 @@ function syncYtPlayer(){
   const te=document.createElement('span');te.className='yt-title';te.textContent=np.title;
   const ae=document.createElement('span');ae.className='yt-artist';ae.textContent=np.artistName;
   info.appendChild(te);info.appendChild(ae);
+  const tracks=getPlaylistTracks();
+  const curIdx=tracks.findIndex(t=>t.id===np.trackId);
+  const prevBtn=document.createElement('button');prevBtn.className='yt-nav';prevBtn.title='Previous track';prevBtn.textContent='⏮';prevBtn.disabled=curIdx<=0;prevBtn.addEventListener('click',()=>playAdjacentTrack(-1));
+  const nextBtn=document.createElement('button');nextBtn.className='yt-nav';nextBtn.title='Next track';nextBtn.textContent='⏭';nextBtn.disabled=curIdx<0||curIdx>=tracks.length-1;nextBtn.addEventListener('click',()=>playAdjacentTrack(1));
   const cb=document.createElement('button');cb.className='yt-close';cb.textContent='×';cb.addEventListener('click',stopPlay);
-  hdr.appendChild(info);hdr.appendChild(cb);wrap.appendChild(hdr);
+  hdr.appendChild(info);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
   if(np.videoId){
     const host=document.createElement('div');host.id='yt-iframe-host';wrap.appendChild(host);
     (ytHost||document.body).appendChild(wrap);loadYtApi();setTimeout(()=>{if(window.YT?.Player)createYtPlayer();},120);
