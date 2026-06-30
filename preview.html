@@ -720,9 +720,12 @@ function rr(){saveSt();if(pending)return;pending=true;requestAnimationFrame(()=>
 function paint(){
   const root=document.getElementById('root');
   const scrolls={};root.querySelectorAll('[data-sc]').forEach(e=>{scrolls[e.dataset.sc]=e.scrollTop;});
+  // Move yt-wrap to body BEFORE nuking root so the iframe is never destroyed
+  const ytWrap=document.getElementById('yt-wrap');
+  if(ytWrap)document.body.appendChild(ytWrap);
   root.innerHTML='';root.appendChild(buildApp());
   Object.entries(scrolls).forEach(([k,v])=>{const e=root.querySelector(`[data-sc="${k}"]`);if(e)e.scrollTop=v;});
-  syncYtPlayer();
+  syncYtPlayer(); // moves yt-wrap from body back into the new rp-player-slot
   root.querySelectorAll('.bio-text').forEach(txt=>{
     const btn=txt.nextElementSibling;
     if(btn&&btn.classList.contains('bio-more')&&txt.scrollHeight<=txt.clientHeight)btn.style.display='none';
