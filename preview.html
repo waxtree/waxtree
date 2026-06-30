@@ -393,12 +393,12 @@ input,select{font:inherit;color:inherit}
 .yt-fallback p{font-size:12px;color:var(--text-m)}
 .yt-fallback a{font-size:12px;color:var(--accent);text-decoration:none;padding:6px 14px;border:1px solid var(--accent);border-radius:20px;transition:background .15s}
 .yt-fallback a:hover{background:rgba(94,196,123,.12)}
-/* ── yt-host (outside #root, never rebuilt) ─────── */
-#yt-host{position:fixed;z-index:50;right:0;width:260px;display:none}
-/* ── Right panel ─────── */
-.rp{display:flex;flex-direction:column;overflow:hidden;border-left:1px solid var(--border);min-height:0;background:var(--bg-s)}
-.rp-np-empty{padding:18px 12px;font-size:12px;color:var(--text-f);text-align:center;line-height:1.5}
-.rp-corr{flex:1;overflow-y:auto;padding:12px;min-height:0}
+/* ── Right panel (outside #root, never rebuilt) ─────── */
+#right-panel{position:fixed;right:0;width:260px;top:0;bottom:0;display:none;flex-direction:column;background:var(--bg-s);border-left:1px solid var(--border);z-index:50}
+#yt-host{flex-shrink:0;overflow:hidden;display:none}
+#related-tracks{flex:1;overflow-y:auto;padding:12px;min-height:0}
+/* .rp is an invisible grid spacer — visual content is in #right-panel */
+.rp{min-height:0}
 .rp-corr-hd{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px;display:block}
 
 /* ── Plant grow loader ─────── */
@@ -417,7 +417,10 @@ input,select{font:inherit;color:inherit}
 </head>
 <body>
 <div id="root"></div>
-<div id="yt-host"></div>
+<div id="right-panel">
+  <div id="yt-host"></div>
+  <div id="related-tracks"><span class="rp-corr-hd">Related Tracks</span></div>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script type="module">
 
@@ -755,14 +758,14 @@ function playAdjacentTrack(dir){
 }
 
 function positionYtHost(){
-  const host=document.getElementById('yt-host');
-  if(!host)return;
-  if(!st.nowPlaying||!document.getElementById('yt-wrap')){host.style.display='none';return;}
+  const panel=document.getElementById('right-panel');
+  if(!panel)return;
   const main=document.querySelector('.main');
-  if(!main){host.style.display='none';return;}
-  const t=main.getBoundingClientRect().top;
-  host.style.display='block';
-  host.style.top=t+'px';
+  if(!main)return;
+  panel.style.display='flex';
+  panel.style.top=main.getBoundingClientRect().top+'px';
+  const ytHost=document.getElementById('yt-host');
+  if(ytHost) ytHost.style.display=(st.nowPlaying&&document.getElementById('yt-wrap'))?'block':'none';
 }
 
 // ── YouTube ────────────────────────────────────────────────
@@ -1633,20 +1636,8 @@ function trackCard(track,parentNodeId,displayArtist){
 
 // ── Right panel ────────────────────────────────────────────
 function buildRightPanel(){
-  const panel=d('rp',{});
-  const playerSlot=el('div',{id:'rp-player-slot'});
-  if(!st.nowPlaying){
-    playerSlot.appendChild(d('rp-np-empty',{},'▶  Nothing playing'));
-  } else {
-    // Reserve space matching yt-host height (header ~51px + video ~146px = ~197px); 205px gives 8px breathing room
-    playerSlot.style.minHeight='205px';
-    playerSlot.style.flexShrink='0';
-  }
-  panel.appendChild(playerSlot);
-  const corr=d('rp-corr',{});
-  corr.appendChild(s('rp-corr-hd','Related Tracks'));
-  panel.appendChild(corr);
-  return panel;
+  // Empty grid spacer — visual content lives in #right-panel outside #root
+  return d('rp',{});
 }
 
 // ── Sidebar ────────────────────────────────────────────────
