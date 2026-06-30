@@ -390,6 +390,8 @@ input,select{font:inherit;color:inherit}
 .yt-fallback p{font-size:12px;color:var(--text-m)}
 .yt-fallback a{font-size:12px;color:var(--accent);text-decoration:none;padding:6px 14px;border:1px solid var(--accent);border-radius:20px;transition:background .15s}
 .yt-fallback a:hover{background:rgba(94,196,123,.12)}
+/* ── yt-host (outside #root, never rebuilt) ─────── */
+#yt-host{position:fixed;z-index:50;width:260px}
 /* ── Right panel ─────── */
 .rp{display:flex;flex-direction:column;overflow:hidden;border-left:1px solid var(--border);min-height:0;background:var(--bg-s)}
 .rp-np-empty{padding:18px 12px;font-size:12px;color:var(--text-f);text-align:center;line-height:1.5}
@@ -412,6 +414,7 @@ input,select{font:inherit;color:inherit}
 </head>
 <body>
 <div id="root"></div>
+<div id="yt-host"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script type="module">
 
@@ -720,17 +723,28 @@ function rr(){saveSt();if(pending)return;pending=true;requestAnimationFrame(()=>
 function paint(){
   const root=document.getElementById('root');
   const scrolls={};root.querySelectorAll('[data-sc]').forEach(e=>{scrolls[e.dataset.sc]=e.scrollTop;});
-  // Move yt-wrap to body BEFORE nuking root so the iframe is never destroyed
-  const ytWrap=document.getElementById('yt-wrap');
-  if(ytWrap)document.body.appendChild(ytWrap);
   root.innerHTML='';root.appendChild(buildApp());
   Object.entries(scrolls).forEach(([k,v])=>{const e=root.querySelector(`[data-sc="${k}"]`);if(e)e.scrollTop=v;});
-  syncYtPlayer(); // moves yt-wrap from body back into the new rp-player-slot
+  syncYtPlayer();
+  positionYtHost();
   root.querySelectorAll('.bio-text').forEach(txt=>{
     const btn=txt.nextElementSibling;
     if(btn&&btn.classList.contains('bio-more')&&txt.scrollHeight<=txt.clientHeight)btn.style.display='none';
   });
 }
+
+function positionYtHost(){
+  const host=document.getElementById('yt-host');
+  if(!host)return;
+  const slot=document.getElementById('rp-player-slot');
+  if(!slot||!document.getElementById('yt-wrap')){host.style.visibility='hidden';return;}
+  const r=slot.getBoundingClientRect();
+  host.style.visibility='';
+  host.style.top=r.top+'px';
+  host.style.left=r.left+'px';
+  host.style.width=r.width+'px';
+}
+window.addEventListener('resize',positionYtHost);
 
 // ── YouTube ────────────────────────────────────────────────
 let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=null,ytPollId=null,ytBadgeTimerId=null,ytTitle='',ytArtist='';
@@ -844,9 +858,8 @@ function makeDraggable(wrap,handle){
 
 function syncYtPlayer(){
   if(!st.nowPlaying){const w=document.getElementById('yt-wrap');if(w)w.remove();killYt();return;}
-  const slot=document.getElementById('rp-player-slot');
-  const existing=document.getElementById('yt-wrap');
-  if(existing){if(slot&&existing.parentNode!==slot)slot.appendChild(existing);return;}
+  if(document.getElementById('yt-wrap'))return; // already live in #yt-host — don't touch it
+  const ytHost=document.getElementById('yt-host');
   const np=st.nowPlaying;
   const wrap=document.createElement('div');wrap.id='yt-wrap';wrap.className='yt-wrap';
   const hdr=document.createElement('div');hdr.className='yt-hdr';
@@ -858,12 +871,12 @@ function syncYtPlayer(){
   hdr.appendChild(info);hdr.appendChild(cb);wrap.appendChild(hdr);
   if(np.videoId){
     const host=document.createElement('div');host.id='yt-iframe-host';wrap.appendChild(host);
-    (slot||document.body).appendChild(wrap);loadYtApi();setTimeout(()=>{if(window.YT?.Player)createYtPlayer();},120);
+    (ytHost||document.body).appendChild(wrap);loadYtApi();setTimeout(()=>{if(window.YT?.Player)createYtPlayer();},120);
   } else {
     const q=encodeURIComponent(np.artistName+' '+np.title);
     const fb=document.createElement('div');fb.className='yt-fallback';
     fb.innerHTML=`<p>No video in Discogs data</p><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noreferrer">Search on YouTube ↗</a>`;
-    wrap.appendChild(fb);(slot||document.body).appendChild(wrap);
+    wrap.appendChild(fb);(ytHost||document.body).appendChild(wrap);
   }
 }
 
@@ -1586,7 +1599,11 @@ function trackCard(track,parentNodeId,displayArtist){
 function buildRightPanel(){
   const panel=d('rp',{});
   const playerSlot=el('div',{id:'rp-player-slot'});
-  if(!st.nowPlaying){
+  if(st.nowPlaying){
+    // yt-host is fixed-positioned over this slot; reserve the same height so
+    // Related Tracks is pushed down correctly. 42px header + 16:9 of 260px ≈ 190px.
+    playerSlot.style.height='190px';
+  } else {
     playerSlot.appendChild(d('rp-np-empty',{},'▶  Nothing playing'));
   }
   panel.appendChild(playerSlot);
