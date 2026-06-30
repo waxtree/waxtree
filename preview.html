@@ -776,17 +776,8 @@ function positionYtHost(){
 // ── YouTube ────────────────────────────────────────────────
 let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=null,ytPollId=null,ytBadgeTimerId=null,ytTitle='',ytArtist='';
 function tryBadge(){if(ytTid&&(ytAccSec>=3||ytSkips>=2)&&!st.listens[ytTid]?.badged){st.listens[ytTid]={badged:true};st.history.unshift({id:ytTid,title:ytTitle,artistName:ytArtist,ts:Date.now()});rr();}}
-const invalidYtIds=new Set();  // truly gone: 404, private, bad ID
+const invalidYtIds=new Set();  // truly gone: player fired error 100/2/5
 const noEmbedIds=new Set();    // exists on YT but embedding disabled (101/150)
-const ytChecked=new Set();
-function prevalidateYt(id){
-  if(!id||ytChecked.has(id)||invalidYtIds.has(id))return;
-  ytChecked.add(id);
-  const img=new Image();
-  img.onload=()=>{if(img.naturalWidth<=120){invalidYtIds.add(id);rr();}};
-  img.onerror=()=>{invalidYtIds.add(id);rr();};
-  img.src=`https://img.youtube.com/vi/${id}/mqdefault.jpg`;
-}
 
 function getYtId(uri){if(!uri)return null;const m=uri.match(/[?&]v=([a-zA-Z0-9_-]{11})/);return m?m[1]:null;}
 
@@ -920,12 +911,12 @@ function syncYtPlayer(){
   const cb=document.createElement('button');cb.className='yt-close';cb.textContent='×';cb.addEventListener('click',stopPlay);
   hdr.appendChild(info);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
   const q=encodeURIComponent(np.artistName+' '+np.title);
-  if(np.videoId&&!noEmbedIds.has(np.videoId)){
+  if(np.videoId&&!noEmbedIds.has(np.videoId)&&!invalidYtIds.has(np.videoId)){
     const videoWrap=document.createElement('div');videoWrap.className='yt-video-wrap';
     const host=document.createElement('div');host.id='yt-iframe-host';videoWrap.appendChild(host);wrap.appendChild(videoWrap);
     ytHost.appendChild(wrap);loadYtApi();setTimeout(()=>{if(window.YT?.Player)createYtPlayer();},120);
   } else {
-    const msg=noEmbedIds.has(np.videoId)?'Watch on YouTube':'No video in Discogs data';
+    const msg=noEmbedIds.has(np.videoId)?'Watch on YouTube':np.videoId?'Video unavailable':'No video in Discogs data';
     const fb=document.createElement('div');fb.className='yt-fallback';
     fb.innerHTML=`<p>${msg}</p><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noreferrer">Search on YouTube ↗</a>`;
     wrap.appendChild(fb);ytHost.appendChild(wrap);
@@ -1524,7 +1515,6 @@ function getAvatarUrl(){return localStorage.getItem(AVATAR_KEY)||null;}
 function trackCard(track,parentNodeId,displayArtist){
   const liked=!!st.likes[track.id],badged=!!st.listens[track.id]?.badged;
   const owned=isOwned(track.title,displayArtist);
-  if(track.videoId)prevalidateYt(track.videoId);
   const videoOk=track.videoId&&!invalidYtIds.has(track.videoId);
   const playBtn=b('t-play'+(videoOk?' has-video':''),{
     title:videoOk?'Play':'Search on YouTube',
