@@ -776,7 +776,8 @@ function positionYtHost(){
 // ── YouTube ────────────────────────────────────────────────
 let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=null,ytPollId=null,ytBadgeTimerId=null,ytTitle='',ytArtist='';
 function tryBadge(){if(ytTid&&(ytAccSec>=3||ytSkips>=2)&&!st.listens[ytTid]?.badged){st.listens[ytTid]={badged:true};st.history.unshift({id:ytTid,title:ytTitle,artistName:ytArtist,ts:Date.now()});rr();}}
-const invalidYtIds=new Set();
+const invalidYtIds=new Set();  // truly gone: 404, private, bad ID
+const noEmbedIds=new Set();    // exists on YT but embedding disabled (101/150)
 const ytChecked=new Set();
 function prevalidateYt(id){
   if(!id||ytChecked.has(id)||invalidYtIds.has(id))return;
@@ -833,9 +834,16 @@ function createYtPlayer(){
       },
       onError(e){
         const vid=st.nowPlaying?.videoId;
-        if(vid&&(e.data===100||e.data===101||e.data===150||e.data===2||e.data===5)){invalidYtIds.add(vid);rr();}
         if(ytPlayer){ytPlayer.destroy();ytPlayer=null;}
-        showYtFallback('Video unavailable',st.nowPlaying);
+        if(e.data===101||e.data===150){
+          // Embedding disabled — video exists on YouTube, owner blocked embeds
+          if(vid)noEmbedIds.add(vid);
+          showYtFallback('Watch on YouTube',st.nowPlaying);
+        } else {
+          // Genuinely unavailable (100=not found/private, 2=bad ID, 5=HTML5 error)
+          if(vid&&(e.data===100||e.data===2||e.data===5)){invalidYtIds.add(vid);rr();}
+          showYtFallback('Video unavailable',st.nowPlaying);
+        }
       }
     }
   });
@@ -911,14 +919,15 @@ function syncYtPlayer(){
   const nextBtn=document.createElement('button');nextBtn.className='yt-nav';nextBtn.title='Next track';nextBtn.textContent='⏭';nextBtn.disabled=curIdx<0||curIdx>=tracks.length-1;nextBtn.addEventListener('click',()=>playAdjacentTrack(1));
   const cb=document.createElement('button');cb.className='yt-close';cb.textContent='×';cb.addEventListener('click',stopPlay);
   hdr.appendChild(info);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
-  if(np.videoId){
+  const q=encodeURIComponent(np.artistName+' '+np.title);
+  if(np.videoId&&!noEmbedIds.has(np.videoId)){
     const videoWrap=document.createElement('div');videoWrap.className='yt-video-wrap';
     const host=document.createElement('div');host.id='yt-iframe-host';videoWrap.appendChild(host);wrap.appendChild(videoWrap);
     ytHost.appendChild(wrap);loadYtApi();setTimeout(()=>{if(window.YT?.Player)createYtPlayer();},120);
   } else {
-    const q=encodeURIComponent(np.artistName+' '+np.title);
+    const msg=noEmbedIds.has(np.videoId)?'Watch on YouTube':'No video in Discogs data';
     const fb=document.createElement('div');fb.className='yt-fallback';
-    fb.innerHTML=`<p>No video in Discogs data</p><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noreferrer">Search on YouTube ↗</a>`;
+    fb.innerHTML=`<p>${msg}</p><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noreferrer">Search on YouTube ↗</a>`;
     wrap.appendChild(fb);ytHost.appendChild(wrap);
   }
   positionYtHost();
