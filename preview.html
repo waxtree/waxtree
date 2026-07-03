@@ -2574,6 +2574,8 @@ function buildApp(){
         if(result.stats.junkFiles>0)doneMsg+=`, ${result.stats.junkFiles} hidden system files ignored`;
         doneMsg+='.';
         if(result.stats.skippedDirs>0)doneMsg+=` ⚠ ${result.stats.skippedDirs} folder${result.stats.skippedDirs!==1?'s':''} could not be fully read — rescan may find more.`;
+        const archives=(result.stats.extCounts['.zip']||0)+(result.stats.extCounts['.rar']||0)+(result.stats.extCounts['.7z']||0);
+        if(archives>0)doneMsg+=` Tip: ${archives} compressed archive${archives!==1?'s':''} skipped — extract them to index those tracks too.`;
         scanMsg.textContent=doneMsg;
         // Per-folder breakdown so undercounts can be compared against Finder
         result.stats.folders.slice().sort((a,b)=>b.audio-a.audio).forEach(f=>{
