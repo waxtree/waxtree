@@ -401,6 +401,7 @@ input,select{font:inherit;color:inherit}
 .rp{min-height:0}
 #rp-np-empty{padding:18px 12px;font-size:12px;color:var(--text-f);text-align:center;line-height:1.5;display:none}
 .rp-corr-hd{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px;display:block}
+.rp-coming-soon{display:block;text-align:center;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-f);opacity:.45;margin-top:24px}
 
 /* ── Plant grow loader ─────── */
 .plant-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:64px 20px 48px;gap:20px}
@@ -421,7 +422,7 @@ input,select{font:inherit;color:inherit}
 <div id="right-panel">
   <div id="rp-np-empty">▶&nbsp;&nbsp;Nothing playing</div>
   <div id="yt-host"></div>
-  <div id="related-tracks"><span class="rp-corr-hd">Related Tracks</span></div>
+  <div id="related-tracks"><span class="rp-corr-hd">Related Tracks</span><span class="rp-coming-soon">Coming Soon</span></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script type="module">
