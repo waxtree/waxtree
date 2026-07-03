@@ -2050,9 +2050,9 @@ function buildContent(){
     }
   }
 
-  // ── Bandcamp section ──────────────────────────────────────
+  // ── Bandcamp section — hidden entirely when the search finds nothing
   const bcData=bcCacheMap[node.id];
-  if(bcData){
+  if(bcData&&(bcData.loading||bcData.tracks.length)){
     const bcSec=d('bc-section',{});
     const hdr=d('bc-hdr',{});
     hdr.appendChild(el('p',{cls:'sec-lbl'},'BANDCAMP'));
@@ -2061,7 +2061,7 @@ function buildContent(){
     if(bcData.loading){
       const ld=d('bc-loading',{});ld.appendChild(d('bc-spin',{}));ld.appendChild(document.createTextNode(' Searching Bandcamp…'));
       bcSec.appendChild(ld);
-    }else if(bcData.tracks.length){
+    }else{
       bcData.tracks.forEach(t=>{
         const row=d('bc-track',{});
         if(t.thumb)row.appendChild(el('img',{cls:'bc-thumb',src:t.thumb,alt:'',loading:'lazy'}));
@@ -2074,8 +2074,6 @@ function buildContent(){
         if(t.url)row.appendChild(el('a',{cls:'bc-link',href:t.url,target:'_blank',rel:'noreferrer'},'Listen ↗'));
         bcSec.appendChild(row);
       });
-    }else{
-      bcSec.appendChild(s('bc-loading',bcData.err?'Bandcamp unavailable':'No results on Bandcamp.'));
     }
     panel.appendChild(bcSec);
   }
