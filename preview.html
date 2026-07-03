@@ -708,6 +708,77 @@ async function linkLibrary(onProgress){
   return{count:owned.length,scannedAt,filesFound:audioFiles.length,persisted,stats};
 }
 
+// Local music folder scan UI — shown in the Sync Libraries modal
+function buildLocalLibrarySection(){
+  const libMeta=wtSession?.user.user_metadata;
+  const libCount=st.ownedTracks.length||libMeta?.library_track_count||0;
+  const libScanned=libMeta?.library_scanned_at;
+  const libScannedStr=libScanned?new Date(libScanned).toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'numeric'}):null;
+  const libRow=d('st-row',{style:{flexWrap:'wrap',gap:'8px'}});
+  const libLeft=d('',{style:{flex:'1',minWidth:'0'}});
+  libLeft.appendChild(s('st-lbl','Music folder'));
+  const libSubEl=s('st-sub',libScannedStr?`Last scanned: ${libScannedStr} · ${libCount} tracks`:'No folder linked yet');
+  libLeft.appendChild(libSubEl);
+  libRow.appendChild(libLeft);
+  const scanBtn=b('btn-sec',{},libScannedStr?'Rescan':'Link folder');
+  const scanMsg=el('p',{style:{flexBasis:'100%',fontSize:'12px',margin:'2px 0 0',minHeight:'0',display:'none'}});
+  const scanRep=d('',{style:{flexBasis:'100%',maxHeight:'200px',overflowY:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'4px 10px',fontSize:'11px',display:'none'}});
+  scanBtn.addEventListener('click',async()=>{
+    if(!('webkitdirectory' in document.createElement('input'))){
+      scanMsg.style.display='block';scanMsg.style.color='#F47B5E';
+      scanMsg.textContent='Folder scanning requires a desktop browser (Chrome, Edge, Safari or Firefox).';return;
+    }
+    scanBtn.disabled=true;scanBtn.textContent='Scanning…';
+    scanRep.style.display='none';scanRep.innerHTML='';
+    scanMsg.style.display='block';scanMsg.style.color='var(--text-m)';
+    scanMsg.textContent='Choose your music folder. If the browser asks to "upload" the files, confirm — everything is read locally, nothing leaves your computer.';
+    try{
+      const result=await linkLibrary((done,total)=>{
+        scanMsg.textContent=total===0
+          ?(done>0?`Collecting files… ${done} found`:'Collecting files…')
+          :`Parsing ${done} / ${total}…`;
+      });
+      if(result===null){
+        scanBtn.disabled=false;scanBtn.textContent=libScannedStr?'Rescan':'Link folder';
+        scanMsg.style.display='none';return;
+      }
+      scanMsg.style.color='var(--accent)';
+      let doneMsg=`Done — ${result.count} tracks indexed. Scanned ${result.stats.dirs} folders: ${result.filesFound} audio files`;
+      if(result.stats.otherFiles>0){
+        const top=Object.entries(result.stats.extCounts).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([e,c])=>`${c} ${e}`).join(', ');
+        doneMsg+=`, ${result.stats.otherFiles} other files skipped (${top})`;
+      }
+      if(result.stats.junkFiles>0)doneMsg+=`, ${result.stats.junkFiles} hidden system files ignored`;
+      doneMsg+='.';
+      if(result.stats.skippedDirs>0)doneMsg+=` ⚠ ${result.stats.skippedDirs} folder${result.stats.skippedDirs!==1?'s':''} could not be fully read — rescan may find more.`;
+      const archives=(result.stats.extCounts['.zip']||0)+(result.stats.extCounts['.rar']||0)+(result.stats.extCounts['.7z']||0);
+      if(archives>0)doneMsg+=` Tip: ${archives} compressed archive${archives!==1?'s':''} skipped — extract them to index those tracks too.`;
+      scanMsg.textContent=doneMsg;
+      // Per-folder breakdown so undercounts can be compared against Finder
+      result.stats.folders.slice().sort((a,b)=>b.audio-a.audio).forEach(f=>{
+        const row=d('',{style:{display:'flex',justifyContent:'space-between',gap:'10px',padding:'3px 0',borderBottom:'1px solid var(--border)'}});
+        row.appendChild(s('',f.path));
+        row.firstChild.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-m)';
+        const cnt=s('',f.audio+' audio'+(f.subdirs?` · ${f.subdirs} sub`:'')+(f.other?` · ${f.other} other`:''));
+        cnt.style.cssText='flex-shrink:0;color:var(--text-f)';
+        row.appendChild(cnt);
+        scanRep.appendChild(row);
+      });
+      if(scanRep.lastChild)scanRep.lastChild.style.borderBottom='none';
+      scanRep.style.display='block';
+      libSubEl.textContent=`Last scanned: just now · ${result.count} tracks`;
+      scanBtn.disabled=false;scanBtn.textContent='Rescan';
+    }catch(e){
+      scanMsg.style.color='#F47B5E';scanMsg.textContent=e.message;
+      scanBtn.disabled=false;scanBtn.textContent=libScannedStr?'Rescan':'Link folder';
+    }
+  });
+  libRow.appendChild(scanBtn);
+  libRow.appendChild(scanMsg);
+  libRow.appendChild(scanRep);
+  return libRow;
+}
+
 // ── Auth ───────────────────────────────────────────────────
 const {createClient}=window.supabase;
 const sb=createClient('https://asmnqlqvlpcwcaaughuu.supabase.co','sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ');
@@ -2039,7 +2110,7 @@ function buildApp(){
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.settingsModal=true;rr();}},'My Settings'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.likesModal=true;rr();}},'My Likes'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.followsModal=true;rr();}},'My Follows'));
-        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.discogsModal=true;rr();}},'Discogs Collection'+(st.discogsCollSyncedAt?' ✓':'')));
+        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.discogsModal=true;rr();}},'Sync Libraries'+((st.discogsCollSyncedAt||st.ownedTracks.length)?' ✓':'')));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.historyModal=true;rr();}},'History'));
         menu.appendChild(d('profile-sep',{}));
         menu.appendChild(b('profile-item danger',{onClick:async()=>{
@@ -2344,10 +2415,17 @@ function buildApp(){
     const overlay=d('overlay',{onClick:()=>{if(!st.discogsSyncing){st.discogsModal=false;rr();}}});
     const modal=d('modal daq-modal',{onClick:e=>e.stopPropagation()});
     modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'4px'}},
-      el('h2',{cls:'modal-title'},'🎵 Discogs Collection'),
+      el('h2',{cls:'modal-title'},'🔄 Sync Libraries'),
       b('btn-sec',{onClick:()=>{if(!st.discogsSyncing){st.discogsModal=false;rr();}}}, '×')
     ));
+    modal.appendChild(el('p',{cls:'modal-sub'},'Connect your music sources — matching tracks get tagged while you dig.'));
 
+    // ── Local music folder
+    modal.appendChild(s('st-section','💾 Local Music Folder'));
+    modal.appendChild(buildLocalLibrarySection());
+
+    // ── Discogs
+    modal.appendChild(s('st-section','🎵 Discogs Collection'));
     if(!st.discogsUser){
       // Not connected — OAuth connect button
       modal.appendChild(el('p',{cls:'modal-sub'},'Connect your Discogs account to sync your collection and wantlist. You\'ll log in on Discogs.'));
@@ -2531,75 +2609,7 @@ function buildApp(){
     });
     body.appendChild(pwRow);
 
-    // ── Library
-    body.appendChild(s('st-section','Local Library'));
-    const libMeta=wtSession?.user.user_metadata;
-    const libCount=st.ownedTracks.length||libMeta?.library_track_count||0;
-    const libScanned=libMeta?.library_scanned_at;
-    const libScannedStr=libScanned?new Date(libScanned).toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'numeric'}):null;
-    const libRow=d('st-row',{style:{flexWrap:'wrap',gap:'8px'}});
-    const libLeft=d('',{style:{flex:'1',minWidth:'0'}});
-    libLeft.appendChild(s('st-lbl','Music folder'));
-    const libSubEl=s('st-sub',libScannedStr?`Last scanned: ${libScannedStr} · ${libCount} tracks`:'No folder linked yet');
-    libLeft.appendChild(libSubEl);
-    libRow.appendChild(libLeft);
-    const scanBtn=b('btn-sec',{},libScannedStr?'Rescan':'Link folder');
-    const scanMsg=el('p',{style:{flexBasis:'100%',fontSize:'12px',margin:'2px 0 0',minHeight:'0',display:'none'}});
-    const scanRep=d('',{style:{flexBasis:'100%',maxHeight:'200px',overflowY:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'4px 10px',fontSize:'11px',display:'none'}});
-    scanBtn.addEventListener('click',async()=>{
-      if(!('webkitdirectory' in document.createElement('input'))){
-        scanMsg.style.display='block';scanMsg.style.color='#F47B5E';
-        scanMsg.textContent='Folder scanning requires a desktop browser (Chrome, Edge, Safari or Firefox).';return;
-      }
-      scanBtn.disabled=true;scanBtn.textContent='Scanning…';
-      scanRep.style.display='none';scanRep.innerHTML='';
-      scanMsg.style.display='block';scanMsg.style.color='var(--text-m)';
-      scanMsg.textContent='Choose your music folder. If the browser asks to "upload" the files, confirm — everything is read locally, nothing leaves your computer.';
-      try{
-        const result=await linkLibrary((done,total)=>{
-          scanMsg.textContent=total===0
-            ?(done>0?`Collecting files… ${done} found`:'Collecting files…')
-            :`Parsing ${done} / ${total}…`;
-        });
-        if(result===null){
-          scanBtn.disabled=false;scanBtn.textContent=libScannedStr?'Rescan':'Link folder';
-          scanMsg.style.display='none';return;
-        }
-        scanMsg.style.color='var(--accent)';
-        let doneMsg=`Done — ${result.count} tracks indexed. Scanned ${result.stats.dirs} folders: ${result.filesFound} audio files`;
-        if(result.stats.otherFiles>0){
-          const top=Object.entries(result.stats.extCounts).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([e,c])=>`${c} ${e}`).join(', ');
-          doneMsg+=`, ${result.stats.otherFiles} other files skipped (${top})`;
-        }
-        if(result.stats.junkFiles>0)doneMsg+=`, ${result.stats.junkFiles} hidden system files ignored`;
-        doneMsg+='.';
-        if(result.stats.skippedDirs>0)doneMsg+=` ⚠ ${result.stats.skippedDirs} folder${result.stats.skippedDirs!==1?'s':''} could not be fully read — rescan may find more.`;
-        const archives=(result.stats.extCounts['.zip']||0)+(result.stats.extCounts['.rar']||0)+(result.stats.extCounts['.7z']||0);
-        if(archives>0)doneMsg+=` Tip: ${archives} compressed archive${archives!==1?'s':''} skipped — extract them to index those tracks too.`;
-        scanMsg.textContent=doneMsg;
-        // Per-folder breakdown so undercounts can be compared against Finder
-        result.stats.folders.slice().sort((a,b)=>b.audio-a.audio).forEach(f=>{
-          const row=d('',{style:{display:'flex',justifyContent:'space-between',gap:'10px',padding:'3px 0',borderBottom:'1px solid var(--border)'}});
-          row.appendChild(s('',f.path));
-          row.firstChild.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-m)';
-          const cnt=s('',f.audio+' audio'+(f.subdirs?` · ${f.subdirs} sub`:'')+(f.other?` · ${f.other} other`:''));
-          cnt.style.cssText='flex-shrink:0;color:var(--text-f)';
-          row.appendChild(cnt);
-          scanRep.appendChild(row);
-        });
-        if(scanRep.lastChild)scanRep.lastChild.style.borderBottom='none';
-        scanRep.style.display='block';
-        libSubEl.textContent=`Last scanned: just now · ${result.count} tracks`;
-        scanBtn.disabled=false;scanBtn.textContent='Rescan';
-      }catch(e){
-        scanMsg.style.color='#F47B5E';scanMsg.textContent=e.message;
-        scanBtn.disabled=false;scanBtn.textContent=libScannedStr?'Rescan':'Link folder';
-      }
-    });
-    libRow.appendChild(scanBtn);
-    libRow.appendChild(scanMsg);
-    libRow.appendChild(scanRep);
-    body.appendChild(libRow);
+    // Library scan moved to the Sync Libraries modal (buildLocalLibrarySection)
 
     // ── Data
     body.appendChild(s('st-section','Data'));
