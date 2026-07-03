@@ -986,10 +986,42 @@ function showYtFallback(msg,np){
   host.appendChild(fb);
 }
 function killYt(){if(ytBadgeTimerId){clearTimeout(ytBadgeTimerId);ytBadgeTimerId=null;}if(ytPollId){clearInterval(ytPollId);ytPollId=null;}if(ytPlayer){ytPlayer.destroy();ytPlayer=null;}}
+// YouTube search fallback for tracks with no video in their Discogs data
+const ytSearchCache={}; // normalized "artist title" → videoId | null (searched, not found)
+async function searchYtVideo(artistName,title){
+  const key=normalizeStr(artistName+' '+title);
+  if(ytSearchCache[key]!==undefined)return ytSearchCache[key];
+  try{
+    const r=await fetch('/api/yt-search?q='+encodeURIComponent(artistName+' '+title));
+    const j=await r.json();
+    const list=j.results||[];
+    const tn=normalizeStr(title);
+    const best=list.find(v=>{const vn=normalizeStr(v.title||'');return tn&&(vn.includes(tn)||tn.includes(vn));})||list[0]||null;
+    ytSearchCache[key]=best?best.id:null;
+  }catch{ytSearchCache[key]=null;}
+  return ytSearchCache[key];
+}
 function doPlay(trackId,videoId,title,artistName){
   killYt();
   const w=document.getElementById('yt-wrap');if(w)w.remove();
-  st.nowPlaying={trackId,videoId,title,artistName};rr();
+  st.nowPlaying={trackId,videoId,title,artistName};
+  if(!videoId){
+    const key=normalizeStr(artistName+' '+title);
+    if(ytSearchCache[key]!==undefined){
+      st.nowPlaying.videoId=ytSearchCache[key];st.nowPlaying.ytSearched=true;
+    }else{
+      st.nowPlaying.ytSearching=true;
+      searchYtVideo(artistName,title).then(id=>{
+        const np=st.nowPlaying;
+        if(!np||np.trackId!==trackId)return; // user moved on
+        np.ytSearching=false;np.ytSearched=true;np.videoId=id;
+        if(id){const tr=findTrack(trackId);if(tr&&!tr.videoId)tr.videoId=id;}
+        const w2=document.getElementById('yt-wrap');if(w2)w2.remove();
+        rr();
+      });
+    }
+  }
+  rr();
 }
 function stopPlay(){
   killYt();
@@ -1055,11 +1087,11 @@ function syncYtPlayer(){
     ytHost.appendChild(wrap);loadYtApi();setTimeout(()=>{if(window.YT?.Player)createYtPlayer();},120);
   } else {
     const isNoEmbed=noEmbedIds.has(np.videoId);
-    const msg=isNoEmbed?'Embedding disabled by owner':np.videoId?'Video unavailable':'No video in Discogs data';
+    const msg=isNoEmbed?'Embedding disabled by owner':np.videoId?'Video unavailable':np.ytSearching?'Searching on YouTube…':'Not found on YouTube';
     const url=isNoEmbed?`https://www.youtube.com/watch?v=${np.videoId}`:`https://www.youtube.com/results?search_query=${q}`;
     const linkTxt=isNoEmbed?'Watch on YouTube ↗':'Search on YouTube ↗';
     const fb=document.createElement('div');fb.className='yt-fallback';
-    fb.innerHTML=`<p>${msg}</p><a href="${url}" target="_blank" rel="noreferrer">${linkTxt}</a>`;
+    fb.innerHTML=`<p>${msg}</p>`+(np.ytSearching?'':`<a href="${url}" target="_blank" rel="noreferrer">${linkTxt}</a>`);
     wrap.appendChild(fb);ytHost.appendChild(wrap);
   }
   positionYtHost();
@@ -1658,7 +1690,7 @@ function trackCard(track,parentNodeId,displayArtist){
   const owned=isOwned(track.title,displayArtist);
   const videoOk=track.videoId&&!invalidYtIds.has(track.videoId);
   const playBtn=b('t-play'+(videoOk?' has-video':''),{
-    title:videoOk?'Play':'Search on YouTube',
+    title:videoOk?'Play':'Play (via YouTube search)',
     onClick:()=>doPlay(track.id,track.videoId,track.title,displayArtist)
   },'▶');
 
