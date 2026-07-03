@@ -528,30 +528,35 @@ async function extractMetadata(file,mm){
 }
 
 // Phase 1: walk the tree and collect file handles — no audio parsing, just names
-async function collectAudioFiles(dirHandle,collected=[],stats=null,onFound=null){
-  stats=stats||{skippedDirs:0,dirs:0,otherFiles:0,extCounts:{}};
+async function collectAudioFiles(dirHandle,collected=[],stats=null,onFound=null,path=''){
+  stats=stats||{skippedDirs:0,dirs:0,otherFiles:0,junkFiles:0,extCounts:{},folders:[]};
   stats.dirs++;
+  const myPath=path?path+'/'+dirHandle.name:dirHandle.name;
+  const mine={path:myPath,audio:0,junk:0,other:0,subdirs:0};
+  stats.folders.push(mine);
   let entries=[];
   for(let attempt=0;;attempt++){
     entries=[];
     try{for await(const e of dirHandle.values())entries.push(e);break;}
     catch(err){
-      if(attempt>=1){stats.skippedDirs++;console.warn('WaxTree scan: folder "'+dirHandle.name+'" only partially read:',err);break;}
+      if(attempt>=1){stats.skippedDirs++;console.warn('WaxTree scan: folder "'+myPath+'" only partially read:',err);break;}
       await new Promise(r=>setTimeout(r,400)); // external drive hiccup — retry once
     }
   }
   for(const entry of entries){
-    if(entry.name.startsWith('._')||entry.name==='.DS_Store')continue; // macOS junk on external drives
+    if(entry.name.startsWith('._')||entry.name==='.DS_Store'){stats.junkFiles++;mine.junk++;continue;} // macOS junk on external drives
     if(entry.kind==='directory'){
-      try{await collectAudioFiles(entry,collected,stats,onFound);}
+      mine.subdirs++;
+      try{await collectAudioFiles(entry,collected,stats,onFound,myPath);}
       catch(err){stats.skippedDirs++;console.warn('WaxTree scan: skipped folder "'+entry.name+'":',err);}
     }else if(entry.kind==='file'){
       const lower=entry.name.toLowerCase();
       if(AUDIO_EXT.some(ext=>lower.endsWith(ext))){
         collected.push(entry);
+        mine.audio++;
         if(collected.length%200===0)onFound?.(collected.length);
       }else{
-        stats.otherFiles++;
+        stats.otherFiles++;mine.other++;
         const m=lower.match(/\.([a-z0-9]{1,5})$/);
         const ext=m?'.'+m[1]:'(no ext)';
         stats.extCounts[ext]=(stats.extCounts[ext]||0)+1;
@@ -684,9 +689,10 @@ async function linkLibrary(onProgress){
   try{dirHandle=await window.showDirectoryPicker({mode:'read'});}
   catch(e){if(e.name==='AbortError')return null;throw e;}
   onProgress?.(0,0); // signal: collection phase
-  const stats={skippedDirs:0,dirs:0,otherFiles:0,extCounts:{}};
+  const stats={skippedDirs:0,dirs:0,otherFiles:0,junkFiles:0,extCounts:{},folders:[]};
   const handles=await collectAudioFiles(dirHandle,[],stats,found=>onProgress?.(found,0));
-  console.log('WaxTree scan report:',{audioFiles:handles.length,foldersScanned:stats.dirs,foldersSkipped:stats.skippedDirs,nonAudioFiles:stats.otherFiles,byExtension:stats.extCounts});
+  console.log('WaxTree scan report:',{audioFiles:handles.length,foldersScanned:stats.dirs,foldersSkipped:stats.skippedDirs,nonAudioFiles:stats.otherFiles,hiddenJunkFiles:stats.junkFiles,byExtension:stats.extCounts});
+  console.table(stats.folders);
   const owned=await extractAllMetadata(handles,onProgress);
   const scannedAt=new Date().toISOString();
   st.ownedTracks=owned;
@@ -2536,12 +2542,14 @@ function buildApp(){
     libRow.appendChild(libLeft);
     const scanBtn=b('btn-sec',{},libScannedStr?'Rescan':'Link folder');
     const scanMsg=el('p',{style:{flexBasis:'100%',fontSize:'12px',margin:'2px 0 0',minHeight:'0',display:'none'}});
+    const scanRep=d('',{style:{flexBasis:'100%',maxHeight:'200px',overflowY:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'4px 10px',fontSize:'11px',display:'none'}});
     scanBtn.addEventListener('click',async()=>{
       if(!('showDirectoryPicker' in window)){
         scanMsg.style.display='block';scanMsg.style.color='#F47B5E';
         scanMsg.textContent='Folder linking requires Chrome or Edge.';return;
       }
       scanBtn.disabled=true;scanBtn.textContent='Scanning…';
+      scanRep.style.display='none';scanRep.innerHTML='';
       scanMsg.style.display='block';scanMsg.style.color='var(--text-m)';scanMsg.textContent='Opening folder…';
       try{
         const result=await linkLibrary((done,total)=>{
@@ -2559,9 +2567,22 @@ function buildApp(){
           const top=Object.entries(result.stats.extCounts).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([e,c])=>`${c} ${e}`).join(', ');
           doneMsg+=`, ${result.stats.otherFiles} other files skipped (${top})`;
         }
+        if(result.stats.junkFiles>0)doneMsg+=`, ${result.stats.junkFiles} hidden system files ignored`;
         doneMsg+='.';
         if(result.stats.skippedDirs>0)doneMsg+=` ⚠ ${result.stats.skippedDirs} folder${result.stats.skippedDirs!==1?'s':''} could not be fully read — rescan may find more.`;
         scanMsg.textContent=doneMsg;
+        // Per-folder breakdown so undercounts can be compared against Finder
+        result.stats.folders.slice().sort((a,b)=>b.audio-a.audio).forEach(f=>{
+          const row=d('',{style:{display:'flex',justifyContent:'space-between',gap:'10px',padding:'3px 0',borderBottom:'1px solid var(--border)'}});
+          row.appendChild(s('',f.path));
+          row.firstChild.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-m)';
+          const cnt=s('',f.audio+' audio'+(f.subdirs?` · ${f.subdirs} sub`:'')+(f.other?` · ${f.other} other`:''));
+          cnt.style.cssText='flex-shrink:0;color:var(--text-f)';
+          row.appendChild(cnt);
+          scanRep.appendChild(row);
+        });
+        if(scanRep.lastChild)scanRep.lastChild.style.borderBottom='none';
+        scanRep.style.display='block';
         libSubEl.textContent=`Last scanned: just now · ${result.count} tracks`;
         scanBtn.disabled=false;scanBtn.textContent='Rescan';
       }catch(e){
@@ -2571,6 +2592,7 @@ function buildApp(){
     });
     libRow.appendChild(scanBtn);
     libRow.appendChild(scanMsg);
+    libRow.appendChild(scanRep);
     body.appendChild(libRow);
 
     // ── Data
