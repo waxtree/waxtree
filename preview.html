@@ -307,6 +307,7 @@ input,select{font:inherit;color:inherit}
 .pl-new-row{display:flex;gap:8px;margin:8px 0 16px}
 .pl-new-input{flex:1;padding:7px 12px;border-radius:8px;background:var(--bg-e);border:1.5px solid var(--border);color:var(--text);font-size:13px;font-family:inherit;outline:none}
 .pl-new-input:focus{border-color:var(--accent)}
+.pl-rename-input{background:none;border:none;border-bottom:1.5px solid var(--accent);outline:none;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text);font-family:inherit;width:120px;padding:0 2px}
 
 /* Empty / err */
 .empty-panel{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;padding:40px;text-align:center}
@@ -704,7 +705,7 @@ const st={
   nowPlaying:null,
   dasAscoltare:saved?.dasAscoltare||[],
   playlists:saved?.playlists||[],
-  playlistDropId:null,playlistsModal:false,
+  playlistDropId:null,playlistsModal:false,plRenameId:null,plRenameVal:'',
   profileOpen:false,
   likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,discogsModal:false,discogsSyncing:false,
   follows:saved?.follows||[],
@@ -2119,9 +2120,20 @@ function buildApp(){
     st.playlists.forEach(pl=>{
       const sec=d('',{style:{marginBottom:'14px'}});
       const phd=d('pl-section-hd',{});
-      phd.appendChild(document.createTextNode(pl.name));
+      const commitRename=()=>{const v=st.plRenameVal.trim();if(v){pl.name=v;}st.plRenameId=null;rr();};
+      if(st.plRenameId===pl.id){
+        const inp=el('input',{cls:'pl-rename-input',value:st.plRenameVal,
+          onInput:e=>{st.plRenameVal=e.target.value;},
+          onKeydown:e=>{if(e.key==='Enter'){e.preventDefault();commitRename();}if(e.key==='Escape'){st.plRenameId=null;rr();}e.stopPropagation();},
+          onBlur:commitRename,onClick:e=>e.stopPropagation()});
+        phd.appendChild(inp);
+        requestAnimationFrame(()=>inp.select());
+      } else {
+        phd.appendChild(document.createTextNode(pl.name));
+      }
       const pRight=d('pl-section-cnt',{});
       pRight.appendChild(document.createTextNode(pl.tracks.length+' tracks'));
+      pRight.appendChild(b('btn-sec',{style:{fontSize:'11px',padding:'2px 8px'},onClick:()=>{st.plRenameId=pl.id;st.plRenameVal=pl.name;rr();}},'Rename'));
       pRight.appendChild(b('btn-sec',{style:{fontSize:'11px',padding:'2px 8px'},onClick:()=>{if(confirm(`Delete "${pl.name}"?`)){st.playlists=st.playlists.filter(p=>p.id!==pl.id);rr();}}},'Delete'));
       phd.appendChild(pRight);
       sec.appendChild(phd);
