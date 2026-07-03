@@ -493,12 +493,13 @@ function incrementSearch(){
 }
 
 // ── Local Library ──────────────────────────────────────────
-const AUDIO_EXT=['.mp3','.flac','.aiff','.aif','.wav','.m4a','.ogg'];
+const AUDIO_EXT=['.mp3','.flac','.aiff','.aif','.aifc','.wav','.m4a','.aac','.ogg','.opus','.wma'];
 const BATCH_SIZE=50;
 
 function normalizeStr(str){
   return (str||'').toLowerCase()
-    .replace(/[^a-z0-9\s]/g,'')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^\p{L}\p{N}\s]/gu,'')
     .replace(/\b(original mix|remix|edit|remaster|remastered|ep|lp|feat|ft)\b/g,'')
     .replace(/\s+/g,' ')
     .trim();
@@ -527,15 +528,20 @@ async function extractMetadata(file,mm){
 }
 
 // Phase 1: walk the tree and collect file handles — no audio parsing, just names
-async function collectAudioFiles(dirHandle,collected=[]){
+async function collectAudioFiles(dirHandle,collected=[],stats={skippedDirs:0},onFound=null){
   const entries=[];
-  try{for await(const e of dirHandle.values())entries.push(e);}catch{}
+  try{for await(const e of dirHandle.values())entries.push(e);}
+  catch(e){stats.skippedDirs++;console.warn('WaxTree scan: could not fully read folder "'+dirHandle.name+'":',e);}
   for(const entry of entries){
+    if(entry.name.startsWith('._'))continue; // macOS AppleDouble junk on external drives
     if(entry.kind==='directory'){
-      try{await collectAudioFiles(entry,collected);}catch{}
+      try{await collectAudioFiles(entry,collected,stats,onFound);}
+      catch(e){stats.skippedDirs++;console.warn('WaxTree scan: skipped folder "'+entry.name+'":',e);}
     }else if(entry.kind==='file'){
-      if(AUDIO_EXT.some(ext=>entry.name.toLowerCase().endsWith(ext)))
+      if(AUDIO_EXT.some(ext=>entry.name.toLowerCase().endsWith(ext))){
         collected.push(entry);
+        if(collected.length%200===0)onFound?.(collected.length);
+      }
     }
   }
   return collected;
@@ -549,10 +555,17 @@ async function extractAllMetadata(handles,onProgress){
   for(let i=0;i<handles.length;i+=BATCH_SIZE){
     const batch=handles.slice(i,i+BATCH_SIZE);
     const batchOut=await Promise.all(batch.map(async h=>{
-      try{const f=await h.getFile();return await extractMetadata(f,mm);}
+      try{const f=await h.getFile();return await extractMetadata(f,mm)||parseFilename(h.name);}
       catch{return parseFilename(h.name);}
     }));
-    for(const t of batchOut)if(t?.titleNorm)results.push(t);
+    for(const t of batchOut){
+      if(t?.titleNorm)results.push(t);
+      else if(t?.filename){
+        // Normalization emptied the title (e.g. all-symbol name) — index raw filename so the track is never lost
+        const raw=t.filename.replace(/\.[^/.]+$/,'').toLowerCase().replace(/\s+/g,' ').trim();
+        if(raw)results.push({titleNorm:raw,artistNorm:'',filename:t.filename});
+      }
+    }
     onProgress?.(Math.min(i+BATCH_SIZE,handles.length),handles.length);
   }
   return results;
@@ -642,6 +655,14 @@ function isOwned(trackTitle,trackArtist){
   });
 }
 
+function saveOwnedTracks(list){
+  try{localStorage.setItem('wt-owned',JSON.stringify(list));return true;}
+  catch(e){console.warn('WaxTree: could not persist library index:',e);return false;}
+}
+function loadOwnedTracks(){
+  try{const r=localStorage.getItem('wt-owned');if(r)return JSON.parse(r);}catch{}
+  return null;
+}
 async function linkLibrary(onProgress){
   if(!('showDirectoryPicker' in window))
     throw new Error('Folder linking requires Chrome or Edge.');
@@ -649,12 +670,18 @@ async function linkLibrary(onProgress){
   try{dirHandle=await window.showDirectoryPicker({mode:'read'});}
   catch(e){if(e.name==='AbortError')return null;throw e;}
   onProgress?.(0,0); // signal: collection phase
-  const handles=await collectAudioFiles(dirHandle);
+  const stats={skippedDirs:0};
+  const handles=await collectAudioFiles(dirHandle,[],stats,found=>onProgress?.(found,0));
   const owned=await extractAllMetadata(handles,onProgress);
   const scannedAt=new Date().toISOString();
   st.ownedTracks=owned;
-  sb.auth.updateUser({data:{owned_tracks:owned,library_scanned_at:scannedAt,library_track_count:owned.length}});
-  return{count:owned.length,scannedAt};
+  // Persist locally — matching data lives in localStorage (drop filename to keep it small).
+  // Supabase user_metadata only gets the count: the full list bloats the JWT and the update
+  // fails silently on big libraries, which is what kept resurrecting stale partial scans.
+  const persisted=saveOwnedTracks(owned.map(o=>({titleNorm:o.titleNorm,artistNorm:o.artistNorm})));
+  try{await sb.auth.updateUser({data:{owned_tracks:null,library_scanned_at:scannedAt,library_track_count:owned.length}});}
+  catch(e){console.warn('WaxTree: could not update library metadata:',e);}
+  return{count:owned.length,scannedAt,filesFound:handles.length,skippedDirs:stats.skippedDirs,persisted};
 }
 
 // ── Auth ───────────────────────────────────────────────────
@@ -2483,7 +2510,7 @@ function buildApp(){
     // ── Library
     body.appendChild(s('st-section','Local Library'));
     const libMeta=wtSession?.user.user_metadata;
-    const libCount=libMeta?.library_track_count||0;
+    const libCount=st.ownedTracks.length||libMeta?.library_track_count||0;
     const libScanned=libMeta?.library_scanned_at;
     const libScannedStr=libScanned?new Date(libScanned).toLocaleDateString('en-US',{day:'2-digit',month:'short',year:'numeric'}):null;
     const libRow=d('st-row',{style:{flexWrap:'wrap',gap:'8px'}});
@@ -2503,14 +2530,18 @@ function buildApp(){
       scanMsg.style.display='block';scanMsg.style.color='var(--text-m)';scanMsg.textContent='Opening folder…';
       try{
         const result=await linkLibrary((done,total)=>{
-          scanMsg.textContent=total===0?'Collecting files…':`Parsing ${done} / ${total}…`;
+          scanMsg.textContent=total===0
+            ?(done>0?`Collecting files… ${done} found`:'Collecting files…')
+            :`Parsing ${done} / ${total}…`;
         });
         if(result===null){
           scanBtn.disabled=false;scanBtn.textContent=libScannedStr?'Rescan':'Link folder';
           scanMsg.style.display='none';return;
         }
         scanMsg.style.color='var(--accent)';
-        scanMsg.textContent=`Done — ${result.count} tracks indexed.`;
+        let doneMsg=`Done — ${result.count} tracks indexed (${result.filesFound} audio files found).`;
+        if(result.skippedDirs>0)doneMsg+=` Warning: ${result.skippedDirs} folder${result.skippedDirs>1?'s':''} could not be read — try rescanning.`;
+        scanMsg.textContent=doneMsg;
         libSubEl.textContent=`Last scanned: just now · ${result.count} tracks`;
         scanBtn.disabled=false;scanBtn.textContent='Rescan';
       }catch(e){
@@ -2565,7 +2596,7 @@ sb.auth.getSession().then(({data:{session}})=>{
   if(!session){window.location.href='login.html';return;}
   wtSession=session;
   st.searchCount=wtSession.user.user_metadata?.search_count||0;
-  st.ownedTracks=wtSession.user.user_metadata?.owned_tracks||[];
+  st.ownedTracks=loadOwnedTracks()||wtSession.user.user_metadata?.owned_tracks||[];
   st.isPremium=wtSession.user.user_metadata?.premium===true;
   paint();
   loadFollows();
