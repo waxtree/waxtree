@@ -777,7 +777,17 @@ function positionYtHost(){
 
 // ── YouTube ────────────────────────────────────────────────
 let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=null,ytPollId=null,ytBadgeTimerId=null,ytTitle='',ytArtist='';
-function tryBadge(){if(ytTid&&(ytAccSec>=3||ytSkips>=2)&&!st.listens[ytTid]?.badged){st.listens[ytTid]={badged:true};st.history.unshift({id:ytTid,title:ytTitle,artistName:ytArtist,ts:Date.now()});rr();}}
+function findTrack(id){for(const n of st.nodes){const t=n.data?.tracks?.find(t=>t.id===id);if(t)return t;}return null;}
+function tryBadge(){
+  if(ytTid&&(ytAccSec>=3||ytSkips>=2)&&!st.listens[ytTid]?.badged){
+    st.listens[ytTid]={badged:true};
+    const tr=findTrack(ytTid);
+    st.history.unshift({id:ytTid,title:ytTitle,artistName:ytArtist,ts:Date.now(),
+      thumbUrl:tr?.thumbUrl||null,videoId:st.nowPlaying?.videoId||null,
+      exploreId:tr?.exploreId||null,exploreType:tr?.exploreType||'artist',exploreName:tr?.exploreName||ytArtist});
+    rr();
+  }
+}
 const invalidYtIds=new Set();  // truly gone: player fired error 100/2/5
 const noEmbedIds=new Set();    // exists on YT but embedding disabled (101/150)
 
@@ -2206,13 +2216,26 @@ function buildApp(){
     if(!st.history.length){list.appendChild(d('daq-empty',{},'No tracks yet — listen to something for 3 seconds'));}
     else{
       const fmt=ts=>{const d=new Date(ts);return d.toLocaleDateString('en-US',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});};
+      const openHistEntry=entry=>{
+        const name=entry.exploreName||entry.artistName;
+        const existing=entry.exploreId
+          ?st.nodes.find(n=>n.discogsId===entry.exploreId)
+          :st.nodes.find(n=>n.name===name);
+        if(existing){selectNode(existing.id);}
+        else if(entry.exploreId){addNode(entry.exploreType||'artist',entry.exploreId,name,null,st.activeBranchId);}
+        else{st.q=name;doSearch();}
+        st.historyModal=false;rr();
+      };
       st.history.forEach(entry=>{
         const item=d('daq-item',{});
-        item.appendChild(d('daq-art-ph',{style:{fontSize:'18px'}},'✓'));
+        if(entry.thumbUrl)item.appendChild(el('img',{cls:'daq-art',src:entry.thumbUrl,alt:'',loading:'lazy'}));
+        else item.appendChild(d('daq-art-ph',{},'♫'));
         const info=d('daq-info',{});
         info.appendChild(s('daq-title',entry.title));
         info.appendChild(s('daq-meta',[entry.artistName,fmt(entry.ts)].filter(Boolean).join(' · ')));
         item.appendChild(info);
+        if(entry.videoId){const pb=b('daq-play has-video',{title:'Play',onClick:()=>{doPlay(entry.id,entry.videoId,entry.title,entry.artistName);st.historyModal=false;rr();}});pb.textContent='▶';item.appendChild(pb);}
+        item.appendChild(b('btn-sec',{style:{fontSize:'11px',padding:'2px 8px',flexShrink:'0'},onClick:()=>openHistEntry(entry)},'Open'));
         list.appendChild(item);
       });
       const clrRow=d('modal-row',{style:{marginTop:'10px'}});
