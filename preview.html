@@ -528,19 +528,33 @@ async function extractMetadata(file,mm){
 }
 
 // Phase 1: walk the tree and collect file handles — no audio parsing, just names
-async function collectAudioFiles(dirHandle,collected=[],stats={skippedDirs:0},onFound=null){
-  const entries=[];
-  try{for await(const e of dirHandle.values())entries.push(e);}
-  catch(e){stats.skippedDirs++;console.warn('WaxTree scan: could not fully read folder "'+dirHandle.name+'":',e);}
+async function collectAudioFiles(dirHandle,collected=[],stats=null,onFound=null){
+  stats=stats||{skippedDirs:0,dirs:0,otherFiles:0,extCounts:{}};
+  stats.dirs++;
+  let entries=[];
+  for(let attempt=0;;attempt++){
+    entries=[];
+    try{for await(const e of dirHandle.values())entries.push(e);break;}
+    catch(err){
+      if(attempt>=1){stats.skippedDirs++;console.warn('WaxTree scan: folder "'+dirHandle.name+'" only partially read:',err);break;}
+      await new Promise(r=>setTimeout(r,400)); // external drive hiccup — retry once
+    }
+  }
   for(const entry of entries){
-    if(entry.name.startsWith('._'))continue; // macOS AppleDouble junk on external drives
+    if(entry.name.startsWith('._')||entry.name==='.DS_Store')continue; // macOS junk on external drives
     if(entry.kind==='directory'){
       try{await collectAudioFiles(entry,collected,stats,onFound);}
-      catch(e){stats.skippedDirs++;console.warn('WaxTree scan: skipped folder "'+entry.name+'":',e);}
+      catch(err){stats.skippedDirs++;console.warn('WaxTree scan: skipped folder "'+entry.name+'":',err);}
     }else if(entry.kind==='file'){
-      if(AUDIO_EXT.some(ext=>entry.name.toLowerCase().endsWith(ext))){
+      const lower=entry.name.toLowerCase();
+      if(AUDIO_EXT.some(ext=>lower.endsWith(ext))){
         collected.push(entry);
         if(collected.length%200===0)onFound?.(collected.length);
+      }else{
+        stats.otherFiles++;
+        const m=lower.match(/\.([a-z0-9]{1,5})$/);
+        const ext=m?'.'+m[1]:'(no ext)';
+        stats.extCounts[ext]=(stats.extCounts[ext]||0)+1;
       }
     }
   }
@@ -670,8 +684,9 @@ async function linkLibrary(onProgress){
   try{dirHandle=await window.showDirectoryPicker({mode:'read'});}
   catch(e){if(e.name==='AbortError')return null;throw e;}
   onProgress?.(0,0); // signal: collection phase
-  const stats={skippedDirs:0};
+  const stats={skippedDirs:0,dirs:0,otherFiles:0,extCounts:{}};
   const handles=await collectAudioFiles(dirHandle,[],stats,found=>onProgress?.(found,0));
+  console.log('WaxTree scan report:',{audioFiles:handles.length,foldersScanned:stats.dirs,foldersSkipped:stats.skippedDirs,nonAudioFiles:stats.otherFiles,byExtension:stats.extCounts});
   const owned=await extractAllMetadata(handles,onProgress);
   const scannedAt=new Date().toISOString();
   st.ownedTracks=owned;
@@ -681,7 +696,7 @@ async function linkLibrary(onProgress){
   const persisted=saveOwnedTracks(owned.map(o=>({titleNorm:o.titleNorm,artistNorm:o.artistNorm})));
   try{await sb.auth.updateUser({data:{owned_tracks:null,library_scanned_at:scannedAt,library_track_count:owned.length}});}
   catch(e){console.warn('WaxTree: could not update library metadata:',e);}
-  return{count:owned.length,scannedAt,filesFound:handles.length,skippedDirs:stats.skippedDirs,persisted};
+  return{count:owned.length,scannedAt,filesFound:handles.length,persisted,stats};
 }
 
 // ── Auth ───────────────────────────────────────────────────
@@ -2539,8 +2554,13 @@ function buildApp(){
           scanMsg.style.display='none';return;
         }
         scanMsg.style.color='var(--accent)';
-        let doneMsg=`Done — ${result.count} tracks indexed (${result.filesFound} audio files found).`;
-        if(result.skippedDirs>0)doneMsg+=` Warning: ${result.skippedDirs} folder${result.skippedDirs>1?'s':''} could not be read — try rescanning.`;
+        let doneMsg=`Done — ${result.count} tracks indexed. Scanned ${result.stats.dirs} folders: ${result.filesFound} audio files`;
+        if(result.stats.otherFiles>0){
+          const top=Object.entries(result.stats.extCounts).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([e,c])=>`${c} ${e}`).join(', ');
+          doneMsg+=`, ${result.stats.otherFiles} other files skipped (${top})`;
+        }
+        doneMsg+='.';
+        if(result.stats.skippedDirs>0)doneMsg+=` ⚠ ${result.stats.skippedDirs} folder${result.stats.skippedDirs!==1?'s':''} could not be fully read — rescan may find more.`;
         scanMsg.textContent=doneMsg;
         libSubEl.textContent=`Last scanned: just now · ${result.count} tracks`;
         scanBtn.disabled=false;scanBtn.textContent='Rescan';
