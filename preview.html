@@ -991,24 +991,35 @@ function killYt(){if(ytBadgeTimerId){clearTimeout(ytBadgeTimerId);ytBadgeTimerId
 // track (title match + artist in title or channel + plausible duration).
 // No confident match → null → "Not found on YouTube", never a random video.
 const ytSearchCache={}; // normalized "artist title" → videoId | null (searched, not found)
+// Whole-phrase containment: "skull" must NOT match inside "skullcandy".
+// Both strings are already normalizeStr()'d (letters/digits/spaces only),
+// so needle can never contain regex metacharacters.
+function phraseIn(haystack,needle){
+  if(!needle)return false;
+  return new RegExp('(^|\\s)'+needle+'(\\s|$)').test(haystack);
+}
 function pickYtMatch(list,artistName,title,trackSec){
   const tn=normalizeStr(title),an=normalizeStr(artistName||'');
   if(!tn)return null;
-  let best=null,bestScore=0;
   for(const v of list){
     const vn=normalizeStr(v.title||''),cn=normalizeStr(v.channel||'');
-    if(!vn.includes(tn))continue; // full track title must appear in the video title
-    const artistOk=!an||vn.includes(an)||(cn&&(cn.includes(an)||an.includes(cn)));
+    if(!phraseIn(vn,tn))continue; // track title must appear as a whole phrase in the video title
+    const artistOk=!an||phraseIn(vn,an)||(cn&&(cn.includes(an)||an.includes(cn)));
     if(!artistOk)continue; // artist must appear in title or match the channel
     const vSec=parseDur(v.length||'');
-    let score=1;
-    if(vSec&&vSec>1200)continue; // >20min = DJ set / stream, never the track
-    if(trackSec&&vSec){
-      if(Math.abs(vSec-trackSec)<=Math.max(25,trackSec*0.1))score=3; // duration confirms it
+    if(vSec>1200)continue; // long-form: DJ set / stream / mix — never the track itself
+    if(trackSec){
+      // Discogs gives a duration for virtually every track — when it does,
+      // require the video length to confirm it. Title+artist alone is NOT
+      // enough: reups, alternate versions and same-artist wrong tracks all
+      // pass that check, which is exactly what was producing unrelated hits.
+      if(!vSec||Math.abs(vSec-trackSec)>Math.max(20,trackSec*0.08))continue;
+    }else if(vn!==tn){
+      continue; // no duration to verify against — require an exact title match instead
     }
-    if(score>bestScore){best=v;bestScore=score;}
+    return v; // results are already YouTube-relevance-ordered; first survivor wins
   }
-  return best;
+  return null;
 }
 async function searchYtVideo(artistName,title,trackSec){
   const key=normalizeStr(artistName+' '+title);
