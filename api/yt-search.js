@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       const id = (c.match(/^\{"videoId":"([\w-]{11})"/) || [])[1]
       if (!id) continue
       const title = (c.match(/"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"/) || [])[1]
-      const length = (c.match(/"lengthText":\{[^{}]*"simpleText":"([\d:]+)"/) || [])[1] || ''
+      const length = (c.match(/"lengthText":\{[\s\S]{0,300}?"simpleText":"([\d:]+)"/) || [])[1] || ''
       const channel = (c.match(/"ownerText":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"/) || [])[1] || ''
       if (!title) continue
       results.push({ id, title: unesc(title), channel: unesc(channel), length })
