@@ -986,17 +986,37 @@ function showYtFallback(msg,np){
   host.appendChild(fb);
 }
 function killYt(){if(ytBadgeTimerId){clearTimeout(ytBadgeTimerId);ytBadgeTimerId=null;}if(ytPollId){clearInterval(ytPollId);ytPollId=null;}if(ytPlayer){ytPlayer.destroy();ytPlayer=null;}}
-// YouTube search fallback for tracks with no video in their Discogs data
+// YouTube search fallback for tracks with no video in their Discogs data.
+// Conservative on purpose: a video plays only when we can CONFIRM it is the
+// track (title match + artist in title or channel + plausible duration).
+// No confident match → null → "Not found on YouTube", never a random video.
 const ytSearchCache={}; // normalized "artist title" → videoId | null (searched, not found)
-async function searchYtVideo(artistName,title){
+function pickYtMatch(list,artistName,title,trackSec){
+  const tn=normalizeStr(title),an=normalizeStr(artistName||'');
+  if(!tn)return null;
+  let best=null,bestScore=0;
+  for(const v of list){
+    const vn=normalizeStr(v.title||''),cn=normalizeStr(v.channel||'');
+    if(!vn.includes(tn))continue; // full track title must appear in the video title
+    const artistOk=!an||vn.includes(an)||(cn&&(cn.includes(an)||an.includes(cn)));
+    if(!artistOk)continue; // artist must appear in title or match the channel
+    const vSec=parseDur(v.length||'');
+    let score=1;
+    if(vSec&&vSec>1200)continue; // >20min = DJ set / stream, never the track
+    if(trackSec&&vSec){
+      if(Math.abs(vSec-trackSec)<=Math.max(25,trackSec*0.1))score=3; // duration confirms it
+    }
+    if(score>bestScore){best=v;bestScore=score;}
+  }
+  return best;
+}
+async function searchYtVideo(artistName,title,trackSec){
   const key=normalizeStr(artistName+' '+title);
   if(ytSearchCache[key]!==undefined)return ytSearchCache[key];
   try{
     const r=await fetch('/api/yt-search?q='+encodeURIComponent(artistName+' '+title));
     const j=await r.json();
-    const list=j.results||[];
-    const tn=normalizeStr(title);
-    const best=list.find(v=>{const vn=normalizeStr(v.title||'');return tn&&(vn.includes(tn)||tn.includes(vn));})||list[0]||null;
+    const best=pickYtMatch(j.results||[],artistName,title,trackSec);
     ytSearchCache[key]=best?best.id:null;
   }catch{ytSearchCache[key]=null;}
   return ytSearchCache[key];
@@ -1011,7 +1031,8 @@ function doPlay(trackId,videoId,title,artistName){
       st.nowPlaying.videoId=ytSearchCache[key];st.nowPlaying.ytSearched=true;
     }else{
       st.nowPlaying.ytSearching=true;
-      searchYtVideo(artistName,title).then(id=>{
+      const trackSec=parseDur(findTrack(trackId)?.duration||'');
+      searchYtVideo(artistName,title,trackSec).then(id=>{
         const np=st.nowPlaying;
         if(!np||np.trackId!==trackId)return; // user moved on
         np.ytSearching=false;np.ytSearched=true;np.videoId=id;
