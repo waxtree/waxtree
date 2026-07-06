@@ -1178,6 +1178,9 @@ function genreColor(g){
   return['#E8834A','#4AB8E8','#9B59B6','#C8D840','#E84A4A','#4AE8A4','#E84A9E','#4A9EE8','#E8C84A','#8B4AE8','#4AE8C4','#E86A4A'][h%12];
 }
 
+// Discogs suffixes an artist name with " (N)" to disambiguate same-named
+// artists (e.g. "Artist Name (2)") — strip it for display everywhere.
+const stripDiscogsSuffix=n=>(n||'').replace(/\s\(\d+\)$/,'');
 function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb=''){
   const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.title);
   if(!tracklist.length)return[];
@@ -1211,11 +1214,17 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
   return tl.map((t,i)=>{
     const tn=t.notes||'';const tbm=tn.match(/\b(\d{2,3})\s*bpm\b/i)||tn.match(/bpm[:\s]+(\d{2,3})/i);
     const bpm=tbm?parseInt(tbm[1]):relBpm;
+    // Various Artists releases credit each track to its own artist(s) —
+    // Discogs exposes this on the tracklist entry itself, distinct from the
+    // single "Various" artist at the release level.
+    const perTrack=(t.artists&&t.artists.length)?t.artists:null;
+    const trackArtistName=perTrack?perTrack.map(a=>stripDiscogsSuffix(a.name)).join(', '):null;
+    const trackArtistId=perTrack?perTrack[0].id:null;
     return{
     id:`${fetchId}-${t.position||i}`,title:t.title,duration:t.duration||'',
     year,label:labelName,labelId,genre,thumbUrl,bpm,album:rd.title||'',
     digital:isDigital,discogsUrl:releaseUrl,videoId:matchVideo(i),catno:'',
-    fromLabel:false,
+    fromLabel:false,trackArtistName,trackArtistId,
     exploreId:null,exploreName:null,exploreType:null,exploreLabel:null
   };});
 }
@@ -1285,7 +1294,7 @@ async function fetchArtistData(discogsId,isCancelled=()=>false){
 }
 
 async function fetchLabelData(discogsId,isCancelled=()=>false){
-  const c=lsGet('l7:'+discogsId);if(c)return c;
+  const c=lsGet('l8:'+discogsId);if(c)return c;
   const[labData,relData]=await Promise.all([
     dReq('/labels/'+discogsId),
     dReq('/labels/'+discogsId+'/releases',{per_page:'100',sort:'year',sort_order:'asc'})
@@ -1301,9 +1310,18 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
       const rd=await dReq('/releases/'+rel.id);
       if(isCancelled())break;
       const artistId=rd.artists?.[0]?.id||null;
-      const artistName=rd.artists?.[0]?.name||rel.artist||'';
+      const artistName=stripDiscogsSuffix(rd.artists?.[0]?.name||rel.artist||'');
       const entries=buildTrackEntries(rd,rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,artistName,rel.thumb||'');
-      entries.forEach(e=>{e.label=artistName;e.labelId=null;e.fromLabel=true;e.exploreId=artistId;e.exploreName=artistId?artistName:null;e.exploreType='artist';e.exploreLabel='Explore artist';e.catno=rd.labels?.[0]?.catno||rel.catno||'';});
+      entries.forEach(e=>{
+        // Various Artists release: use the per-track credit instead of the
+        // release-level "Various" placeholder, for both the displayed
+        // artist name and the "Explore artist" button's target.
+        const realName=e.trackArtistName||artistName;
+        const realId=e.trackArtistId||artistId;
+        e.label=realName;e.labelId=null;e.fromLabel=true;
+        e.exploreId=realId;e.exploreName=realId?realName:null;e.exploreType='artist';e.exploreLabel='Explore artist';
+        e.catno=rd.labels?.[0]?.catno||rel.catno||'';
+      });
       if(entries.length&&!entries[0].thumbUrl){
         const mbUrl=await fetchMbCoverUrl(artistName,rd.title||rel.title||'',rd.year||rel.year);
         if(mbUrl)entries.forEach(e=>e.thumbUrl=mbUrl);
@@ -1327,7 +1345,7 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:artists,artistStr:artists.length?`Artists include: ${artists.slice(0,5).join(', ')}`:null},
     tracks,trackCount:relData.pagination.items
   };
-  lsSet('l7:'+discogsId,nd);return nd;
+  lsSet('l8:'+discogsId,nd);return nd;
 }
 
 // ── Actions ────────────────────────────────────────────────
