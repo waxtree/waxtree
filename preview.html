@@ -2723,6 +2723,10 @@ sb.auth.getSession().then(({data:{session}})=>{
   paint();
   loadFollows();
   handleDiscogsCallback();
+  // A plain page reload restores st.nodes from localStorage directly — it never
+  // calls selectNode(), so the version check there alone would never fire for
+  // a node that's already selected before the reload. Sweep once at boot too.
+  st.nodes.filter(n=>n.type==='label'&&n.loaded&&!n.loading&&n.data?._v!==LABEL_DATA_VERSION).forEach(n=>retryNode(n.id));
 });
 
 </script>
