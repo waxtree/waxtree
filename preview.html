@@ -787,6 +787,11 @@ let wtSession=null;
 // ── Demo data ──────────────────────────────────────────────
 const FREE_WOOD_LIMIT=3;
 const FREE_NODE_LIMIT=15;
+// Bump whenever buildTrackEntries/fetchLabelData's per-track output shape
+// changes — already-added label nodes carry their old node.data forever
+// otherwise (the l7/l8-style API-response cache bump alone doesn't reach
+// nodes a user already added; selectNode() below re-fetches them once).
+const LABEL_DATA_VERSION=2;
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
@@ -1343,7 +1348,8 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
     parentLabel:labData.parent_label?{id:labData.parent_label.id,name:labData.parent_label.name,type:'label'}:null,
     country:labData.country||null,
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:artists,artistStr:artists.length?`Artists include: ${artists.slice(0,5).join(', ')}`:null},
-    tracks,trackCount:relData.pagination.items
+    tracks,trackCount:relData.pagination.items,
+    _v:LABEL_DATA_VERSION
   };
   lsSet('l8:'+discogsId,nd);return nd;
 }
@@ -1425,7 +1431,11 @@ function moveNodeToBranch(nodeId,targetBranchId){
 }
 function selectNode(id){
   st.selectedId=id;const n=getNode(id);if(n)st.activeBranchId=n.branchId;
-  st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];rr();
+  st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
+  // Silently re-fetch a label node that was added before a track-data fix —
+  // otherwise it keeps showing whatever was baked into it back then forever.
+  if(n&&n.type==='label'&&n.loaded&&!n.loading&&n.data?._v!==LABEL_DATA_VERSION)retryNode(id);
+  rr();
 }
 function togglePin(id){const n=getNode(id);if(n)n.pinned=!n.pinned;rr();}
 function addTag(nodeId,tag){
