@@ -855,8 +855,14 @@ function rr(){saveSt();if(pending)return;pending=true;requestAnimationFrame(()=>
 function paint(){
   const root=document.getElementById('root');
   const scrolls={};root.querySelectorAll('[data-sc]').forEach(e=>{scrolls[e.dataset.sc]=e.scrollTop;});
+  const active=document.activeElement;
+  const restoreFocus=(active&&active.classList?.contains('s-input'))?active.selectionStart:null;
   root.innerHTML='';root.appendChild(buildApp());
   Object.entries(scrolls).forEach(([k,v])=>{const e=root.querySelector(`[data-sc="${k}"]`);if(e)e.scrollTop=v;});
+  if(restoreFocus!==null){
+    const inp=root.querySelector('.s-input');
+    if(inp){inp.focus();try{inp.setSelectionRange(restoreFocus,restoreFocus);}catch{}}
+  }
   syncYtPlayer();
   requestAnimationFrame(positionYtHost);
   root.querySelectorAll('.bio-text').forEach(txt=>{
@@ -1420,12 +1426,36 @@ function removeBranch(id){
   if(!getNode(st.selectedId))st.selectedId=st.nodes.filter(n=>n.branchId===st.activeBranchId).at(-1)?.id||null;rr();
 }
 function renameBranch(id,name){const b=getBranch(id);if(b&&name.trim())b.name=name.trim();st.renameId=null;rr();}
+// Live search-as-you-type: doSearch (Enter/button) does an immediate lookup and
+// auto-picks a single result; liveSearchTick (debounced, on every keystroke) only
+// ever populates the suggestion dropdown, never auto-navigates and never counts
+// toward the search-count gamification metric. searchGen guards against an older
+// in-flight request overwriting results from a newer, still-being-typed query.
+let searchDebTimer=null,searchGen=0;
 function doSearch(){
+  if(searchDebTimer){clearTimeout(searchDebTimer);searchDebTimer=null;}
   const q=st.q.trim();if(!q)return;
-  const branchNodeCount=st.nodes.filter(n=>n.branchId===st.activeBranchId).length;
-  if(!st.isPremium&&branchNodeCount>=FREE_NODE_LIMIT){st.premiumModal=true;rr();return;}
+  const myGen=++searchGen;
   st.loading=true;st.err='';st.results=[];rr();
-  searchDiscogs(q).then(res=>{st.loading=false;incrementSearch();if(!res.length){st.err='No results';rr();return;}if(res.length===1){pickResult(res[0]);return;}st.results=res;rr();}).catch(e=>{st.loading=false;st.err=e.message;rr();});
+  searchDiscogs(q).then(res=>{
+    if(myGen!==searchGen)return;
+    st.loading=false;incrementSearch();
+    if(!res.length){st.err='No results';rr();return;}
+    if(res.length===1){pickResult(res[0]);return;}
+    st.results=res;rr();
+  }).catch(e=>{if(myGen!==searchGen)return;st.loading=false;st.err=e.message;rr();});
+}
+function liveSearchTick(){
+  const q=st.q.trim();
+  if(q.length<2)return;
+  const myGen=++searchGen;
+  st.loading=true;st.err='';rr();
+  searchDiscogs(q).then(res=>{
+    if(myGen!==searchGen)return;
+    st.loading=false;
+    if(!res.length){st.err='No results';st.results=[];rr();return;}
+    st.results=res;rr();
+  }).catch(e=>{if(myGen!==searchGen)return;st.loading=false;st.err=e.message;rr();});
 }
 function pickResult(r){st.results=[];st.q='';st.loading=false;st.err='';addNode(r.type,r.id,r.title,null,st.activeBranchId);}
 
@@ -2129,8 +2159,16 @@ function buildApp(){
   swrap.appendChild(d('search-field',{},s('s-icon','🔍'),
     activeBranch?s('s-badge',activeBranch.name):null,
     el('input',{cls:'s-input',type:'text',placeholder:'Search artist or label...',value:st.q,
-      onInput:e=>{st.q=e.target.value;if(!e.target.value){st.results=[];st.err='';rr();}},
-      onKeydown:e=>{if(e.key==='Enter')doSearch();if(e.key==='Escape'){st.results=[];st.err='';rr();}},
+      onInput:e=>{
+        st.q=e.target.value;
+        if(searchDebTimer){clearTimeout(searchDebTimer);searchDebTimer=null;}
+        if(!e.target.value.trim()){searchGen++;st.results=[];st.err='';rr();return;}
+        searchDebTimer=setTimeout(liveSearchTick,300);
+      },
+      onKeydown:e=>{
+        if(e.key==='Enter')doSearch();
+        if(e.key==='Escape'){if(searchDebTimer){clearTimeout(searchDebTimer);searchDebTimer=null;}searchGen++;st.results=[];st.err='';rr();}
+      },
     }),
   ));
   swrap.appendChild(b('s-btn',{onClick:doSearch},'Search'));
