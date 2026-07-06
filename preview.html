@@ -230,19 +230,9 @@ input,select{font:inherit;color:inherit}
 .bc-link{font-size:11px;padding:4px 10px;border-radius:20px;border:1.5px solid rgba(29,160,195,.4);color:#1da0c3;text-decoration:none;white-space:nowrap;transition:background .15s,color .15s;flex-shrink:0}
 .bc-link:hover{background:rgba(29,160,195,.12)}
 
-/* Track card */
-.t-card{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-s);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;transition:border-color .15s}
-.t-card:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--border))}
-.t-play{width:34px;height:34px;border-radius:50%;background:var(--bg);color:var(--text-m);font-size:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s}
-.t-play:hover{background:var(--accent);color:#fff}
-.t-play.has-video{color:var(--accent)}
 /* Album artwork thumbnail */
 .t-art{width:40px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--bg-e);border:1px solid var(--border);display:block}
 .t-art-ph{width:40px;height:40px;border-radius:6px;background:var(--bg-e);border:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:17px;color:var(--text-f)}
-.t-info{flex:1;min-width:0}
-.t-title{display:block;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.t-title-row{display:flex;align-items:center;gap:6px;min-width:0}
-.t-title-row .t-title{flex:0 1 auto;min-width:0}
 .t-meta{font-size:11px;color:var(--text-m);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .t-meta-row{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px}
 .genre-badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;border:1px solid;white-space:nowrap;letter-spacing:.2px;line-height:1.6;flex-shrink:0}
@@ -268,6 +258,17 @@ input,select{font:inherit;color:inherit}
 .t-daq.queued{color:var(--accent)}
 .t-daq:hover{transform:scale(1.2)}
 .t-bpm{font-size:10px;color:var(--text-f);padding:2px 6px;border-radius:8px;background:var(--bg-e);border:1px solid var(--border);flex-shrink:0;white-space:nowrap}
+/* Release card — one row per EP/Album, tracks grouped inside */
+.rel-card{display:flex;align-items:flex-start;gap:12px;padding:10px 14px;background:var(--bg-s);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;transition:border-color .15s}
+.rel-card:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--border))}
+.rel-tracks{display:flex;flex-direction:column;gap:5px;flex:1 1 42%;min-width:0}
+.rel-track-row{display:flex;align-items:center;gap:6px;min-width:0}
+.rel-play{width:22px;height:22px;border-radius:50%;background:var(--bg);color:var(--text-m);font-size:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s}
+.rel-play:hover{background:var(--accent);color:#fff}
+.rel-play.has-video{color:var(--accent)}
+.rel-track-title{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0}
+.rel-mid{flex:1 1 28%;min-width:0;padding-top:2px}
+.rel-title{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Artisti correlati */
 .corr-section{margin-bottom:18px;padding:12px 14px;background:var(--bg-e);border-radius:10px;border:1px solid var(--border)}
 .corr-lbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-f);margin-bottom:8px;display:block}
@@ -1710,36 +1711,124 @@ async function uploadAvatar(file){
 }
 function getAvatarUrl(){return localStorage.getItem(AVATAR_KEY)||null;}
 
-// ── Track card ─────────────────────────────────────────────
-function trackCard(track,parentNodeId,displayArtist){
-  const liked=!!st.likes[track.id],badged=!!st.listens[track.id]?.badged;
-  const owned=isOwned(track.title,displayArtist);
-  const videoOk=track.videoId&&!invalidYtIds.has(track.videoId);
-  const playBtn=b('t-play'+(videoOk?' has-video':''),{
-    title:videoOk?'Play':'Search on YouTube',
-    onClick:()=>doPlay(track.id,track.videoId,track.title,displayArtist)
-  },'▶');
+// ── Release card (groups all tracks of one EP/Album into one row) ──
+function groupTracksByRelease(tracks){
+  const groups=[];
+  const byKey=new Map();
+  for(const t of tracks){
+    const key=t.discogsUrl||t.id; // release-level, identical for every track of that release
+    let g=byKey.get(key);
+    if(!g){g={key,tracks:[]};byKey.set(key,g);groups.push(g);}
+    g.tracks.push(t);
+  }
+  return groups;
+}
 
-  // Album artwork thumbnail
-  const art=track.thumbUrl
-    ?el('img',{cls:'t-art',src:track.thumbUrl,alt:'',loading:'lazy'})
+function releaseCard(group,parentNodeId,isLabel,nodeName){
+  const tracks=group.tracks;
+  const first=tracks[0];
+
+  // Release artwork (identical thumbUrl across the group)
+  const art=first.thumbUrl
+    ?el('img',{cls:'t-art',src:first.thumbUrl,alt:'',loading:'lazy'})
     :d('t-art-ph',{},'♫');
 
-  // Show on artist-page tracks even without labelId — click searches label by name
-  const labelBtn=(track.label&&!track.fromLabel)?b('esplora-btn esplora-label',{
-    onClick:()=>{
-      if(track.labelId)addNode('label',track.labelId,track.label,parentNodeId,getNode(parentNodeId)?.branchId);
-      else{st.q=track.label;doSearch();}
+  // ── LEFT: one compact row per track, each with its own small play button
+  const trackRows=tracks.map(track=>{
+    const displayArtist=isLabel?track.label:nodeName;
+    const liked=!!st.likes[track.id],badged=!!st.listens[track.id]?.badged;
+    const owned=isOwned(track.title,displayArtist);
+    const videoOk=track.videoId&&!invalidYtIds.has(track.videoId);
+    const playBtn=b('rel-play'+(videoOk?' has-video':''),{
+      title:videoOk?'Play':'Search on YouTube',
+      onClick:()=>doPlay(track.id,track.videoId,track.title,displayArtist)
+    },'▶');
+
+    const inDaq=st.dasAscoltare.some(q=>q.id===track.id);
+    const isDropOpen=st.playlistDropId===track.id;
+    const trackWithArtist={...track,artistName:displayArtist};
+    const plWrap=d('pl-wrap',{});
+    const plBtn=b('t-daq'+(inDaq?' queued':''),{
+      title:'Add to playlist',
+      onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:track.id;rr();}
+    },'🏷️');
+    plWrap.appendChild(plBtn);
+    if(isDropOpen){
+      const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
+      const llItem=b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
+        if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);
+        else st.dasAscoltare=[...st.dasAscoltare,trackWithArtist];
+        st.playlistDropId=null;rr();
+      }},inDaq?'✓ Listen Later':'Listen Later');
+      drop.appendChild(llItem);
+      st.playlists.forEach(pl=>{
+        const inPl=pl.tracks.some(t=>t.id===track.id);
+        const plItem=b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
+          if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==track.id);
+          else pl.tracks=[...pl.tracks,trackWithArtist];
+          st.playlistDropId=null;rr();
+        }},inPl?'✓ '+pl.name:pl.name);
+        drop.appendChild(plItem);
+      });
+      drop.appendChild(d('pl-drop-sep',{}));
+      drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
+        const name=prompt('Playlist name:','');
+        if(!name?.trim())return;
+        st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackWithArtist]}];
+        st.playlistDropId=null;rr();
+      }},'+ New playlist'));
+      plWrap.appendChild(drop);
+      setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
     }
-  },`Explore label: ${track.label} ›`):null;
 
-  const espBtn=track.exploreName?b('esplora-btn'+(track.fromLabel?' esplora-label':''),{
-    onClick:()=>addNode(track.exploreType||'artist',track.exploreId,track.exploreName,parentNodeId,getNode(parentNodeId)?.branchId)
-  },`${track.exploreLabel||'Explore'}: ${track.exploreName} ›`):null;
+    return d('rel-track-row',{},
+      playBtn,
+      s('rel-track-title',track.title),
+      track.duration?s('t-dur',track.duration):null,
+      b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'),
+      plWrap,
+      owned?s('own-badge','In your digital library'):null,
+      inDiscogsCollection(track)?s('coll-badge','In collection'):null,
+      inDiscogsWantlist(track)?s('want-badge','On wantlist'):null,
+      badged?s('t-badge','✓ played'):null,
+      track.bpm?s('t-bpm',track.bpm+' BPM'):null,
+    );
+  });
 
-  const buyBtns=[];
-  // Bandcamp — cerca prima in cache, poi via Edge Function al click
-  const bcDirect=findBcMatch(parentNodeId,track.title);
+  // ── MIDDLE: release/EP/Album title + year·label + genres (release-level, shown once)
+  const yearLabel=[first.year,first.label].filter(Boolean).join(' · ');
+  const genres=first.genre?first.genre.split(' · '):[];
+  const mid=d('rel-mid',{},
+    s('rel-title',first.album||first.title),
+    d('t-meta-row',{},
+      yearLabel?s('t-meta',yearLabel):null,
+      ...genres.map(g=>{const c=genreColor(g);return el('span',{cls:'genre-badge',style:`background:${c}1A;border-color:${c}66;color:${c}`},g);})
+    )
+  );
+
+  // ── RIGHT: explore + buy buttons (release-level; explore-artist deduped across
+  // the group since a Various Artists release can credit a different artist per track)
+  const labelBtn=(first.label&&!first.fromLabel)?b('esplora-btn esplora-label',{
+    onClick:()=>{
+      if(first.labelId)addNode('label',first.labelId,first.label,parentNodeId,getNode(parentNodeId)?.branchId);
+      else{st.q=first.label;doSearch();}
+    }
+  },`Explore label: ${first.label} ›`):null;
+
+  const seenArtists=new Set();
+  const artistBtns=[];
+  tracks.forEach(track=>{
+    if(!track.exploreName)return;
+    const key=track.exploreId||track.exploreName;
+    if(seenArtists.has(key))return;
+    seenArtists.add(key);
+    artistBtns.push(b('esplora-btn'+(track.fromLabel?' esplora-label':''),{
+      onClick:()=>addNode(track.exploreType||'artist',track.exploreId,track.exploreName,parentNodeId,getNode(parentNodeId)?.branchId)
+    },`${track.exploreLabel||'Explore'}: ${track.exploreName} ›`));
+  });
+
+  const releaseTitle=first.album||first.title;
+  const bcDirect=findBcMatch(parentNodeId,releaseTitle)||tracks.map(t=>findBcMatch(parentNodeId,t.title)).find(Boolean);
   const bcBtn=b('buy-btn bc'+(bcDirect?' direct':''),{
     title:bcDirect?'Go to Bandcamp':'Search on Bandcamp',
     onClick:async(e)=>{
@@ -1749,11 +1838,10 @@ function trackCard(track,parentNodeId,displayArtist){
       const win=window.open('about:blank','_blank');
       const btn=e.currentTarget;
       btn.textContent='…';btn.style.opacity='0.55';
-      const q=(displayArtist+' '+track.title).trim();
-      let finalUrl=`https://bandcamp.com/search?q=${encodeURIComponent(track.title)}&item_type=t`;
+      const bcArtist=isLabel?(first.label||''):nodeName;
+      let finalUrl=`https://bandcamp.com/search?q=${encodeURIComponent(releaseTitle)}&item_type=a`;
       try{
-        const{data}=await sb.functions.invoke('bc-search',{body:{artist:displayArtist,title:track.title,release:track.album||''}});
-        console.log('[BC debug]',displayArtist,'-',track.title,'(release:',track.album,')','→',JSON.stringify(data));
+        const{data}=await sb.functions.invoke('bc-search',{body:{artist:bcArtist,title:releaseTitle,release:releaseTitle}});
         if(data?.tracks?.[0]?.url)finalUrl=data.tracks[0].url;
       }catch(err){console.error('[BC error]',err?.message||err);}
       btn.textContent='Bandcamp ↗';btn.style.opacity='';
@@ -1761,77 +1849,19 @@ function trackCard(track,parentNodeId,displayArtist){
       else window.open(finalUrl,'_blank','noreferrer');
     }
   },'Bandcamp ↗');
-  buyBtns.push(bcBtn);
-  buyBtns.push(el('a',{cls:'buy-btn bp',href:`https://www.beatport.com/search?q=${encodeURIComponent(track.title)}`,target:'_blank',rel:'noreferrer'},'Beatport ↗'));
-  if(track.discogsUrl)buyBtns.push(el('a',{cls:'buy-btn dg',href:track.discogsUrl,target:'_blank',rel:'noreferrer'},'Discogs ↗'));
 
-  // Meta: year · label as text, genre as colored badges
-  const yearLabel=[track.year,track.label].filter(Boolean).join(' · ');
-  const genres=track.genre?track.genre.split(' · '):[];
+  const buyBtns=[bcBtn,
+    el('a',{cls:'buy-btn bp',href:`https://www.beatport.com/search?q=${encodeURIComponent(releaseTitle)}`,target:'_blank',rel:'noreferrer'},'Beatport ↗'),
+  ];
+  if(first.discogsUrl)buyBtns.push(el('a',{cls:'buy-btn dg',href:first.discogsUrl,target:'_blank',rel:'noreferrer'},'Discogs ↗'));
 
-  // Playlist button + dropdown
-  const inDaq=st.dasAscoltare.some(q=>q.id===track.id);
-  const isDropOpen=st.playlistDropId===track.id;
-  const trackWithArtist={...track,artistName:getNode(parentNodeId)?.name||''};
-  const plWrap=d('pl-wrap',{});
-  const plBtn=b('t-daq'+(inDaq?' queued':''),{
-    title:'Add to playlist',
-    onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:track.id;rr();}
-  },'🏷️');
-  plWrap.appendChild(plBtn);
-  if(isDropOpen){
-    const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
-    // Listen Later
-    const llItem=b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
-      if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);
-      else st.dasAscoltare=[...st.dasAscoltare,trackWithArtist];
-      st.playlistDropId=null;rr();
-    }},inDaq?'✓ Listen Later':'Listen Later');
-    drop.appendChild(llItem);
-    // Custom playlists
-    st.playlists.forEach(pl=>{
-      const inPl=pl.tracks.some(t=>t.id===track.id);
-      const plItem=b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
-        if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==track.id);
-        else pl.tracks=[...pl.tracks,trackWithArtist];
-        st.playlistDropId=null;rr();
-      }},inPl?'✓ '+pl.name:pl.name);
-      drop.appendChild(plItem);
-    });
-    drop.appendChild(d('pl-drop-sep',{}));
-    drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
-      const name=prompt('Playlist name:','');
-      if(!name?.trim())return;
-      st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackWithArtist]}];
-      st.playlistDropId=null;rr();
-    }},'+ New playlist'));
-    plWrap.appendChild(drop);
-    setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
-  }
-
-  return d('t-card',{},playBtn,art,
-    d('t-info',{},
-      d('t-title-row',{},
-        s('t-title',track.title),
-        track.duration?s('t-dur',track.duration):null,
-        b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'),
-        plWrap,
-      ),
-      d('t-meta-row',{},
-        yearLabel?s('t-meta',yearLabel):null,
-        ...genres.map(g=>{const c=genreColor(g);return el('span',{cls:'genre-badge',style:`background:${c}1A;border-color:${c}66;color:${c}`},g);})
-      )
-    ),
+  return d('rel-card',{},
+    art,
+    d('rel-tracks',{},...trackRows),
+    mid,
     d('t-actions',{},
-      d('t-act-explore',{},
-        labelBtn,espBtn,
-        owned?s('own-badge','In your digital library'):null,
-        inDiscogsCollection(track)?s('coll-badge','In collection'):null,
-        inDiscogsWantlist(track)?s('want-badge','On wantlist'):null,
-        badged?s('t-badge','✓ played'):null,
-        track.bpm?s('t-bpm',track.bpm+' BPM'):null,
-      ),
-      buyBtns.length?d('t-act-buy',{},...buyBtns):null,
+      d('t-act-explore',{},labelBtn,...artistBtns),
+      d('t-act-buy',{},...buyBtns),
     ),
   );
 }
@@ -2090,7 +2120,7 @@ function buildContent(){
       panel.appendChild(fb);
     }
 
-    if(pageSlice.length)pageSlice.forEach(t=>panel.appendChild(trackCard(t,node.id,isLabel?t.label:node.name)));
+    if(pageSlice.length)groupTracksByRelease(pageSlice).forEach(g=>panel.appendChild(releaseCard(g,node.id,isLabel,node.name)));
     else panel.appendChild(d('filter-none',{},'No tracks match the filters.'));
 
     if(totalPages>1){
