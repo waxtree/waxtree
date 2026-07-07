@@ -1235,6 +1235,48 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
   };});
 }
 
+// Release-detail fetches were happening one at a time in a for-await loop —
+// with a discography of 30+ releases that's 30+ sequential HTTP round trips
+// before anything appears. Fetch in small parallel batches instead. Also pull
+// the MusicBrainz cover fallback (server-mandated 1 req/sec) and the
+// correlated-artists lookup out of the blocking path entirely: both patch
+// into the already-returned `nd` object in the background and trigger a
+// re-render (rr()) once ready, instead of making the whole discography wait
+// on them.
+const FETCH_BATCH=6;
+async function fetchReleaseBatches(relList,capTracks,isCancelled,fetchOne){
+  const rawTracks=[];
+  const needsCover=[];
+  for(let i=0;i<relList.length&&rawTracks.length<capTracks;i+=FETCH_BATCH){
+    if(isCancelled())break;
+    const batch=relList.slice(i,i+FETCH_BATCH);
+    const results=await Promise.all(batch.map(async rel=>{
+      try{return await fetchOne(rel);}catch{return null;}
+    }));
+    if(isCancelled())break;
+    for(const r of results){
+      if(!r)continue;
+      rawTracks.push(...r.entries);
+      if(r.needsCover)needsCover.push(r.needsCover);
+    }
+  }
+  return{rawTracks,needsCover};
+}
+function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
+  if(!needsCover.length)return;
+  (async()=>{
+    let patched=false;
+    for(const item of needsCover){
+      if(isCancelled())break;
+      try{
+        const mbUrl=await fetchMbCoverUrl(item.artistName,item.releaseTitle,item.year);
+        if(mbUrl){item.entries.forEach(e=>e.thumbUrl=mbUrl);patched=true;rr();}
+      }catch{}
+    }
+    if(patched)lsSet(cacheKey,nd); // persist the same (mutated) object so covers survive a reload
+  })();
+}
+
 async function fetchArtistData(discogsId,isCancelled=()=>false){
   const c=lsGet('a7:'+discogsId);if(c&&c.tracks?.length)return c;
   const[artData,relData]=await Promise.all([
@@ -1245,31 +1287,24 @@ async function fetchArtistData(discogsId,isCancelled=()=>false){
   const imageUrl=artData.images?.find(i=>i.type==='primary')?.uri||artData.images?.[0]?.uri||null;
   const wikiP=(!rawBio||rawBio.length<60||!imageUrl)?fetchWikipediaData(artData.name):Promise.resolve(null);
 
-  const rawTracks=[];
   const mainRels=relData.releases.filter(r=>r.role==='Main');
   const relList=mainRels.length>0?mainRels:relData.releases;
-  for(const rel of relList){
-    if(isCancelled())break;
-    try{
-      let fetchId,releaseUrl,rd;
-      if(rel.type==='master'){
-        releaseUrl=`https://www.discogs.com/master/${rel.id}`;
-        if(rel.main_release){fetchId=rel.main_release;rd=await dReq('/releases/'+fetchId);}
-        else{fetchId='m'+rel.id;rd=await dReq('/masters/'+rel.id);}
-      }else{
-        fetchId=rel.id;releaseUrl=`https://www.discogs.com/release/${rel.id}`;
-        rd=await dReq('/releases/'+fetchId);
-      }
-      if(isCancelled())break;
-      const entries=buildTrackEntries(rd,fetchId,releaseUrl,rel.year,rel.label,rel.thumb||'');
-      if(entries.length&&!entries[0].thumbUrl){
-        const mbUrl=await fetchMbCoverUrl(artData.name,rd.title||rel.title||'',rd.year||rel.year);
-        if(mbUrl)entries.forEach(e=>e.thumbUrl=mbUrl);
-      }
-      rawTracks.push(...entries);
-    }catch{}
-    if(rawTracks.length>=200)break;
-  }
+  const{rawTracks,needsCover}=await fetchReleaseBatches(relList,200,isCancelled,async rel=>{
+    let fetchId,releaseUrl,rd;
+    if(rel.type==='master'){
+      releaseUrl=`https://www.discogs.com/master/${rel.id}`;
+      if(rel.main_release){fetchId=rel.main_release;rd=await dReq('/releases/'+fetchId);}
+      else{fetchId='m'+rel.id;rd=await dReq('/masters/'+rel.id);}
+    }else{
+      fetchId=rel.id;releaseUrl=`https://www.discogs.com/release/${rel.id}`;
+      rd=await dReq('/releases/'+fetchId);
+    }
+    const entries=buildTrackEntries(rd,fetchId,releaseUrl,rel.year,rel.label,rel.thumb||'');
+    const needsCoverItem=(entries.length&&!entries[0].thumbUrl)
+      ?{entries,artistName:artData.name,releaseTitle:rd.title||rel.title||'',year:rd.year||rel.year}
+      :null;
+    return{entries,needsCover:needsCoverItem};
+  });
   const tracks=dedup(rawTracks);
   const years=rawTracks.map(t=>t.year).filter(Boolean);
   const labels=[...new Set(rawTracks.map(t=>t.label).filter(Boolean))].slice(0,6);
@@ -1278,25 +1313,35 @@ async function fetchArtistData(discogsId,isCancelled=()=>false){
   const bio=(rawBio&&rawBio.length>=60)?rawBio:(wikiData?.bio||rawBio||null);
   const lblCounts={};rawTracks.forEach(t=>{if(t.labelId)lblCounts[t.labelId]=(lblCounts[t.labelId]||0)+1;});
   const topLabelId=Object.entries(lblCounts).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  let correlatedArtists=[];
-  if(topLabelId){try{
-    const lRel=await dReq('/labels/'+topLabelId+'/releases',{per_page:'30',sort:'year'});
-    const seen=new Set([artData.name.toLowerCase().replace(/\s+/g,'')]);
-    correlatedArtists=lRel.releases
-      .map(r=>r.artist||'').filter(n=>n&&!/^various$/i.test(n.trim()))
-      .map(n=>({name:n,k:n.toLowerCase().replace(/\s+/g,'')}))
-      .filter(a=>{if(seen.has(a.k))return false;seen.add(a.k);return true;})
-      .slice(0,10).map(a=>a.name);
-  }catch{}}
   const nd={
     id:artData.id,name:artData.name,bio,
     imageUrl:imageUrl||wikiData?.imageUrl||null,
     aliases:(artData.aliases||[]).map(a=>({id:a.id,name:a.name,type:'artist'})),
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:labels,labelStr:labels.length?`Released on: ${labels.join(', ')}`:null},
-    correlatedArtists,
+    correlatedArtists:[],
     tracks,trackCount:relData.pagination.items
   };
-  lsSet('a7:'+discogsId,nd);return nd;
+  lsSet('a7:'+discogsId,nd);
+
+  // Background: correlated artists (secondary sidebar data) and missing cover art —
+  // neither blocks the track list from appearing.
+  if(topLabelId){
+    (async()=>{
+      try{
+        const lRel=await dReq('/labels/'+topLabelId+'/releases',{per_page:'30',sort:'year'});
+        const seen=new Set([artData.name.toLowerCase().replace(/\s+/g,'')]);
+        nd.correlatedArtists=lRel.releases
+          .map(r=>r.artist||'').filter(n=>n&&!/^various$/i.test(n.trim()))
+          .map(n=>({name:n,k:n.toLowerCase().replace(/\s+/g,'')}))
+          .filter(a=>{if(seen.has(a.k))return false;seen.add(a.k);return true;})
+          .slice(0,10).map(a=>a.name);
+        lsSet('a7:'+discogsId,nd);rr();
+      }catch{}
+    })();
+  }
+  resolveCoversInBackground(needsCover,'a7:'+discogsId,isCancelled,nd);
+
+  return nd;
 }
 
 async function fetchLabelData(discogsId,isCancelled=()=>false){
@@ -1309,33 +1354,26 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
   const labImgUrl=labData.images?.find(i=>i.type==='primary')?.uri||labData.images?.[0]?.uri||null;
   const wikiP=(!rawBio||rawBio.length<60||!labImgUrl)?fetchWikipediaData(labData.name):Promise.resolve(null);
 
-  const rawTracks=[];
-  for(const rel of relData.releases){
-    if(isCancelled())break;
-    try{
-      const rd=await dReq('/releases/'+rel.id);
-      if(isCancelled())break;
-      const artistId=rd.artists?.[0]?.id||null;
-      const artistName=stripDiscogsSuffix(rd.artists?.[0]?.name||rel.artist||'');
-      const entries=buildTrackEntries(rd,rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,artistName,rel.thumb||'');
-      entries.forEach(e=>{
-        // Various Artists release: use the per-track credit instead of the
-        // release-level "Various" placeholder, for both the displayed
-        // artist name and the "Explore artist" button's target.
-        const realName=e.trackArtistName||artistName;
-        const realId=e.trackArtistId||artistId;
-        e.label=realName;e.labelId=null;e.fromLabel=true;
-        e.exploreId=realId;e.exploreName=realId?realName:null;e.exploreType='artist';e.exploreLabel='Explore artist';
-        e.catno=rd.labels?.[0]?.catno||rel.catno||'';
-      });
-      if(entries.length&&!entries[0].thumbUrl){
-        const mbUrl=await fetchMbCoverUrl(artistName,rd.title||rel.title||'',rd.year||rel.year);
-        if(mbUrl)entries.forEach(e=>e.thumbUrl=mbUrl);
-      }
-      rawTracks.push(...entries);
-    }catch{}
-    if(rawTracks.length>=200)break;
-  }
+  const{rawTracks,needsCover}=await fetchReleaseBatches(relData.releases,200,isCancelled,async rel=>{
+    const rd=await dReq('/releases/'+rel.id);
+    const artistId=rd.artists?.[0]?.id||null;
+    const artistName=stripDiscogsSuffix(rd.artists?.[0]?.name||rel.artist||'');
+    const entries=buildTrackEntries(rd,rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,artistName,rel.thumb||'');
+    entries.forEach(e=>{
+      // Various Artists release: use the per-track credit instead of the
+      // release-level "Various" placeholder, for both the displayed
+      // artist name and the "Explore artist" button's target.
+      const realName=e.trackArtistName||artistName;
+      const realId=e.trackArtistId||artistId;
+      e.label=realName;e.labelId=null;e.fromLabel=true;
+      e.exploreId=realId;e.exploreName=realId?realName:null;e.exploreType='artist';e.exploreLabel='Explore artist';
+      e.catno=rd.labels?.[0]?.catno||rel.catno||'';
+    });
+    const needsCoverItem=(entries.length&&!entries[0].thumbUrl)
+      ?{entries,artistName,releaseTitle:rd.title||rel.title||'',year:rd.year||rel.year}
+      :null;
+    return{entries,needsCover:needsCoverItem};
+  });
   const tracks=dedup(rawTracks);
   const years=rawTracks.map(t=>t.year).filter(Boolean);
   const artists=[...new Set(rawTracks.map(t=>t.label).filter(Boolean))].slice(0,8);
@@ -1352,7 +1390,9 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
     tracks,trackCount:relData.pagination.items,
     _v:LABEL_DATA_VERSION
   };
-  lsSet('l8:'+discogsId,nd);return nd;
+  lsSet('l8:'+discogsId,nd);
+  resolveCoversInBackground(needsCover,'l8:'+discogsId,isCancelled,nd);
+  return nd;
 }
 
 // ── Actions ────────────────────────────────────────────────
