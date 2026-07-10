@@ -983,6 +983,7 @@ function tryBadge(){
     st.history.unshift({id:ytTid,title:ytTitle,artistName:ytArtist,ts:Date.now(),
       thumbUrl:tr?.thumbUrl||null,videoId:st.nowPlaying?.videoId||null,
       exploreId:tr?.exploreId||null,exploreType:tr?.exploreType||'artist',exploreName:tr?.exploreName||ytArtist});
+    if(st.history.length>300)st.history.length=300; // unbounded otherwise — this is per-play, not per-search
     rr();
   }
 }
