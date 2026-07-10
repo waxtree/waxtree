@@ -412,18 +412,18 @@ input,select{font:inherit;color:inherit}
 .plant-loader-label{font-size:12px;color:var(--text-f);letter-spacing:.06em}
 /* Loader: a single tree that actually grows — branches draw themselves
    stroke-by-stroke, leaf buds scale in at each tip once its branch is
-   done. Every element shares one 5s master cycle (no animation-delay)
+   done. Every element shares one 2.4s master cycle (no animation-delay)
    so they all reset to "bare" in lockstep with the wrapper's own
    fade-out, instead of drifting out of phase across loops. */
-.wt-grow{animation:wt-fadecycle 5s ease-in-out infinite}
+.wt-grow{animation:wt-fadecycle 2.4s ease-in-out infinite}
 @keyframes wt-fadecycle{0%{opacity:0}4%{opacity:1}88%{opacity:1}100%{opacity:0}}
 .wt-b{stroke-dasharray:120}
-.wt-b-trunk{animation:wt-draw-trunk 5s ease-out infinite}
-.wt-b-a{animation:wt-draw-a 5s ease-out infinite}
-.wt-b-b{animation:wt-draw-b 5s ease-out infinite}
-.wt-b-c{animation:wt-draw-c 5s ease-out infinite}
-.wt-b-d{animation:wt-draw-d 5s ease-out infinite}
-.wt-b-top{animation:wt-draw-top 5s ease-out infinite}
+.wt-b-trunk{animation:wt-draw-trunk 2.4s ease-out infinite}
+.wt-b-a{animation:wt-draw-a 2.4s ease-out infinite}
+.wt-b-b{animation:wt-draw-b 2.4s ease-out infinite}
+.wt-b-c{animation:wt-draw-c 2.4s ease-out infinite}
+.wt-b-d{animation:wt-draw-d 2.4s ease-out infinite}
+.wt-b-top{animation:wt-draw-top 2.4s ease-out infinite}
 @keyframes wt-draw-trunk{0%{stroke-dashoffset:120}22%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
 @keyframes wt-draw-a{0%,12%{stroke-dashoffset:120}32%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
 @keyframes wt-draw-b{0%,16%{stroke-dashoffset:120}36%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
@@ -431,11 +431,11 @@ input,select{font:inherit;color:inherit}
 @keyframes wt-draw-d{0%,28%{stroke-dashoffset:120}46%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
 @keyframes wt-draw-top{0%,32%{stroke-dashoffset:120}48%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
 .wt-leaf{transform-box:fill-box;transform-origin:center;opacity:0;transform:scale(.2)}
-.wt-leaf-a{animation:wt-bud-a 5s ease-out infinite}
-.wt-leaf-b{animation:wt-bud-b 5s ease-out infinite}
-.wt-leaf-c{animation:wt-bud-c 5s ease-out infinite}
-.wt-leaf-d{animation:wt-bud-d 5s ease-out infinite}
-.wt-leaf-top{animation:wt-bud-top 5s ease-out infinite}
+.wt-leaf-a{animation:wt-bud-a 2.4s ease-out infinite}
+.wt-leaf-b{animation:wt-bud-b 2.4s ease-out infinite}
+.wt-leaf-c{animation:wt-bud-c 2.4s ease-out infinite}
+.wt-leaf-d{animation:wt-bud-d 2.4s ease-out infinite}
+.wt-leaf-top{animation:wt-bud-top 2.4s ease-out infinite}
 @keyframes wt-bud-a{0%,32%{opacity:0;transform:scale(.2)}40%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
 @keyframes wt-bud-b{0%,36%{opacity:0;transform:scale(.2)}44%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
 @keyframes wt-bud-c{0%,42%{opacity:0;transform:scale(.2)}50%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
