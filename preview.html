@@ -816,7 +816,70 @@ const DEMO_NODES=[{
 // ── State ──────────────────────────────────────────────────
 const SK='ct-v5';
 function loadSt(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}}
-function saveSt(){try{localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:st.nodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));}catch{}}
+function saveSt(){
+  try{
+    localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:st.nodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));
+    localStorage.setItem(SK+':ts',String(Date.now()));
+  }catch{}
+  scheduleCloudSync();
+}
+// ── Cloud backup ───────────────────────────────────────────
+// localStorage alone is one "clear site data" click away from wiping every
+// wood, node, playlist and like a user has. Mirror the same payload to a
+// Supabase table (RLS-scoped to the user) so it survives that.
+let stateSyncTimer=null;
+function scheduleCloudSync(){
+  if(!wtSession)return;
+  if(stateSyncTimer)clearTimeout(stateSyncTimer);
+  stateSyncTimer=setTimeout(pushStateToCloud,4000);
+}
+async function pushStateToCloud(){
+  if(!wtSession)return;
+  // Strip the heavy cached Discogs payload (bio, images, full tracklists) —
+  // it's cheaply re-fetched on selectNode; only the tree structure itself
+  // (which artist/label, which branch, pin/tag state) is irreplaceable.
+  const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
+  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,avatarDataUrl:getAvatarUrl()};
+  try{await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});}
+  catch(e){console.warn('WaxTree: cloud backup failed (will retry on next change):',e);}
+}
+function ensureNodeLoaded(id){
+  const n=getNode(id);
+  if(n&&!n.loaded&&!n.loading&&!n.error)retryNode(id);
+}
+async function hydrateFromCloud(){
+  try{
+    const{data,error}=await sb.from('user_state').select('data,updated_at').eq('user_id',wtSession.user.id).maybeSingle();
+    if(error||!data)return;
+    const cloudTs=new Date(data.updated_at).getTime();
+    const localTs=Number(localStorage.getItem(SK+':ts')||0);
+    if(cloudTs<=localTs)return; // local copy is newer or equal — nothing to recover
+    const c=data.data||{};
+    if(c.branches?.length)st.branches=c.branches;
+    if(c.nodes)st.nodes=c.nodes.map(n=>({...n,pinned:!!n.pinned,tags:n.tags||[],loaded:false,loading:false,error:null,data:null}));
+    if(c.selectedId!==undefined)st.selectedId=c.selectedId;
+    if(c.activeBranchId)st.activeBranchId=c.activeBranchId;
+    if(c.chips)st.chips=c.chips;
+    if(c.likes)st.likes=c.likes;
+    if(c.listens)st.listens=c.listens;
+    if(c.dasAscoltare)st.dasAscoltare=c.dasAscoltare;
+    if(c.playlists)st.playlists=c.playlists;
+    if(c.history)st.history=c.history;
+    if(c.follows)st.follows=c.follows;
+    if(c.discogsUser)st.discogsUser=c.discogsUser;
+    if(c.discogsOAuthToken)st.discogsOAuthToken=c.discogsOAuthToken;
+    if(c.discogsOAuthSecret)st.discogsOAuthSecret=c.discogsOAuthSecret;
+    if(c.discogsCollReleaseIds)st.discogsCollReleaseIds=c.discogsCollReleaseIds;
+    if(c.discogsCollMasterIds)st.discogsCollMasterIds=c.discogsCollMasterIds;
+    if(c.discogsWantReleaseIds)st.discogsWantReleaseIds=c.discogsWantReleaseIds;
+    if(c.discogsWantMasterIds)st.discogsWantMasterIds=c.discogsWantMasterIds;
+    if(c.discogsCollSyncedAt)st.discogsCollSyncedAt=c.discogsCollSyncedAt;
+    if(c.avatarDataUrl){try{localStorage.setItem(AVATAR_KEY,c.avatarDataUrl);}catch{}}
+    saveSt();
+    ensureNodeLoaded(st.selectedId);
+    rr();
+  }catch(e){console.warn('WaxTree: cloud restore failed:',e);}
+}
 
 const saved=loadSt();
 const st={
@@ -1474,6 +1537,9 @@ function moveNodeToBranch(nodeId,targetBranchId){
 function selectNode(id){
   st.selectedId=id;const n=getNode(id);if(n)st.activeBranchId=n.branchId;
   st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
+  // A node restored from the cloud backup (or never fully loaded) has no
+  // cached Discogs data — fetch it now instead of rendering an empty panel.
+  ensureNodeLoaded(id);
   // Silently re-fetch a label node that was added before a track-data fix —
   // otherwise it keeps showing whatever was baked into it back then forever.
   if(n&&n.type==='label'&&n.loaded&&!n.loading&&n.data?._v!==LABEL_DATA_VERSION)retryNode(id);
@@ -2795,6 +2861,8 @@ sb.auth.getSession().then(({data:{session}})=>{
   paint();
   loadFollows();
   handleDiscogsCallback();
+  ensureNodeLoaded(st.selectedId);
+  hydrateFromCloud();
   // A plain page reload restores st.nodes from localStorage directly — it never
   // calls selectNode(), so the version check there alone would never fire for
   // a node that's already selected before the reload. Sweep once at boot too.
