@@ -410,14 +410,37 @@ input,select{font:inherit;color:inherit}
 .plant-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:64px 20px 48px;gap:20px}
 .plant-loader-svg{width:110px;height:99px}
 .plant-loader-label{font-size:12px;color:var(--text-f);letter-spacing:.06em}
-.wt-seed{animation:wt-seed 4.5s linear infinite}
-.wt-sprout{animation:wt-sprout 4.5s linear infinite}
-.wt-plant{animation:wt-plant 4.5s linear infinite}
-.wt-tree{animation:wt-tree 4.5s linear infinite}
-@keyframes wt-seed{0%{opacity:1}22%{opacity:1}28%{opacity:0}100%{opacity:0}}
-@keyframes wt-sprout{0%{opacity:0}22%{opacity:0}28%{opacity:1}48%{opacity:1}54%{opacity:0}100%{opacity:0}}
-@keyframes wt-plant{0%{opacity:0}48%{opacity:0}54%{opacity:1}72%{opacity:1}78%{opacity:0}100%{opacity:0}}
-@keyframes wt-tree{0%{opacity:0}72%{opacity:0}78%{opacity:1}97%{opacity:1}100%{opacity:0}}
+/* Loader: a single tree that actually grows — branches draw themselves
+   stroke-by-stroke, leaf buds scale in at each tip once its branch is
+   done. Every element shares one 5s master cycle (no animation-delay)
+   so they all reset to "bare" in lockstep with the wrapper's own
+   fade-out, instead of drifting out of phase across loops. */
+.wt-grow{animation:wt-fadecycle 5s ease-in-out infinite}
+@keyframes wt-fadecycle{0%{opacity:0}4%{opacity:1}88%{opacity:1}100%{opacity:0}}
+.wt-b{stroke-dasharray:120}
+.wt-b-trunk{animation:wt-draw-trunk 5s ease-out infinite}
+.wt-b-a{animation:wt-draw-a 5s ease-out infinite}
+.wt-b-b{animation:wt-draw-b 5s ease-out infinite}
+.wt-b-c{animation:wt-draw-c 5s ease-out infinite}
+.wt-b-d{animation:wt-draw-d 5s ease-out infinite}
+.wt-b-top{animation:wt-draw-top 5s ease-out infinite}
+@keyframes wt-draw-trunk{0%{stroke-dashoffset:120}22%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-a{0%,12%{stroke-dashoffset:120}32%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-b{0%,16%{stroke-dashoffset:120}36%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-c{0%,24%{stroke-dashoffset:120}42%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-d{0%,28%{stroke-dashoffset:120}46%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-top{0%,32%{stroke-dashoffset:120}48%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+.wt-leaf{transform-box:fill-box;transform-origin:center;opacity:0;transform:scale(.2)}
+.wt-leaf-a{animation:wt-bud-a 5s ease-out infinite}
+.wt-leaf-b{animation:wt-bud-b 5s ease-out infinite}
+.wt-leaf-c{animation:wt-bud-c 5s ease-out infinite}
+.wt-leaf-d{animation:wt-bud-d 5s ease-out infinite}
+.wt-leaf-top{animation:wt-bud-top 5s ease-out infinite}
+@keyframes wt-bud-a{0%,32%{opacity:0;transform:scale(.2)}40%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+@keyframes wt-bud-b{0%,36%{opacity:0;transform:scale(.2)}44%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+@keyframes wt-bud-c{0%,42%{opacity:0;transform:scale(.2)}50%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+@keyframes wt-bud-d{0%,46%{opacity:0;transform:scale(.2)}54%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+@keyframes wt-bud-top{0%,48%{opacity:0;transform:scale(.2)}56%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
 </style>
 </head>
 <body>
@@ -1649,36 +1672,28 @@ function buildPlantLoader(label='Loading…'){
   svg.innerHTML=`
 <rect x="0" y="64" width="100" height="26" fill="var(--bg-e)"/>
 <line x1="8" y1="64" x2="92" y2="64" stroke="var(--text-f)" stroke-width="1" opacity="0.3"/>
-<g class="wt-seed">
-  <ellipse cx="50" cy="63" rx="7" ry="4.5" fill="var(--accent)" opacity="0.5"/>
-  <path d="M46,66 Q43,73 42,79" stroke="var(--text-f)" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.3"/>
-  <path d="M54,66 Q57,73 58,79" stroke="var(--text-f)" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.3"/>
-  <path d="M50,67 L50,80" stroke="var(--text-f)" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.3"/>
-</g>
-<g class="wt-sprout">
-  <path d="M50,64 L50,48" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linecap="round"/>
-  <path d="M50,51 C45,47 42,44 43,41 C46,44 48,48 50,51" fill="var(--accent-light)" opacity="0.9"/>
-  <path d="M50,51 C55,47 58,44 57,41 C54,44 52,48 50,51" fill="var(--accent-light)" opacity="0.9"/>
-</g>
-<g class="wt-plant">
-  <path d="M50,64 L50,35" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linecap="round"/>
-  <path d="M50,56 C42,52 39,47 41,43 C44,47 47,52 50,56" fill="var(--accent-light)" opacity="0.85"/>
-  <path d="M50,47 C58,43 61,39 59,35 C56,39 53,43 50,47" fill="var(--accent-light)" opacity="0.85"/>
-  <path d="M50,37 C47,34 46,31 47,29 C48,31 49,35 50,37" fill="var(--accent-light)" opacity="0.7"/>
-  <path d="M50,37 C53,34 54,31 53,29 C52,31 51,35 50,37" fill="var(--accent-light)" opacity="0.7"/>
-</g>
-<g class="wt-tree">
-  <path d="M50,64 L50,26" stroke="var(--accent)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-  <path d="M50,47 C44,43 38,41 34,40" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-  <path d="M50,39 C46,35 41,32 37,31" stroke="var(--accent)" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-  <path d="M50,44 C56,40 62,38 66,37" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-  <path d="M50,36 C54,32 58,30 62,29" stroke="var(--accent)" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-  <ellipse cx="50" cy="17" rx="17" ry="12" fill="var(--accent)" opacity="0.12"/>
-  <ellipse cx="36" cy="32" rx="10" ry="8" fill="var(--accent)" opacity="0.12"/>
-  <ellipse cx="65" cy="29" rx="10" ry="8" fill="var(--accent)" opacity="0.12"/>
-  <ellipse cx="50" cy="17" rx="17" ry="12" fill="none" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
-  <ellipse cx="36" cy="32" rx="10" ry="8" fill="none" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
-  <ellipse cx="65" cy="29" rx="10" ry="8" fill="none" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
+<g class="wt-grow">
+  <path class="wt-b wt-b-trunk" d="M50,64 C49,56 51,48 50,38" stroke="var(--accent)" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path class="wt-b wt-b-a" d="M50,52 C45,49 39,47 34,45" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path class="wt-b wt-b-b" d="M50,46 C56,43 62,42 67,41" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path class="wt-b wt-b-c" d="M50,42 C46,38 41,35 38,32" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <path class="wt-b wt-b-d" d="M50,40 C55,36 60,33 63,30" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <path class="wt-b wt-b-top" d="M50,38 C49,35 50,32 50,28" stroke="var(--accent)" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+  <g class="wt-leaf wt-leaf-a" fill="var(--accent-light)">
+    <circle cx="32" cy="43" r="1.8"/><circle cx="35" cy="42" r="1.6"/><circle cx="33" cy="46" r="1.5"/>
+  </g>
+  <g class="wt-leaf wt-leaf-b" fill="var(--accent-light)">
+    <circle cx="69" cy="39" r="1.8"/><circle cx="66" cy="38" r="1.6"/><circle cx="68" cy="42" r="1.5"/>
+  </g>
+  <g class="wt-leaf wt-leaf-c" fill="var(--accent-light)">
+    <circle cx="36" cy="30" r="1.7"/><circle cx="39" cy="29" r="1.5"/><circle cx="37" cy="33" r="1.4"/>
+  </g>
+  <g class="wt-leaf wt-leaf-d" fill="var(--accent-light)">
+    <circle cx="65" cy="28" r="1.7"/><circle cx="62" cy="27" r="1.5"/><circle cx="64" cy="31" r="1.4"/>
+  </g>
+  <g class="wt-leaf wt-leaf-top" fill="var(--accent-light)">
+    <circle cx="48" cy="26" r="1.7"/><circle cx="51" cy="25" r="1.6"/><circle cx="53" cy="27" r="1.3"/><circle cx="50" cy="28" r="1.4"/>
+  </g>
 </g>`;
   wrap.appendChild(svg);
   if(label)wrap.appendChild(s('plant-loader-label',label));
