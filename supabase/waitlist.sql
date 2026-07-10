@@ -13,13 +13,19 @@ create table if not exists public.waitlist (
   id         bigserial primary key,
   email      text not null unique,
   name       text,
+  source     text,     -- "How did you find out about us?"
   created_at timestamptz not null default now()
 );
+
+-- Safe to re-run: adds the column if this file already ran before
+-- source was added, no-ops otherwise.
+alter table public.waitlist add column if not exists source text;
 
 alter table public.waitlist enable row level security;
 
 -- Anyone can submit the form (including anonymous visitors) — but
 -- nobody can read the list back from the client, only via the
 -- Supabase dashboard (Table Editor) with your own account.
+drop policy if exists "waitlist_insert_anyone" on public.waitlist;
 create policy "waitlist_insert_anyone" on public.waitlist
   for insert with check (true);
