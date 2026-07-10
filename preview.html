@@ -62,6 +62,7 @@ input,select{font:inherit;color:inherit}
 /* ── Chips ───────────────────── */
 .chips{display:flex;align-items:center;gap:6px;padding:8px 18px;overflow-x:auto;flex-shrink:0;scrollbar-width:none;background:var(--bg);border-bottom:1px solid var(--border)}
 .chips::-webkit-scrollbar{display:none}
+.chips-hd{flex-shrink:0;position:sticky;left:0;background:var(--bg);padding-right:10px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-f);white-space:nowrap;display:flex;align-items:center;gap:4px}
 .chip{padding:4px 10px 4px 13px;border-radius:20px;border:1px solid var(--border);background:var(--bg-s);font-size:12px;color:var(--text-m);white-space:nowrap;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:border-color .15s,color .15s;flex-shrink:0}
 .chip:hover{border-color:var(--accent);color:var(--text)}
 .chip.on{border-color:var(--accent);color:var(--accent)}
@@ -2292,6 +2293,7 @@ function buildApp(){
 
   if(st.chips.length){
     const row=d('chips',{});
+    row.appendChild(s('chips-hd','🕓 Recent Searches'));
     st.chips.forEach(name=>{
       const on=getNode(st.selectedId)?.name===name;
       const chip=d('chip'+(on?' on':''),{});
