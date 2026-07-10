@@ -1,9 +1,57 @@
 <!doctype html>
-<html>
+<html lang="en" data-theme="light" translate="no">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="refresh" content="0;url=preview.html">
-<title>WaxTree</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="google" content="notranslate">
+<title>WaxTree — Dig deeper</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+[data-theme=dark]{--bg:#09090B;--bg-s:#111114;--text:#E8EDEA;--text-m:#7A9A8A;--text-f:#3E5A4A;--accent:#5EC47B;--accent-light:#90E0AA;--border:#1E1E25}
+[data-theme=light]{--bg:#E8F0EA;--bg-s:#F4FBF6;--text:#1B2D22;--text-m:#3D6B4E;--text-f:#8FB09A;--accent:#3DAE5A;--accent-light:#5EC47B;--border:#C0D9C7}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;position:relative;overflow:hidden}
+.top-bar{position:fixed;top:0;left:0;right:0;display:flex;justify-content:flex-end;align-items:center;gap:10px;padding:20px 24px}
+.login-link{padding:9px 20px;border-radius:20px;border:1.5px solid var(--border);color:var(--text-m);font-size:13px;font-weight:600;text-decoration:none;transition:border-color .15s,color .15s}
+.login-link:hover{border-color:var(--accent);color:var(--accent)}
+.theme-btn{width:32px;height:32px;border-radius:50%;background:var(--bg-s);border:1px solid var(--border);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;transition:background .15s}
+.theme-btn:hover{background:var(--border)}
+.hero{text-align:center;max-width:480px}
+.hero-logo{width:64px;height:64px;margin:0 auto 20px;display:block}
+.hero-logo img{width:100%;height:100%;object-fit:contain}
+.hero-name{font-size:38px;font-weight:700;letter-spacing:-1px;margin-bottom:14px}
+.hero-name em{font-style:normal;color:var(--accent-light)}
+.hero-tag{font-size:15px;color:var(--text-m);line-height:1.6;margin-bottom:36px}
+.btn-join{display:inline-block;padding:15px 36px;border-radius:14px;background:var(--accent);color:#fff;font-size:15px;font-weight:700;text-decoration:none;transition:opacity .15s,transform .1s}
+.btn-join:hover{opacity:.9}
+.btn-join:active{transform:scale(.98)}
+</style>
 </head>
-<body></body>
+<body>
+
+<div class="top-bar">
+  <button class="theme-btn" id="themeBtn" title="Toggle theme">🌙</button>
+  <a href="login.html" class="login-link">Login</a>
+</div>
+
+<div class="hero">
+  <div class="hero-logo"><img src="./logo.svg" alt="WaxTree"></div>
+  <div class="hero-name"><em>Wax</em>Tree</div>
+  <div class="hero-tag">Dig deeper. Explore artists and labels as a living, non-destructive family tree — and never lose track of where you started.</div>
+  <a href="register.html" class="btn-join">Join the Waitlist</a>
+</div>
+
+<script>
+const html=document.documentElement;
+const saved=localStorage.getItem('wt-theme');
+if(saved)html.setAttribute('data-theme',saved);
+const themeBtn=document.getElementById('themeBtn');
+themeBtn.textContent=html.dataset.theme==='dark'?'☀':'🌙';
+themeBtn.addEventListener('click',()=>{
+  const next=html.dataset.theme==='dark'?'light':'dark';
+  html.setAttribute('data-theme',next);
+  localStorage.setItem('wt-theme',next);
+  themeBtn.textContent=next==='dark'?'☀':'🌙';
+});
+</script>
+</body>
 </html>
