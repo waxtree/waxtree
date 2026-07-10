@@ -2360,7 +2360,7 @@ function buildApp(){
 
   if(st.chips.length){
     const row=d('chips',{});
-    row.appendChild(s('chips-hd','🕓 Recent Searches'));
+    row.appendChild(s('chips-hd','Recent Searches'));
     st.chips.forEach(name=>{
       const on=getNode(st.selectedId)?.name===name;
       const chip=d('chip'+(on?' on':''),{});
