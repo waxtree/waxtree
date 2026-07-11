@@ -1,6 +1,6 @@
 const ck = process.env.DISCOGS_CONSUMER_KEY ?? ''
 const cs = process.env.DISCOGS_CONSUMER_SECRET ?? ''
-const UA = 'WaxTree/1.0 (navi.avinn@gmail.com)'
+const UA = 'WaxTree/1.0 (luca.doots@gmail.com)'
 
 function nonce() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)

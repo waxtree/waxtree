@@ -13,7 +13,7 @@ const respond = (body: unknown, status = 200) =>
     headers: { ...CORS, 'Content-Type': 'application/json' },
   })
 
-const UA = 'WaxTree/1.0 (navi.avinn@gmail.com)'
+const UA = 'WaxTree/1.0 (luca.doots@gmail.com)'
 
 function nonce() {
   return crypto.randomUUID().replace(/-/g, '')

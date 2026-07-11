@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="google" content="notranslate">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-BG6G70ZKRE"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-BG6G70ZKRE');
+</script>
 <title>WaxTree</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -1225,7 +1233,7 @@ async function mbFetch(url,_retry=0){
   if(gap<1100)await new Promise(r=>setTimeout(r,1100-gap));
   mbLast=Date.now();
   let res;
-  try{res=await fetch(url,{headers:{'User-Agent':'WaxTree/1.0 (navi.avinn@gmail.com)'}});}
+  try{res=await fetch(url,{headers:{'User-Agent':'WaxTree/1.0 (luca.doots@gmail.com)'}});}
   catch(e){
     if(_retry<2){mbLast=0;await new Promise(r=>setTimeout(r,3000*(1+_retry)));return mbFetch(url,_retry+1);}
     throw e;
