@@ -1502,7 +1502,16 @@ async function fetchBandcamp(nodeId,artistName){
   rr();
 }
 
-let _loadGen=0;
+// Per-node load generation — each node cancels only its OWN previous
+// in-flight fetch (e.g. a fast double retry), never another node's.
+// A single shared counter here previously meant clicking Explore on
+// node B silently cancelled node A's still-loading fetch, leaving A
+// stuck at loading:true forever once its (discarded) response arrived.
+const nodeLoadGen={};
+function startNodeLoad(nodeId){
+  const myGen=(nodeLoadGen[nodeId]=(nodeLoadGen[nodeId]||0)+1);
+  return ()=>nodeLoadGen[nodeId]!==myGen;
+}
 function addNode(type,discogsId,name,parentId,branchId){
   const bid=branchId||st.activeBranchId;
   const existing=st.nodes.find(n=>n.discogsId===discogsId&&n.branchId===bid);
@@ -1514,8 +1523,7 @@ function addNode(type,discogsId,name,parentId,branchId){
   st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
   if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
   rr();
-  const myGen=++_loadGen;
-  const cancelled=()=>_loadGen!==myGen;
+  const cancelled=startNodeLoad(id);
   const fn=type==='label'?fetchLabelData:fetchArtistData;
   fn(discogsId,cancelled).then(d=>{
     if(cancelled())return;
@@ -1529,8 +1537,7 @@ function addNode(type,discogsId,name,parentId,branchId){
 function retryNode(nodeId){
   const node=getNode(nodeId);if(!node)return;
   node.error=null;node.loading=true;rr();
-  const myGen=++_loadGen;
-  const cancelled=()=>_loadGen!==myGen;
+  const cancelled=startNodeLoad(nodeId);
   const fn=node.type==='label'?fetchLabelData:fetchArtistData;
   fn(node.discogsId,cancelled).then(d=>{
     if(cancelled())return;
