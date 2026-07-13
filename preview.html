@@ -1064,10 +1064,26 @@ const DEMO_NODES=[{
 const SK='ct-v5';
 function loadSt(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}}
 function saveSt(){
+  // Node.data (bio, images, full tracklists) used to be written to
+  // localStorage in full, uncapped — for a long-time user with a large
+  // explored tree, this blob can grow past the browser's localStorage quota
+  // (typically 5-10MB/origin). Once ANY write to that origin starts failing,
+  // it's not just our own data at risk: Supabase's client also persists its
+  // session/refresh token to localStorage, and a failed write there can look
+  // like an invalid session and trigger a spontaneous sign-out — matching
+  // reports of random logout + login being stuck until the user manually
+  // clears site data (which resets the quota). Stripping the same way
+  // pushStateToCloud() already does keeps this local write small; nodes
+  // reload their .data on demand via ensureNodeLoaded(), same mechanism
+  // already used after a cloud restore.
+  const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
   try{
-    localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:st.nodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsCollection:st.discogsCollection,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));
+    localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsCollection:st.discogsCollection,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));
     localStorage.setItem(SK+':ts',String(Date.now()));
-  }catch{}
+  }catch(e){
+    console.warn('WaxTree: local save failed (localStorage full?):',e);
+    window.Sentry?.captureException instanceof Function&&Sentry.captureException(e,{tags:{area:'local-save'}});
+  }
   scheduleCloudSync();
 }
 // ── Cloud backup ───────────────────────────────────────────
