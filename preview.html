@@ -1087,8 +1087,13 @@ async function pushStateToCloud(){
   // (which artist/label, which branch, pin/tag state) is irreplaceable.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
   const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,avatarDataUrl:getAvatarUrl()};
-  try{await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});}
-  catch(e){console.warn('WaxTree: cloud backup failed (will retry on next change):',e);}
+  try{
+    const{error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});
+    if(error)throw error;
+  }catch(e){
+    console.warn('WaxTree: cloud backup failed (will retry on next change):',e);
+    window.Sentry?.captureException instanceof Function&&Sentry.captureException(e,{tags:{area:'cloud-backup-push'}});
+  }
 }
 function ensureNodeLoaded(id){
   const n=getNode(id);
@@ -1097,7 +1102,12 @@ function ensureNodeLoaded(id){
 async function hydrateFromCloud(){
   try{
     const{data,error}=await sb.from('user_state').select('data,updated_at').eq('user_id',wtSession.user.id).maybeSingle();
-    if(error||!data)return;
+    if(error){
+      console.warn('WaxTree: cloud restore query failed:',error);
+      window.Sentry?.captureException instanceof Function&&Sentry.captureException(new Error('hydrateFromCloud query failed: '+error.message),{tags:{area:'cloud-backup-pull'}});
+      return;
+    }
+    if(!data){console.info('WaxTree: no cloud backup found yet for this account.');return;}
     const cloudTs=new Date(data.updated_at).getTime();
     const localTs=Number(localStorage.getItem(SK+':ts')||0);
     if(cloudTs<=localTs)return; // local copy is newer or equal — nothing to recover
@@ -1125,7 +1135,10 @@ async function hydrateFromCloud(){
     saveSt();
     ensureNodeLoaded(st.selectedId);
     rr();
-  }catch(e){console.warn('WaxTree: cloud restore failed:',e);}
+  }catch(e){
+    console.warn('WaxTree: cloud restore failed:',e);
+    window.Sentry?.captureException instanceof Function&&Sentry.captureException(e,{tags:{area:'cloud-backup-pull'}});
+  }
 }
 
 const saved=loadSt();
