@@ -2808,7 +2808,6 @@ function buildApp(){
         info.appendChild(s('daq-meta',[rel.artist,rel.year].filter(Boolean).join(' · ')));
         item.appendChild(info);
         const actions=d('follows-actions',{});
-        if(rel.discogsUrl)actions.appendChild(el('a',{cls:'follows-open',href:rel.discogsUrl,target:'_blank',rel:'noreferrer'},'Discogs ↗'));
         if(rel.artistExploreId)actions.appendChild(b('follows-open',{title:'Explore artist',onClick:()=>{
           st.librariesModal=false;
           const existing=st.nodes.find(n=>n.discogsId===rel.artistExploreId&&n.branchId===st.activeBranchId);
