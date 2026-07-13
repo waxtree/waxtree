@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en" data-theme="light" translate="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="google" content="notranslate">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-BG6G70ZKRE"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-BG6G70ZKRE');
+</script>
+<title>WaxTree — Registration Waitlist</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+[data-theme=dark]{--bg:#09090B;--bg-s:#111114;--bg-e:#17171B;--bg-h:#1F1F25;--text:#E8EDEA;--text-m:#7A9A8A;--text-f:#3E5A4A;--accent:#5EC47B;--accent-light:#90E0AA;--border:#1E1E25;--shadow:0 8px 32px rgba(0,0,0,.85);--input-bg:#17171B;--err:#F47B5E;--ok:#5EC47B}
+[data-theme=light]{--bg:#E8F0EA;--bg-s:#F4FBF6;--bg-e:#EAF2EC;--bg-h:#D4E8D8;--text:#1B2D22;--text-m:#3D6B4E;--text-f:#8FB09A;--accent:#3DAE5A;--accent-light:#5EC47B;--border:#C0D9C7;--shadow:0 8px 32px rgba(0,0,0,.12);--input-bg:#fff;--err:#D94F2E;--ok:#3DAE5A}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+.card{background:var(--bg-s);border:1px solid var(--border);border-radius:20px;padding:44px 40px 36px;width:100%;max-width:420px;box-shadow:var(--shadow)}
+.brand{text-align:center;margin-bottom:32px}
+.brand-logo{width:92px;height:92px;margin:0 auto 18px;display:block}
+.brand-logo img{width:100%;height:100%;object-fit:contain}
+.brand-name{font-size:26px;font-weight:700;letter-spacing:-.4px;color:#3DAE79}
+.brand-name em{font-style:normal;color:#3DAE79}
+.brand-sub{font-size:13px;color:var(--text-m);margin-top:6px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--text-m);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
+.field input{width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:12px;padding:11px 14px;font-size:14px;color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s;font-family:inherit}
+.field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(94,196,123,.14)}
+.field input.error{border-color:var(--err)}
+.err-msg{font-size:12px;color:var(--err);margin-top:5px;min-height:16px}
+.form-err{background:rgba(244,123,94,.1);border:1px solid rgba(244,123,94,.3);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--err);margin-bottom:16px;display:none}
+.form-err.show{display:block}
+.btn-main{width:100%;padding:13px;border-radius:12px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:opacity .15s,transform .1s;font-family:inherit;margin-top:4px}
+.btn-main:hover{opacity:.9}
+.btn-main:active{transform:scale(.98)}
+.btn-main:disabled{opacity:.5;cursor:default}
+.card-footer{text-align:center;margin-top:24px;font-size:13px;color:var(--text-m)}
+.card-footer a{color:var(--accent);text-decoration:none;font-weight:500;transition:opacity .15s}
+.card-footer a:hover{opacity:.8}
+.theme-btn{position:fixed;top:16px;right:16px;width:32px;height:32px;border-radius:50%;background:var(--bg-s);border:1px solid var(--border);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;transition:background .15s}
+.theme-btn:hover{background:var(--bg-h)}
+.spinner{display:inline-block;width:16px;height:16px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* confirm state */
+.confirm-state{display:none;text-align:center}
+.confirm-state.show{display:block}
+.confirm-icon{font-size:48px;margin-bottom:16px}
+.confirm-title{font-size:18px;font-weight:700;margin-bottom:10px}
+.confirm-body{font-size:13px;color:var(--text-m);line-height:1.6}
+</style>
+</head>
+<body>
+
+<button class="theme-btn" id="themeBtn" title="Toggle theme">🌙</button>
+
+<div class="card">
+  <div class="brand">
+    <div class="brand-logo"><img src="./logo.svg" alt=""></div>
+    <div class="brand-name"><em>Wax</em>Tree</div>
+    <div class="brand-sub" id="brandSub">Join the waitlist</div>
+  </div>
+
+  <div class="form-err" id="formErr"></div>
+
+  <form id="waitForm" novalidate>
+    <div class="field">
+      <label for="name">Name <span style="text-transform:none;font-weight:400">(optional)</span></label>
+      <input type="text" id="name" placeholder="Your name" autocomplete="name" maxlength="60">
+    </div>
+
+    <div class="field">
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="your@email.com" autocomplete="email">
+      <div class="err-msg" id="emailErr"></div>
+    </div>
+
+    <div class="field">
+      <label for="source">How did you find out about us? <span style="text-transform:none;font-weight:400">(optional)</span></label>
+      <input type="text" id="source" placeholder="e.g. a friend, Instagram, Reddit…" maxlength="140">
+    </div>
+
+    <button type="submit" class="btn-main" id="submitBtn">Join the waitlist</button>
+  </form>
+
+  <div class="confirm-state" id="confirmState">
+    <div class="confirm-icon">🌱</div>
+    <div class="confirm-title">You're on the list!</div>
+    <div class="confirm-body">
+      Thanks for wanting to be part of this adventure from the very start — it means a lot to us. We'll reach out soon with your login details so you can dig in.
+    </div>
+  </div>
+
+  <div class="card-footer" id="cardFooter">
+    Already have an account? <a href="login.html">Sign in</a>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL='https://asmnqlqvlpcwcaaughuu.supabase.co';
+const SUPABASE_KEY='sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ';
+const {createClient}=window.supabase;
+const sb=createClient(SUPABASE_URL,SUPABASE_KEY);
+
+// Theme
+const html=document.documentElement;
+const saved=localStorage.getItem('wt-theme');
+if(saved)html.setAttribute('data-theme',saved);
+const themeBtn=document.getElementById('themeBtn');
+themeBtn.textContent=html.dataset.theme==='dark'?'☀':'🌙';
+themeBtn.addEventListener('click',()=>{
+  const next=html.dataset.theme==='dark'?'light':'dark';
+  html.setAttribute('data-theme',next);
+  localStorage.setItem('wt-theme',next);
+  themeBtn.textContent=next==='dark'?'☀':'🌙';
+});
+
+// Helpers
+function showFieldErr(id,msg){
+  const err=document.getElementById(id);
+  err.textContent=msg;
+  const sib=err.previousElementSibling;
+  if(sib?.tagName==='INPUT')sib.classList.toggle('error',!!msg);
+}
+function clearErrs(){showFieldErr('emailErr','');document.getElementById('formErr').classList.remove('show');}
+function showFormErr(msg){const el=document.getElementById('formErr');el.textContent=msg;el.classList.add('show');}
+
+// Submit
+document.getElementById('waitForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  clearErrs();
+  const name=document.getElementById('name').value.trim();
+  const email=document.getElementById('email').value.trim();
+  const source=document.getElementById('source').value.trim();
+
+  if(!email){showFieldErr('emailErr','Enter your email');return;}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showFieldErr('emailErr','Invalid email');return;}
+
+  const btn=document.getElementById('submitBtn');
+  btn.disabled=true;
+  btn.innerHTML='<span class="spinner"></span>Joining…';
+
+  const {error}=await sb.from('waitlist').insert({email,name:name||null,source:source||null});
+
+  if(error){
+    btn.disabled=false;btn.textContent='Join the waitlist';
+    const msg=error.code==='23505'
+      ?'This email is already on the waitlist.'
+      :'Something went wrong — please try again.';
+    showFormErr(msg);
+    return;
+  }
+
+  document.getElementById('waitForm').style.display='none';
+  document.getElementById('confirmState').classList.add('show');
+  document.getElementById('brandSub').textContent="You're in!";
+  document.getElementById('cardFooter').style.display='none';
+});
+</script>
+</body>
+</html>

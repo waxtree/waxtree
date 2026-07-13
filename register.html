@@ -12,7 +12,7 @@
   gtag('js', new Date());
   gtag('config', 'G-BG6G70ZKRE');
 </script>
-<title>WaxTree — Registration Waitlist</title>
+<title>WaxTree — Sign Up</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 [data-theme=dark]{--bg:#09090B;--bg-s:#111114;--bg-e:#17171B;--bg-h:#1F1F25;--text:#E8EDEA;--text-m:#7A9A8A;--text-f:#3E5A4A;--accent:#5EC47B;--accent-light:#90E0AA;--border:#1E1E25;--shadow:0 8px 32px rgba(0,0,0,.85);--input-bg:#17171B;--err:#F47B5E;--ok:#5EC47B}
@@ -27,13 +27,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .brand-sub{font-size:13px;color:var(--text-m);margin-top:6px}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:12px;font-weight:600;color:var(--text-m);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px}
+.field-wrap{position:relative}
 .field input{width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:12px;padding:11px 14px;font-size:14px;color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s;font-family:inherit}
 .field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(94,196,123,.14)}
 .field input.error{border-color:var(--err)}
+.field-eye{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-f);font-size:15px;padding:2px;line-height:1;transition:color .15s}
+.field-eye:hover{color:var(--text-m)}
 .err-msg{font-size:12px;color:var(--err);margin-top:5px;min-height:16px}
 .form-err{background:rgba(244,123,94,.1);border:1px solid rgba(244,123,94,.3);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--err);margin-bottom:16px;display:none}
 .form-err.show{display:block}
-.btn-main{width:100%;padding:13px;border-radius:12px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:opacity .15s,transform .1s;font-family:inherit;margin-top:4px}
+.pw-strength{margin-top:8px}
+.pw-bar-wrap{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.pw-bar{height:100%;width:0%;border-radius:2px;transition:width .3s,background .3s}
+.pw-label{font-size:11px;color:var(--text-f);margin-top:4px}
+.btn-main{width:100%;padding:13px;border-radius:12px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:opacity .15s,transform .1s;font-family:inherit;margin-top:8px}
 .btn-main:hover{opacity:.9}
 .btn-main:active{transform:scale(.98)}
 .btn-main:disabled{opacity:.5;cursor:default}
@@ -44,12 +51,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .theme-btn:hover{background:var(--bg-h)}
 .spinner{display:inline-block;width:16px;height:16px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
-/* confirm state */
+.divider{height:1px;background:var(--border);margin:4px 0 14px}
+.section-label{font-size:11px;font-weight:600;color:var(--text-f);letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px}
+/* confirm email state */
 .confirm-state{display:none;text-align:center}
 .confirm-state.show{display:block}
 .confirm-icon{font-size:48px;margin-bottom:16px}
 .confirm-title{font-size:18px;font-weight:700;margin-bottom:10px}
-.confirm-body{font-size:13px;color:var(--text-m);line-height:1.6}
+.confirm-body{font-size:13px;color:var(--text-m);line-height:1.6;margin-bottom:20px}
+.confirm-email{color:var(--accent-light);font-weight:600}
+.btn-secondary{display:inline-block;padding:11px 24px;border-radius:12px;border:1.5px solid var(--accent);color:var(--accent);font-size:14px;font-weight:600;text-decoration:none;transition:background .15s,color .15s}
+.btn-secondary:hover{background:var(--accent);color:#fff}
 </style>
 </head>
 <body>
@@ -60,15 +72,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   <div class="brand">
     <div class="brand-logo"><img src="./logo.svg" alt=""></div>
     <div class="brand-name"><em>Wax</em>Tree</div>
-    <div class="brand-sub" id="brandSub">Join the waitlist</div>
+    <div class="brand-sub" id="brandSub">Create your account</div>
   </div>
 
   <div class="form-err" id="formErr"></div>
 
-  <form id="waitForm" novalidate>
+  <form id="regForm" novalidate>
+    <div class="section-label">Profile</div>
     <div class="field">
-      <label for="name">Name <span style="text-transform:none;font-weight:400">(optional)</span></label>
-      <input type="text" id="name" placeholder="Your name" autocomplete="name" maxlength="60">
+      <label for="username">Username</label>
+      <input type="text" id="username" placeholder="e.g. djluca" autocomplete="username" maxlength="32">
+      <div class="err-msg" id="usernameErr"></div>
     </div>
 
     <div class="field">
@@ -77,20 +91,43 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
       <div class="err-msg" id="emailErr"></div>
     </div>
 
+    <div class="divider"></div>
+    <div class="section-label">Security</div>
+
     <div class="field">
-      <label for="source">How did you find out about us? <span style="text-transform:none;font-weight:400">(optional)</span></label>
-      <input type="text" id="source" placeholder="e.g. a friend, Instagram, Reddit…" maxlength="140">
+      <label for="password">Password</label>
+      <div class="field-wrap">
+        <input type="password" id="password" placeholder="Min. 8 characters" autocomplete="new-password" style="padding-right:40px">
+        <button type="button" class="field-eye" id="eyeBtn1" aria-label="Show password">👁</button>
+      </div>
+      <div class="pw-strength">
+        <div class="pw-bar-wrap"><div class="pw-bar" id="pwBar"></div></div>
+        <div class="pw-label" id="pwLabel"></div>
+      </div>
+      <div class="err-msg" id="passErr"></div>
     </div>
 
-    <button type="submit" class="btn-main" id="submitBtn">Join the waitlist</button>
+    <div class="field">
+      <label for="confirm">Confirm password</label>
+      <div class="field-wrap">
+        <input type="password" id="confirm" placeholder="Repeat password" autocomplete="new-password" style="padding-right:40px">
+        <button type="button" class="field-eye" id="eyeBtn2" aria-label="Show confirm">👁</button>
+      </div>
+      <div class="err-msg" id="confirmErr"></div>
+    </div>
+
+    <button type="submit" class="btn-main" id="submitBtn">Create account</button>
   </form>
 
+  <!-- shown if Supabase requires email confirmation -->
   <div class="confirm-state" id="confirmState">
-    <div class="confirm-icon">🌱</div>
-    <div class="confirm-title">You're on the list!</div>
+    <div class="confirm-icon">📬</div>
+    <div class="confirm-title">Check your email</div>
     <div class="confirm-body">
-      Thanks for wanting to be part of this adventure from the very start — it means a lot to us. We'll reach out soon with your login details so you can dig in.
+      We've sent a confirmation link to <span class="confirm-email" id="confirmEmail"></span>.<br>
+      Click the link to activate your account.
     </div>
+    <a href="login.html" class="btn-secondary">Go to sign in</a>
   </div>
 
   <div class="card-footer" id="cardFooter">
@@ -118,46 +155,113 @@ themeBtn.addEventListener('click',()=>{
   themeBtn.textContent=next==='dark'?'☀':'🌙';
 });
 
+// Already logged in?
+sb.auth.getSession().then(({data:{session}})=>{
+  if(session)window.location.href='preview.html';
+});
+
+// Eye toggles
+function makeEye(btnId,inputId){
+  const btn=document.getElementById(btnId),inp=document.getElementById(inputId);
+  btn.addEventListener('click',()=>{
+    const show=inp.type==='password';
+    inp.type=show?'text':'password';
+    btn.textContent=show?'🙈':'👁';
+  });
+}
+makeEye('eyeBtn1','password');
+makeEye('eyeBtn2','confirm');
+
+// Password strength
+const pwInput=document.getElementById('password');
+const pwBar=document.getElementById('pwBar');
+const pwLabel=document.getElementById('pwLabel');
+function calcStrength(pw){
+  let s=0;
+  if(pw.length>=8)s++;if(pw.length>=12)s++;
+  if(/[A-Z]/.test(pw))s++;if(/[0-9]/.test(pw))s++;if(/[^A-Za-z0-9]/.test(pw))s++;
+  return s;
+}
+const LEVELS=[{label:'',color:''},{label:'Weak',color:'#F47B5E'},{label:'Fair',color:'#F4C15E'},{label:'Good',color:'#90E0AA'},{label:'Great',color:'#5EC47B'},{label:'Strong',color:'#3DAE5A'}];
+pwInput.addEventListener('input',()=>{
+  const pw=pwInput.value;
+  if(!pw){pwBar.style.width='0';pwLabel.textContent='';return;}
+  const s=Math.max(1,calcStrength(pw));
+  const lvl=LEVELS[Math.min(s,5)];
+  pwBar.style.width=(s/5*100)+'%';
+  pwBar.style.background=lvl.color;
+  pwLabel.textContent=lvl.label;
+  pwLabel.style.color=lvl.color;
+});
+
 // Helpers
 function showFieldErr(id,msg){
   const err=document.getElementById(id);
   err.textContent=msg;
   const sib=err.previousElementSibling;
-  if(sib?.tagName==='INPUT')sib.classList.toggle('error',!!msg);
+  const inp=sib?.tagName==='INPUT'?sib:sib?.querySelector('input');
+  if(inp)inp.classList.toggle('error',!!msg);
 }
-function clearErrs(){showFieldErr('emailErr','');document.getElementById('formErr').classList.remove('show');}
+function clearErrs(){
+  [['username','usernameErr'],['email','emailErr'],['password','passErr'],['confirm','confirmErr']]
+    .forEach(([f,e])=>showFieldErr(e,''));
+  document.getElementById('formErr').classList.remove('show');
+}
 function showFormErr(msg){const el=document.getElementById('formErr');el.textContent=msg;el.classList.add('show');}
 
 // Submit
-document.getElementById('waitForm').addEventListener('submit',async e=>{
+document.getElementById('regForm').addEventListener('submit',async e=>{
   e.preventDefault();
   clearErrs();
-  const name=document.getElementById('name').value.trim();
+  const username=document.getElementById('username').value.trim();
   const email=document.getElementById('email').value.trim();
-  const source=document.getElementById('source').value.trim();
+  const pass=document.getElementById('password').value;
+  const confirm=document.getElementById('confirm').value;
+  let ok=true;
 
-  if(!email){showFieldErr('emailErr','Enter your email');return;}
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showFieldErr('emailErr','Invalid email');return;}
+  if(!username){showFieldErr('usernameErr','Enter a username');ok=false;}
+  else if(username.length<3){showFieldErr('usernameErr','At least 3 characters');ok=false;}
+  else if(!/^[a-zA-Z0-9_.-]+$/.test(username)){showFieldErr('usernameErr','Letters, numbers, _ . - only');ok=false;}
+  if(!email){showFieldErr('emailErr','Enter your email');ok=false;}
+  else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showFieldErr('emailErr','Invalid email');ok=false;}
+  if(!pass){showFieldErr('passErr','Enter a password');ok=false;}
+  else if(pass.length<8){showFieldErr('passErr','At least 8 characters');ok=false;}
+  if(!confirm){showFieldErr('confirmErr','Confirm your password');ok=false;}
+  else if(pass&&confirm&&pass!==confirm){showFieldErr('confirmErr','Passwords do not match');ok=false;}
+  if(!ok)return;
 
   const btn=document.getElementById('submitBtn');
   btn.disabled=true;
-  btn.innerHTML='<span class="spinner"></span>Joining…';
+  btn.innerHTML='<span class="spinner"></span>Creating account…';
 
-  const {error}=await sb.from('waitlist').insert({email,name:name||null,source:source||null});
+  const {data,error}=await sb.auth.signUp({
+    email,
+    password:pass,
+    options:{data:{username}}
+  });
 
   if(error){
-    btn.disabled=false;btn.textContent='Join the waitlist';
-    const msg=error.code==='23505'
-      ?'This email is already on the waitlist.'
-      :'Something went wrong — please try again.';
+    btn.disabled=false;btn.textContent='Create account';
+    const msg=error.message.includes('already registered')
+      ?'Email already registered. <a href="login.html">Sign in</a>'
+      :error.message;
     showFormErr(msg);
     return;
   }
 
-  document.getElementById('waitForm').style.display='none';
-  document.getElementById('confirmState').classList.add('show');
-  document.getElementById('brandSub').textContent="You're in!";
-  document.getElementById('cardFooter').style.display='none';
+  localStorage.setItem('wt-theme',html.dataset.theme);
+
+  // If session is present → email confirmation disabled, go directly to app
+  if(data.session){
+    window.location.href='preview.html';
+  } else {
+    // Email confirmation required → show confirmation notice
+    document.getElementById('regForm').style.display='none';
+    document.getElementById('confirmEmail').textContent=email;
+    document.getElementById('confirmState').classList.add('show');
+    document.getElementById('brandSub').textContent='Almost done!';
+    document.getElementById('cardFooter').style.display='none';
+  }
 });
 </script>
 </body>
