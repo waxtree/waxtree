@@ -687,10 +687,24 @@ async function syncDiscogsAccount(){
   const fetchPage=(path,p)=>useOAuth?dOAuthProxy(path,p):dReq(path,p);
   st.discogsSyncing=true;rr();
   try{
-    let page=1,collRIds=[],collMIds=[];
+    let page=1,collRIds=[],collMIds=[],collEntries=[];
     while(true){
       const d=await fetchPage(`/users/${username}/collection/folders/0/releases`,{per_page:'100',page:String(page),sort:'added',sort_order:'desc'});
-      d.releases.forEach(r=>{collRIds.push(r.basic_information.id);if(r.basic_information.master_id)collMIds.push(r.basic_information.master_id);});
+      d.releases.forEach(r=>{
+        const bi=r.basic_information;
+        collRIds.push(bi.id);if(bi.master_id)collMIds.push(bi.master_id);
+        const formatNames=(bi.formats||[]).map(f=>f.name);
+        collEntries.push({
+          id:bi.id,
+          title:bi.title||'',
+          artist:(bi.artists||[]).map(a=>stripDiscogsSuffix(a.name)).join(', '),
+          year:bi.year||null,
+          thumb:bi.thumb||bi.cover_image||null,
+          isVinyl:formatNames.includes('Vinyl'),
+          isDigital:formatNames.includes('File'),
+          discogsUrl:`https://www.discogs.com/release/${bi.id}`,
+        });
+      });
       if(page>=d.pagination.pages)break;page++;
     }
     let wp=1,wantRIds=[],wantMIds=[];
@@ -700,6 +714,7 @@ async function syncDiscogsAccount(){
       if(wp>=d.pagination.pages)break;wp++;
     }
     st.discogsCollReleaseIds=collRIds;st.discogsCollMasterIds=collMIds;
+    st.discogsCollection=collEntries;
     st.discogsWantReleaseIds=wantRIds;st.discogsWantMasterIds=wantMIds;
     st.discogsCollSyncedAt=new Date().toISOString();saveSt();
   }catch(e){st.discogsSyncing=false;rr();throw e;}
@@ -903,7 +918,7 @@ const SK='ct-v5';
 function loadSt(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}}
 function saveSt(){
   try{
-    localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:st.nodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));
+    localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:st.nodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsCollection:st.discogsCollection,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));
     localStorage.setItem(SK+':ts',String(Date.now()));
   }catch{}
   scheduleCloudSync();
@@ -991,6 +1006,8 @@ const st={
   discogsOAuthSecret:saved?.discogsOAuthSecret||'',
   discogsCollReleaseIds:saved?.discogsCollReleaseIds||[],
   discogsCollMasterIds:saved?.discogsCollMasterIds||[],
+  discogsCollection:saved?.discogsCollection||[],
+  librariesModal:false,
   discogsWantReleaseIds:saved?.discogsWantReleaseIds||[],
   discogsWantMasterIds:saved?.discogsWantMasterIds||[],
   discogsCollSyncedAt:saved?.discogsCollSyncedAt||null,
@@ -2388,6 +2405,7 @@ function buildApp(){
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.settingsModal=true;rr();}},'My Settings'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.likesModal=true;rr();}},'My Likes'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.followsModal=true;rr();}},'My Follows'));
+        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.librariesModal=true;rr();}},'My Libraries'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.discogsModal=true;rr();}},'Sync Libraries'+((st.discogsCollSyncedAt||st.ownedTracks.length)?' ✓':'')));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.historyModal=true;rr();}},'History'));
         menu.appendChild(d('profile-sep',{}));
@@ -2694,6 +2712,49 @@ function buildApp(){
       });
     }
     modal.appendChild(list);
+    overlay.appendChild(modal);root.appendChild(overlay);
+  }
+
+  // ── My Libraries modal ──────────────────────────────────────
+  if(st.librariesModal){
+    const overlay=d('overlay',{onClick:()=>{st.librariesModal=false;rr();}});
+    const modal=d('modal daq-modal follows-modal',{onClick:e=>e.stopPropagation()});
+    modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'0'}},
+      el('h2',{cls:'modal-title'},'💿 My Libraries'),
+      b('btn-sec',{onClick:()=>{st.librariesModal=false;rr();}},'×')
+    ));
+    const buildLibSection=(label,entries)=>{
+      const hd=d('pl-section-hd',{});
+      hd.appendChild(document.createTextNode(label));
+      hd.appendChild(s('pl-section-cnt',entries.length+(entries.length===1?' release':' releases')));
+      modal.appendChild(hd);
+      const list=d('follows-list',{});
+      if(!entries.length){
+        const empty=d('daq-empty',{},st.discogsCollSyncedAt?'No releases in this format.':'Sync your Discogs collection to see it here.');
+        if(!st.discogsCollSyncedAt){
+          empty.style.cursor='pointer';
+          empty.addEventListener('click',()=>{st.librariesModal=false;st.discogsModal=true;rr();});
+        }
+        list.appendChild(empty);
+      } else {
+        entries.forEach(rel=>{
+          const item=d('follows-item',{});
+          if(rel.thumb)item.appendChild(el('img',{cls:'follows-thumb',src:rel.thumb,alt:'',loading:'lazy'}));
+          else item.appendChild(d('follows-thumb-ph',{},'♫'));
+          const info=d('daq-info',{});
+          info.appendChild(s('daq-title',rel.title));
+          info.appendChild(s('daq-meta',[rel.artist,rel.year].filter(Boolean).join(' · ')));
+          item.appendChild(info);
+          const actions=d('follows-actions',{});
+          actions.appendChild(el('a',{cls:'follows-open',href:rel.discogsUrl,target:'_blank',rel:'noreferrer'},'Open ↗'));
+          item.appendChild(actions);
+          list.appendChild(item);
+        });
+      }
+      modal.appendChild(list);
+    };
+    buildLibSection('💽 Vinyl',st.discogsCollection.filter(r=>r.isVinyl));
+    buildLibSection('💾 Digital',st.discogsCollection.filter(r=>r.isDigital));
     overlay.appendChild(modal);root.appendChild(overlay);
   }
 
