@@ -4,25 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="google" content="notranslate">
-<!-- Sentry error monitoring + tracing + session replay -->
-<script src="https://browser.sentry-cdn.com/10.65.0/bundle.tracing.replay.min.js" crossorigin="anonymous"></script>
-<script>
-  Sentry.init({
-    dsn: "https://0120197e3869fdd033c9574c0d4e9841@o4511727540305920.ingest.de.sentry.io/4511727608987728",
-    integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
-    tracesSampleRate: 1.0,
-    replaysSessionSampleRate: 0.1,
-    replaysOnErrorSampleRate: 1.0,
-  });
-</script>
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-BG6G70ZKRE"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-BG6G70ZKRE');
-</script>
 <title>WaxTree</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -460,6 +441,14 @@ input,select{font:inherit;color:inherit}
 @keyframes wt-bud-c{0%,42%{opacity:0;transform:scale(.2)}50%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
 @keyframes wt-bud-d{0%,46%{opacity:0;transform:scale(.2)}54%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
 @keyframes wt-bud-top{0%,48%{opacity:0;transform:scale(.2)}56%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+.cookie-banner{position:fixed;left:0;right:0;bottom:0;transform:translateY(120%);transition:transform .3s ease;background:var(--bg-s);border-top:1px solid var(--border);padding:16px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:space-between;z-index:2000;box-shadow:0 -4px 20px rgba(0,0,0,.15)}
+.cookie-banner.show{transform:translateY(0)}
+.cookie-text{font-size:13px;color:var(--text-m);line-height:1.5;flex:1;min-width:220px;text-align:left}
+.cookie-btns{display:flex;gap:10px;flex-shrink:0}
+.cookie-decline{padding:9px 18px;border-radius:20px;border:1.5px solid var(--border);background:none;color:var(--text-m);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:border-color .15s,color .15s}
+.cookie-decline:hover{border-color:var(--text-m)}
+.cookie-accept{padding:9px 18px;border-radius:20px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity .15s}
+.cookie-accept:hover{opacity:.9}
 </style>
 </head>
 <body>
@@ -469,6 +458,60 @@ input,select{font:inherit;color:inherit}
   <div id="yt-host"></div>
   <div id="related-tracks"><span class="rp-corr-hd">Related Tracks</span><span class="rp-coming-soon">Coming Soon</span></div>
 </div>
+
+<div class="cookie-banner" id="cookieBanner">
+  <p class="cookie-text">We use cookies to understand how WaxTree is used and to catch errors. This won't affect your ability to use the app either way.</p>
+  <div class="cookie-btns">
+    <button class="cookie-decline" id="cookieDecline">Decline</button>
+    <button class="cookie-accept" id="cookieAccept">Accept</button>
+  </div>
+</div>
+
+<script>
+// ── Cookie consent — gates analytics/monitoring until the visitor accepts ──
+function loadGA(){
+  const s=document.createElement('script');
+  s.async=true;s.src='https://www.googletagmanager.com/gtag/js?id=G-BG6G70ZKRE';
+  document.head.appendChild(s);
+  window.dataLayer=window.dataLayer||[];
+  window.gtag=function(){dataLayer.push(arguments);};
+  gtag('js',new Date());
+  gtag('config','G-BG6G70ZKRE');
+}
+function loadSentry(){
+  const s=document.createElement('script');
+  s.src='https://browser.sentry-cdn.com/10.65.0/bundle.tracing.replay.min.js';
+  s.crossOrigin='anonymous';
+  s.onload=function(){
+    Sentry.init({
+      dsn:"https://0120197e3869fdd033c9574c0d4e9841@o4511727540305920.ingest.de.sentry.io/4511727608987728",
+      integrations:[Sentry.browserTracingIntegration(),Sentry.replayIntegration()],
+      tracesSampleRate:1.0,
+      replaysSessionSampleRate:0.1,
+      replaysOnErrorSampleRate:1.0,
+    });
+  };
+  document.head.appendChild(s);
+}
+(function initConsent(loaders){
+  const CONSENT_KEY='wt-cookie-consent';
+  const choice=localStorage.getItem(CONSENT_KEY);
+  if(choice==='accepted'){loaders.forEach(fn=>fn());return;}
+  if(choice==='declined')return;
+  const banner=document.getElementById('cookieBanner');
+  banner.classList.add('show');
+  document.getElementById('cookieAccept').addEventListener('click',()=>{
+    localStorage.setItem(CONSENT_KEY,'accepted');
+    banner.classList.remove('show');
+    loaders.forEach(fn=>fn());
+  });
+  document.getElementById('cookieDecline').addEventListener('click',()=>{
+    localStorage.setItem(CONSENT_KEY,'declined');
+    banner.classList.remove('show');
+  });
+})([loadGA,loadSentry]);
+</script>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script type="module">
 
