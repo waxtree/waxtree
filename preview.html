@@ -4,11 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="google" content="notranslate">
-<!-- Sentry error monitoring -->
-<script src="https://browser.sentry-cdn.com/10.65.0/bundle.min.js" crossorigin="anonymous"></script>
+<!-- Sentry error monitoring + tracing + session replay -->
+<script src="https://browser.sentry-cdn.com/10.65.0/bundle.tracing.replay.min.js" crossorigin="anonymous"></script>
 <script>
   Sentry.init({
     dsn: "https://0120197e3869fdd033c9574c0d4e9841@o4511727540305920.ingest.de.sentry.io/4511727608987728",
+    integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
+    tracesSampleRate: 1.0,
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
   });
 </script>
 <!-- Google tag (gtag.js) -->
