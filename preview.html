@@ -601,19 +601,20 @@ function parseFilename(filename){
   let name=filename.replace(/\.[^/.]+$/,'');
   name=name.replace(/^[\dA-Da-d]{1,2}[.\-\s]+/,'');
   const parts=name.split(/\s[-–]\s/);
-  if(parts.length>=2)return{titleNorm:normalizeStr(parts[parts.length-1]),artistNorm:normalizeStr(parts[0]),filename};
+  if(parts.length>=2)return{titleNorm:normalizeStr(parts[parts.length-1]),artistNorm:normalizeStr(parts[0]),filename,dur:null};
   const trimmed=name.trim();
-  if(trimmed)return{titleNorm:normalizeStr(trimmed),artistNorm:'',filename};
+  if(trimmed)return{titleNorm:normalizeStr(trimmed),artistNorm:'',filename,dur:null};
   return null;
 }
 
 async function extractMetadata(file,mm){
   if(mm){
     try{
-      const meta=await mm.parseBlob(file,{skipCovers:true,duration:false});
+      const meta=await mm.parseBlob(file,{skipCovers:true,duration:true});
       const title=meta.common.title?.trim();
       const artist=meta.common.artist?.trim();
-      if(title)return{titleNorm:normalizeStr(title),artistNorm:normalizeStr(artist||''),filename:file.name};
+      const dur=meta.format.duration?Math.round(meta.format.duration):null;
+      if(title)return{titleNorm:normalizeStr(title),artistNorm:normalizeStr(artist||''),filename:file.name,dur};
     }catch{}
   }
   return parseFilename(file.name);
@@ -651,7 +652,7 @@ async function extractAllMetadata(handles,onProgress){
       else if(t?.filename){
         // Normalization emptied the title (e.g. all-symbol name) — index raw filename so the track is never lost
         const raw=t.filename.replace(/\.[^/.]+$/,'').toLowerCase().replace(/\s+/g,' ').trim();
-        if(raw)results.push({titleNorm:raw,artistNorm:'',filename:t.filename});
+        if(raw)results.push({titleNorm:raw,artistNorm:'',filename:t.filename,dur:t.dur||null});
       }
     }
     onProgress?.(Math.min(i+BATCH_SIZE,handles.length),handles.length);
@@ -796,6 +797,18 @@ function getDigitalLibraryEntries(){
       });
     });
   });
+  // Add anything matchLibraryWithDiscogs() found for artists/releases not
+  // already reachable through an explored node
+  Object.values(loadDigitalMatches()).forEach(m=>{
+    const key=m.discogsUrl||(m.title+'|'+m.artist);
+    if(seen.has(key))return;
+    seen.add(key);
+    out.push({
+      title:m.title,artist:m.artist,year:m.year,thumb:m.thumb,discogsUrl:m.discogsUrl,
+      artistExploreId:m.artistExploreId,artistExploreName:m.artistExploreName,artistExploreType:'artist',
+      labelExploreId:m.labelExploreId,labelExploreName:m.labelExploreName,
+    });
+  });
   return out;
 }
 
@@ -806,6 +819,69 @@ function saveOwnedTracks(list){
 function loadOwnedTracks(){
   try{const r=localStorage.getItem('wt-owned');if(r)return JSON.parse(r);}catch{}
   return null;
+}
+
+// ── Match local library against Discogs ─────────────────────
+// Keyed by "titleNorm|artistNorm" → matched release info. Kept out of
+// saveSt()/cloud backup (same reasoning as discogsCollection: cheap to
+// rebuild, not worth the payload weight for a large library).
+function loadDigitalMatches(){
+  try{const r=localStorage.getItem('wt-digital-matches');if(r)return JSON.parse(r);}catch{}
+  return {};
+}
+function saveDigitalMatches(m){
+  try{localStorage.setItem('wt-digital-matches',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist digital matches:',e);}
+}
+async function matchLibraryWithDiscogs(){
+  if(st.libraryMatchRunning)return;
+  if(!st.ownedTracks.length)return;
+  st.libraryMatchRunning=true;
+  st.libraryMatchProgress={done:0,total:0,found:0};
+  rr();
+  const byArtist=new Map();
+  st.ownedTracks.forEach(t=>{
+    if(!t.artistNorm||!t.titleNorm)return; // can't search without an artist name
+    if(!byArtist.has(t.artistNorm))byArtist.set(t.artistNorm,[]);
+    byArtist.get(t.artistNorm).push(t);
+  });
+  const artists=[...byArtist.keys()];
+  st.libraryMatchProgress.total=artists.length;
+  const matches=loadDigitalMatches();
+  for(const artistNorm of artists){
+    if(!st.libraryMatchRunning)break; // cancelled mid-run
+    try{
+      const results=await searchDiscogs(artistNorm);
+      const cand=results.find(r=>r.type==='artist'&&normalizeStr(r.title)===artistNorm);
+      if(cand){
+        const data=await fetchArtistData(cand.id);
+        byArtist.get(artistNorm).forEach(t=>{
+          const key=t.titleNorm+'|'+t.artistNorm;
+          if(matches[key])return; // already matched in a previous run
+          const found=(data.tracks||[]).find(dt=>{
+            if(normalizeStr(dt.title)!==t.titleNorm)return false;
+            if(t.dur){
+              const dd=parseDur(dt.duration||'');
+              if(!dd||Math.abs(dd-t.dur)>8)return false; // no confident duration match — reject
+            }
+            return true;
+          });
+          if(found){
+            matches[key]={
+              title:found.album||found.title,artist:data.name,year:found.year,thumb:found.thumbUrl,
+              discogsUrl:found.discogsUrl,
+              artistExploreId:data.id,artistExploreName:data.name,
+              labelExploreId:found.labelId,labelExploreName:found.label,
+            };
+            st.libraryMatchProgress.found++;
+          }
+        });
+      }
+    }catch(e){console.warn('WaxTree: library match failed for artist',artistNorm,e);}
+    st.libraryMatchProgress.done++;
+    saveDigitalMatches(matches);
+    rr();
+  }
+  st.libraryMatchRunning=false;rr();
 }
 async function linkLibrary(onProgress){
   if(!('webkitdirectory' in document.createElement('input')))
@@ -850,7 +926,7 @@ async function linkLibrary(onProgress){
   // Persist locally — matching data lives in localStorage (drop filename to keep it small).
   // Supabase user_metadata only gets the count: the full list bloats the JWT and the update
   // fails silently on big libraries, which is what kept resurrecting stale partial scans.
-  const persisted=saveOwnedTracks(owned.map(o=>({titleNorm:o.titleNorm,artistNorm:o.artistNorm})));
+  const persisted=saveOwnedTracks(owned.map(o=>({titleNorm:o.titleNorm,artistNorm:o.artistNorm,dur:o.dur||null})));
   try{await sb.auth.updateUser({data:{owned_tracks:null,library_scanned_at:scannedAt,library_track_count:owned.length}});}
   catch(e){console.warn('WaxTree: could not update library metadata:',e);}
   return{count:owned.length,scannedAt,filesFound:audioFiles.length,persisted,stats};
@@ -925,6 +1001,27 @@ function buildLocalLibrarySection(){
   libRow.appendChild(scanMsg);
   libRow.appendChild(scanRep);
   return libRow;
+}
+
+// Local-library ↔ Discogs matching UI — shown under the folder scan row
+function buildLibraryMatchSection(){
+  const row=d('st-row',{style:{flexWrap:'wrap',gap:'8px'}});
+  const left=d('',{style:{flex:'1',minWidth:'0'}});
+  left.appendChild(s('st-lbl','Match with Discogs'));
+  const digitalCount=Object.keys(loadDigitalMatches()).length;
+  const sub=st.libraryMatchRunning
+    ?`Matching… ${st.libraryMatchProgress.done}/${st.libraryMatchProgress.total} artists (${st.libraryMatchProgress.found} tracks found so far)`
+    :(digitalCount?`${digitalCount} tracks matched — visible in My Libraries → Digital`:'Find your local tracks on Discogs, artist by artist. Can take a while on a large library — runs in the background.');
+  left.appendChild(s('st-sub',sub));
+  row.appendChild(left);
+  if(!st.ownedTracks.length){
+    row.appendChild(s('st-sub','Link a folder first'));
+  } else if(st.libraryMatchRunning){
+    row.appendChild(b('btn-sec',{onClick:()=>{st.libraryMatchRunning=false;rr();}},'Stop'));
+  } else {
+    row.appendChild(b('btn-sec',{onClick:()=>matchLibraryWithDiscogs()},digitalCount?'Match again':'Match library'));
+  }
+  return row;
 }
 
 // ── Auth ───────────────────────────────────────────────────
@@ -1054,6 +1151,7 @@ const st={
   discogsCollMasterIds:saved?.discogsCollMasterIds||[],
   discogsCollection:saved?.discogsCollection||[],
   librariesModal:false,librariesTab:'vinyl',
+  libraryMatchRunning:false,libraryMatchProgress:{done:0,total:0,found:0},
   discogsWantReleaseIds:saved?.discogsWantReleaseIds||[],
   discogsWantMasterIds:saved?.discogsWantMasterIds||[],
   discogsCollSyncedAt:saved?.discogsCollSyncedAt||null,
@@ -2839,6 +2937,7 @@ function buildApp(){
     // ── Local music folder
     modal.appendChild(s('st-section','💾 Local Music Folder'));
     modal.appendChild(buildLocalLibrarySection());
+    modal.appendChild(buildLibraryMatchSection());
 
     // ── Discogs
     modal.appendChild(s('st-section','🎵 Discogs Collection'));
