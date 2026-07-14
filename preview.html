@@ -795,13 +795,19 @@ function resolveHeroArtistName(artistNorm){
   return undefined;
 }
 
+// No top-N cap here — every artist with at least LOCAL_HERO_MIN_TRACKS
+// tracks in the library is a legitimate candidate (10 tracks by the same
+// artist is already a clear "you like this" signal on its own). What's
+// bounded instead is how many brand-new ones get resolved against Discogs
+// per computeDiggingHeroes() call, below.
+const LOCAL_HERO_MIN_TRACKS=10;
 function computeLocalArtistFrequency(){
   const counts=new Map();
   st.ownedTracks.forEach(t=>{
     if(!t.artistNorm)return;
     counts.set(t.artistNorm,(counts.get(t.artistNorm)||0)+1);
   });
-  return[...counts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15);
+  return[...counts.entries()].filter(([,count])=>count>=LOCAL_HERO_MIN_TRACKS).sort((a,b)=>b[1]-a[1]);
 }
 
 // allowBackgroundWork=false gives a read-only snapshot of whatever's
@@ -832,8 +838,18 @@ function computeDiggingHeroes(allowBackgroundWork){
     }
   });
   if(st.ownedTracks.length){
+    // The candidate pool itself isn't capped (see computeLocalArtistFrequency)
+    // — a library with many qualifying artists just takes a few extra
+    // renders to work all the way through, resolveHeroArtistName's own
+    // cache means nothing gets re-searched once it's been checked once.
+    let localKickoffsLeft=allowBackgroundWork?8:0;
     computeLocalArtistFrequency().forEach(([artistNorm,count])=>{
-      const resolved=allowBackgroundWork?resolveHeroArtistName(artistNorm):lsGet('heroArtist:'+artistNorm);
+      const cached=lsGet('heroArtist:'+artistNorm);
+      let resolved=cached;
+      if(cached===null&&allowBackgroundWork&&localKickoffsLeft>0){
+        localKickoffsLeft--;
+        resolved=resolveHeroArtistName(artistNorm);
+      }
       if(resolved){
         const cur=artists.get(resolved.id)||{id:resolved.id,name:resolved.name,collectionCount:0,libraryCount:0,thumb:null};
         cur.libraryCount+=count;
