@@ -880,7 +880,7 @@ async function matchLibraryWithDiscogs(){
 
   st.libraryMatchRunning=true;
   st.libraryMatchProgress={done:0,total:remaining.length,found:0};
-  rr();
+  if(st.discogsModal)rr();
   const matches=loadDigitalMatches();
 
   for(let i=0;i<remaining.length;i+=DIGITAL_MATCH_BATCH){
@@ -901,7 +901,7 @@ async function matchLibraryWithDiscogs(){
       if(!st.libraryMatchRunning)break;
       if(cand){
         try{
-          const data=await fetchArtistData(cand.id);
+          const data=await fetchArtistData(cand.id,undefined,true);
           byArtist.get(artistNorm).forEach(t=>{
             const key=t.titleNorm+'|'+t.artistNorm;
             if(matches[key])return; // already matched in a previous run
@@ -931,9 +931,14 @@ async function matchLibraryWithDiscogs(){
     st.libraryMatchProgress.done=Math.min(remaining.length,i+batch.length);
     saveDigitalMatches(matches);
     saveCheckedArtists(checked);
-    rr();
+    // Only worth a full app re-render while the Sync Libraries modal (the
+    // only place this progress is shown) is actually open — otherwise this
+    // fires every batch for the whole run and visibly disrupts scroll on
+    // whatever the user has navigated to elsewhere in the meantime.
+    if(st.discogsModal)rr();
   }
-  st.libraryMatchRunning=false;rr();
+  st.libraryMatchRunning=false;
+  if(st.discogsModal)rr();
 }
 async function linkLibrary(onProgress){
   if(!('webkitdirectory' in document.createElement('input')))
@@ -1803,7 +1808,7 @@ function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
   })();
 }
 
-async function fetchArtistData(discogsId,isCancelled=()=>false){
+async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=false){
   const c=lsGet('a7:'+discogsId);if(c&&c.tracks?.length&&c._v===TRACK_DATA_VERSION)return c;
   const[artData,relData]=await Promise.all([
     dReq('/artists/'+discogsId),
@@ -1851,22 +1856,30 @@ async function fetchArtistData(discogsId,isCancelled=()=>false){
   lsSet('a7:'+discogsId,nd);
 
   // Background: correlated artists (secondary sidebar data) and missing cover art —
-  // neither blocks the track list from appearing.
-  if(topLabelId){
-    (async()=>{
-      try{
-        const lRel=await dReq('/labels/'+topLabelId+'/releases',{per_page:'30',sort:'year'});
-        const seen=new Set([artData.name.toLowerCase().replace(/\s+/g,'')]);
-        nd.correlatedArtists=lRel.releases
-          .map(r=>r.artist||'').filter(n=>n&&!/^various$/i.test(n.trim()))
-          .map(n=>({name:n,k:n.toLowerCase().replace(/\s+/g,'')}))
-          .filter(a=>{if(seen.has(a.k))return false;seen.add(a.k);return true;})
-          .slice(0,10).map(a=>a.name);
-        lsSet('a7:'+discogsId,nd);rr();
-      }catch{}
-    })();
+  // neither blocks the track list from appearing. Skipped when the caller
+  // only needs .tracks (the library-Discogs matcher) — that data is never
+  // displayed there, and each of these fires its own rr() (full app
+  // re-render) whenever it resolves, which for a matcher checking dozens of
+  // artists in a row meant the whole app kept re-rendering — and visibly
+  // fighting the current scroll position — long after any given match
+  // "finished", no matter what the user was actually looking at.
+  if(!skipEnrichment){
+    if(topLabelId){
+      (async()=>{
+        try{
+          const lRel=await dReq('/labels/'+topLabelId+'/releases',{per_page:'30',sort:'year'});
+          const seen=new Set([artData.name.toLowerCase().replace(/\s+/g,'')]);
+          nd.correlatedArtists=lRel.releases
+            .map(r=>r.artist||'').filter(n=>n&&!/^various$/i.test(n.trim()))
+            .map(n=>({name:n,k:n.toLowerCase().replace(/\s+/g,'')}))
+            .filter(a=>{if(seen.has(a.k))return false;seen.add(a.k);return true;})
+            .slice(0,10).map(a=>a.name);
+          lsSet('a7:'+discogsId,nd);rr();
+        }catch{}
+      })();
+    }
+    resolveCoversInBackground(needsCover,'a7:'+discogsId,isCancelled,nd);
   }
-  resolveCoversInBackground(needsCover,'a7:'+discogsId,isCancelled,nd);
 
   return nd;
 }
