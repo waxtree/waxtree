@@ -1107,7 +1107,7 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=4;
+const TRACK_DATA_VERSION=5;
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
@@ -1735,6 +1735,7 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
   const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.title);
   if(!tracklist.length)return[];
   const isDigital=(rd.formats||[]).some(f=>/^file$/i.test(f.name)||(f.descriptions||[]).some(d=>/mp3|flac|wav|aac|digital|lossless/i.test(d)));
+  const hasVinyl=(rd.formats||[]).some(f=>/vinyl/i.test(f.name));
   const labelId=rd.labels?.[0]?.id||null;
   const labelName=rd.labels?.[0]?.name||relLabelHint||'';
   const year=rd.year||relYear;
@@ -1773,7 +1774,7 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
     return{
     id:`${fetchId}-${t.position||i}`,title:t.title,duration:t.duration||'',
     year,label:labelName,labelId,genre,thumbUrl,bpm,album:rd.title||'',
-    digital:isDigital,discogsUrl:releaseUrl,videoId:matchVideo(i),catno:'',
+    digital:isDigital,hasVinyl,discogsUrl:releaseUrl,videoId:matchVideo(i),catno:'',
     fromLabel:false,trackArtistName,trackArtistId,
     exploreId:null,exploreName:null,exploreType:null,exploreLabel:null
   };});
@@ -2516,7 +2517,12 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   const buyBtns=[bcBtn,
     el('a',{cls:'buy-btn bp',href:`https://www.beatport.com/search?q=${encodeURIComponent(releaseTitle)}`,target:'_blank',rel:'noreferrer'},'Beatport ↗'),
   ];
-  if(first.discogsUrl)buyBtns.push(el('a',{cls:'buy-btn dg',href:first.discogsUrl,target:'_blank',rel:'noreferrer'},'Discogs ↗'));
+  // Discogs is a crate-digger's marketplace/database for physical media —
+  // a release with no vinyl pressing at all (digital-only) has nothing to
+  // redirect to there. A release bundling both digital and vinyl formats
+  // still gets the button.
+  const digitalOnly=first.digital&&!first.hasVinyl;
+  if(first.discogsUrl&&!digitalOnly)buyBtns.push(el('a',{cls:'buy-btn dg',href:first.discogsUrl,target:'_blank',rel:'noreferrer'},'Discogs ↗'));
 
   return d('rel-card',{},
     art,
