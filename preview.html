@@ -2392,7 +2392,12 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   });
 
   // ── MIDDLE: release/EP/Album title + year·label + genres (release-level, shown once)
-  const yearLabel=[first.year,first.label].filter(Boolean).join(' · ');
+  // In a label's own catalog, track.label actually holds the per-track
+  // ARTIST credit (see fetchLabelData) — when a release has more than one
+  // distinct one, it's a Various Artists release and showing just
+  // tracks[0]'s artist there is misleading.
+  const isVariousArtists=isLabel&&new Set(tracks.map(t=>t.label).filter(Boolean)).size>1;
+  const yearLabel=[first.year,isVariousArtists?'Various Artists':first.label].filter(Boolean).join(' · ');
   const genres=first.genre?first.genre.split(' · '):[];
   const mid=d('rel-mid',{},
     s('rel-title',first.album||first.title),
@@ -2452,8 +2457,12 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     onClick:()=>addNode('artist',id,name,parentNodeId,getNode(parentNodeId)?.branchId)
   }));
 
+  // Any time there's more than one target (multiple distinct artists on a
+  // Various Artists release, a remix credit, or both) they fold into one
+  // dropdown instead of a row of separate buttons — a single target still
+  // renders as the plain inline button it always has.
   let exploreEls;
-  if(remixResolved.length>0&&exploreEntries.length>0){
+  if(exploreEntries.length>1){
     const exploreOpen=st.exploreDropKey===group.key;
     const highlighted=exploreEntries.some(en=>en.cls==='esplora-label');
     const wrap=d('explore-wrap',{});
