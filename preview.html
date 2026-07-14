@@ -837,54 +837,100 @@ function loadDigitalMatches(){
 function saveDigitalMatches(m){
   try{localStorage.setItem('wt-digital-matches',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist digital matches:',e);}
 }
+// Which artistNorm keys have already been searched (match found or not) —
+// without this, every "Match again" click re-searched the entire library
+// from the top, so a 5000-track collection with hundreds of unique artists
+// never got past the first few dozen before the tab was closed. Now a run
+// always continues from where the last one left off.
+function loadCheckedArtists(){
+  try{const r=localStorage.getItem('wt-digital-matches-checked');if(r)return new Set(JSON.parse(r));}catch{}
+  return new Set();
+}
+function saveCheckedArtists(set){
+  try{localStorage.setItem('wt-digital-matches-checked',JSON.stringify([...set]));}
+  catch(e){console.warn('WaxTree: could not persist checked-artists list:',e);}
+}
+// Discogs search results mix releases/masters/artists/labels by text
+// relevance — for a library of underground/niche producer names the actual
+// artist profile often didn't make the top 25 at all. Filtering server-side
+// with type=artist means we only ever get artist profiles back.
+async function searchDiscogsArtist(q){
+  const ck='sa:'+q;
+  const c=lsGet(ck);if(c)return c;
+  const data=await dReq('/database/search',{q,type:'artist',per_page:'25'});
+  const r=(data.results||[]).map(x=>({id:x.id,title:x.title,thumb:x.thumb,uri:x.uri}));
+  lsSet(ck,r);return r;
+}
+const DIGITAL_MATCH_BATCH=6;
 async function matchLibraryWithDiscogs(){
   if(st.libraryMatchRunning)return;
   if(!st.ownedTracks.length)return;
-  st.libraryMatchRunning=true;
-  st.libraryMatchProgress={done:0,total:0,found:0};
-  rr();
   const byArtist=new Map();
   st.ownedTracks.forEach(t=>{
     if(!t.artistNorm||!t.titleNorm)return; // can't search without an artist name
     if(!byArtist.has(t.artistNorm))byArtist.set(t.artistNorm,[]);
     byArtist.get(t.artistNorm).push(t);
   });
-  const artists=[...byArtist.keys()];
-  st.libraryMatchProgress.total=artists.length;
+  const allArtists=[...byArtist.keys()];
+  let checked=loadCheckedArtists();
+  let remaining=allArtists.filter(a=>!checked.has(a));
+  // Nothing left from previous runs — a click here means starting a full
+  // fresh pass in case Discogs data changed since.
+  if(!remaining.length){checked=new Set();remaining=allArtists;}
+
+  st.libraryMatchRunning=true;
+  st.libraryMatchProgress={done:0,total:remaining.length,found:0};
+  rr();
   const matches=loadDigitalMatches();
-  for(const artistNorm of artists){
+
+  for(let i=0;i<remaining.length;i+=DIGITAL_MATCH_BATCH){
     if(!st.libraryMatchRunning)break; // cancelled mid-run
-    try{
-      const results=await searchDiscogs(artistNorm);
-      const cand=results.find(r=>r.type==='artist'&&normalizeStr(r.title)===artistNorm);
+    const batch=remaining.slice(i,i+DIGITAL_MATCH_BATCH);
+    // Cheap artist-name searches run concurrently; the heavier
+    // fetchArtistData() (which itself fans out into a batch of release
+    // fetches) stays sequential per batch so total in-flight requests
+    // don't spike beyond what the shared Discogs rate limiter expects.
+    const searchResults=await Promise.all(batch.map(async artistNorm=>{
+      try{
+        const results=await searchDiscogsArtist(artistNorm);
+        const cand=results.find(r=>normalizeStr(stripDiscogsSuffix(r.title))===artistNorm);
+        return{artistNorm,cand};
+      }catch(e){console.warn('WaxTree: artist search failed for',artistNorm,e);return{artistNorm,cand:null};}
+    }));
+    for(const{artistNorm,cand}of searchResults){
+      if(!st.libraryMatchRunning)break;
       if(cand){
-        const data=await fetchArtistData(cand.id);
-        byArtist.get(artistNorm).forEach(t=>{
-          const key=t.titleNorm+'|'+t.artistNorm;
-          if(matches[key])return; // already matched in a previous run
-          const found=(data.tracks||[]).find(dt=>{
-            if(normalizeStr(dt.title)!==t.titleNorm)return false;
-            if(t.dur){
-              const dd=parseDur(dt.duration||'');
-              if(!dd||Math.abs(dd-t.dur)>8)return false; // no confident duration match — reject
+        try{
+          const data=await fetchArtistData(cand.id);
+          byArtist.get(artistNorm).forEach(t=>{
+            const key=t.titleNorm+'|'+t.artistNorm;
+            if(matches[key])return; // already matched in a previous run
+            const found=(data.tracks||[]).find(dt=>{
+              if(normalizeStr(dt.title)!==t.titleNorm)return false;
+              if(t.dur){
+                const dd=parseDur(dt.duration||'');
+                if(!dd||Math.abs(dd-t.dur)>8)return false; // no confident duration match — reject
+              }
+              return true;
+            });
+            if(found){
+              matches[key]={
+                title:found.album||found.title,artist:data.name,year:found.year,thumb:found.thumbUrl,
+                discogsUrl:found.discogsUrl,
+                artistExploreId:data.id,artistExploreName:data.name,
+                labelExploreId:found.labelId,labelExploreName:found.label,
+                genre:found.genre||null,
+              };
+              st.libraryMatchProgress.found++;
             }
-            return true;
           });
-          if(found){
-            matches[key]={
-              title:found.album||found.title,artist:data.name,year:found.year,thumb:found.thumbUrl,
-              discogsUrl:found.discogsUrl,
-              artistExploreId:data.id,artistExploreName:data.name,
-              labelExploreId:found.labelId,labelExploreName:found.label,
-              genre:found.genre||null,
-            };
-            st.libraryMatchProgress.found++;
-          }
-        });
+        }catch(e){console.warn('WaxTree: fetching artist data failed for',artistNorm,e);}
       }
-    }catch(e){console.warn('WaxTree: library match failed for artist',artistNorm,e);}
-    st.libraryMatchProgress.done++;
+      checked.add(artistNorm);
+    }
+    st.libraryMatchProgress.done=Math.min(remaining.length,i+batch.length);
     saveDigitalMatches(matches);
+    saveCheckedArtists(checked);
     rr();
   }
   st.libraryMatchRunning=false;rr();
@@ -1015,9 +1061,14 @@ function buildLibraryMatchSection(){
   const left=d('',{style:{flex:'1',minWidth:'0'}});
   left.appendChild(s('st-lbl','Match with Discogs'));
   const digitalCount=Object.keys(loadDigitalMatches()).length;
+  const checkedCount=loadCheckedArtists().size;
+  const totalArtistsCount=new Set(st.ownedTracks.map(t=>t.artistNorm).filter(Boolean)).size;
+  const allChecked=totalArtistsCount>0&&checkedCount>=totalArtistsCount;
   const sub=st.libraryMatchRunning
-    ?`Matching… ${st.libraryMatchProgress.done}/${st.libraryMatchProgress.total} artists (${st.libraryMatchProgress.found} tracks found so far)`
-    :(digitalCount?`${digitalCount} tracks matched — visible in My Libraries → Digital`:'Find your local tracks on Discogs, artist by artist. Can take a while on a large library — runs in the background.');
+    ?`Matching… ${st.libraryMatchProgress.done}/${st.libraryMatchProgress.total} artists this run (${st.libraryMatchProgress.found} new tracks found so far)`
+    :(digitalCount||checkedCount
+      ?`${digitalCount} tracks matched from ${checkedCount}/${totalArtistsCount} artists checked — visible in My Libraries → Digital`
+      :'Find your local tracks on Discogs, artist by artist. Can take a while on a large library — runs in the background.');
   left.appendChild(s('st-sub',sub));
   row.appendChild(left);
   if(!st.ownedTracks.length){
@@ -1025,7 +1076,8 @@ function buildLibraryMatchSection(){
   } else if(st.libraryMatchRunning){
     row.appendChild(b('btn-sec',{onClick:()=>{st.libraryMatchRunning=false;rr();}},'Stop'));
   } else {
-    row.appendChild(b('btn-sec',{onClick:()=>matchLibraryWithDiscogs()},digitalCount?'Match again':'Match library'));
+    const label=!digitalCount&&!checkedCount?'Match library':(allChecked?'Match again':'Continue matching');
+    row.appendChild(b('btn-sec',{onClick:()=>matchLibraryWithDiscogs()},label));
   }
   return row;
 }
