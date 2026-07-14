@@ -1063,6 +1063,7 @@ const DEMO_NODES=[{
 // ── State ──────────────────────────────────────────────────
 const SK='ct-v5';
 function loadSt(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}}
+function loadDiscogsCollection(){try{const r=localStorage.getItem('wt-discogs-collection');return r?JSON.parse(r):[];}catch{return[];}}
 function saveSt(){
   // Node.data (bio, images, full tracklists) used to be written to
   // localStorage in full, uncapped — for a long-time user with a large
@@ -1077,12 +1078,33 @@ function saveSt(){
   // reload their .data on demand via ensureNodeLoaded(), same mechanism
   // already used after a cloud restore.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
+  // discogsCollection (the full Vinyl/Digital release list, hundreds of
+  // entries for an active collector) lives in its own key so a quota issue
+  // there can never block saving the core app state below.
+  try{localStorage.setItem('wt-discogs-collection',JSON.stringify(st.discogsCollection));}
+  catch(e){
+    if(e.name==='QuotaExceededError'&&purgeExpiredCache())
+      try{localStorage.setItem('wt-discogs-collection',JSON.stringify(st.discogsCollection));}catch{}
+  }
+  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt});
   try{
-    localStorage.setItem(SK,JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsCollection:st.discogsCollection,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt}));
+    localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
   }catch(e){
-    console.warn('WaxTree: local save failed (localStorage full?):',e);
-    window.Sentry?.captureException instanceof Function&&Sentry.captureException(e,{tags:{area:'local-save'}});
+    if(e.name==='QuotaExceededError'){
+      const freed=purgeExpiredCache();
+      console.warn('WaxTree: localStorage quota hit on core save — purged',freed,'expired cache entries, retrying');
+      try{
+        localStorage.setItem(SK,corePayload);
+        localStorage.setItem(SK+':ts',String(Date.now()));
+      }catch(e2){
+        console.warn('WaxTree: core save still failing after purge:',e2);
+        window.Sentry?.captureException instanceof Function&&Sentry.captureException(e2,{tags:{area:'local-save-after-purge'}});
+      }
+    }else{
+      console.warn('WaxTree: local save failed:',e);
+      window.Sentry?.captureException instanceof Function&&Sentry.captureException(e,{tags:{area:'local-save'}});
+    }
   }
   scheduleCloudSync();
 }
@@ -1182,7 +1204,7 @@ const st={
   discogsOAuthSecret:saved?.discogsOAuthSecret||'',
   discogsCollReleaseIds:saved?.discogsCollReleaseIds||[],
   discogsCollMasterIds:saved?.discogsCollMasterIds||[],
-  discogsCollection:saved?.discogsCollection||[],
+  discogsCollection:loadDiscogsCollection(),
   librariesModal:false,librariesTab:'vinyl',
   libraryMatchRunning:false,libraryMatchProgress:{done:0,total:0,found:0},
   discogsWantReleaseIds:saved?.discogsWantReleaseIds||[],
@@ -1435,8 +1457,35 @@ function dedup(tracks){
 }
 
 // ── API ────────────────────────────────────────────────────
+// Every explored artist/label's full response (bio, images, up to 200
+// tracks) gets cached under ct2:*. The 24h TTL only stops lsGet() from
+// RETURNING a stale entry — it never actually deletes it, so for anyone
+// with a large explored tree this cache grows forever and was found to be
+// the dominant cause of localStorage quota exhaustion (which in turn broke
+// Supabase's own session-token persistence, causing spontaneous sign-outs
+// and a login that stayed broken even after clearing site data once).
+function purgeExpiredCache(){
+  const now=Date.now();
+  let freed=0;
+  for(let i=localStorage.length-1;i>=0;i--){
+    const k=localStorage.key(i);
+    if(!k||!k.startsWith('ct2:'))continue;
+    try{
+      const{t}=JSON.parse(localStorage.getItem(k));
+      if(now-t>=86400000){localStorage.removeItem(k);freed++;}
+    }catch{localStorage.removeItem(k);freed++;} // corrupted entry — drop it too
+  }
+  return freed;
+}
 function lsGet(k){try{const r=localStorage.getItem('ct2:'+k);if(!r)return null;const{d,t}=JSON.parse(r);if(Date.now()-t<86400000)return d;}catch{}return null;}
-function lsSet(k,d){try{localStorage.setItem('ct2:'+k,JSON.stringify({d,t:Date.now()}));}catch{}}
+function lsSet(k,d){
+  try{localStorage.setItem('ct2:'+k,JSON.stringify({d,t:Date.now()}));}
+  catch(e){
+    if(e.name!=='QuotaExceededError')return;
+    const freed=purgeExpiredCache();
+    if(freed)try{localStorage.setItem('ct2:'+k,JSON.stringify({d,t:Date.now()}));}catch{}
+  }
+}
 function stripBio(t){return t.replace(/\[a\d*=([^\]]+)\]/g,'$1').replace(/\[l=([^\]]+)\]/g,'$1').replace(/\[url=[^\]]*\]([^[]*)\[\/url\]/g,'$1').replace(/\[[^\]]*\]/g,'').trim();}
 
 let rqN=0,rqW=Date.now();
@@ -3202,6 +3251,12 @@ sb.auth.onAuthStateChange((event)=>{
 });
 
 window.addEventListener('resize',positionYtHost);
+
+// Runs immediately, before the session check below — if localStorage is
+// already near/at quota, this is what gives Supabase's own session-token
+// write room to succeed instead of silently failing and bouncing straight
+// back to login.html.
+purgeExpiredCache();
 
 sb.auth.getSession().then(({data:{session}})=>{
   if(!session){window.location.href='login.html';return;}

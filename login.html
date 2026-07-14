@@ -101,6 +101,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
+// Emergency space-clearing, runs before anything else. A large explored
+// tree can push the ct2:* Discogs-response cache past the browser's
+// localStorage quota; once THAT happens, Supabase's own session-token
+// write can fail too, which looks like "sign in succeeds, then bounces
+// straight back to login" — the very next page can't find a session that
+// never got persisted. Clearing this cache is always safe: it's just
+// re-fetchable Discogs data, nothing the user created.
+(function clearApiCacheIfPresent(){
+  try{
+    const keys=[];
+    for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('ct2:'))keys.push(k);}
+    keys.forEach(k=>localStorage.removeItem(k));
+  }catch{}
+})();
 const SUPABASE_URL='https://asmnqlqvlpcwcaaughuu.supabase.co';
 const SUPABASE_KEY='sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ';
 const {createClient}=window.supabase;
