@@ -2884,11 +2884,11 @@ function buildApp(){
         whoMeta.appendChild(s('profile-who-name',uname));
         whoRow.appendChild(whoMeta);
         menu.appendChild(whoRow);
-        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.profileModal=true;rr();}},'My Profile'));
-        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.settingsModal=true;rr();}},'My Settings'));
-        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.likesModal=true;rr();}},'My Likes'));
-        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.followsModal=true;rr();}},'My Follows'));
-        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.librariesModal=true;rr();}},'My Libraries'));
+        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.profileModal=true;rr();}},'Profile'));
+        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.settingsModal=true;rr();}},'Settings'));
+        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.likesModal=true;rr();}},'Likes'));
+        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.followsModal=true;rr();}},'Follows'));
+        menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.librariesModal=true;rr();}},'Libraries'));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.discogsModal=true;rr();}},'Sync Libraries'+((st.discogsCollSyncedAt||st.ownedTracks.length)?' ✓':'')));
         menu.appendChild(b('profile-item',{onClick:()=>{st.profileOpen=false;st.historyModal=true;rr();}},'History'));
         menu.appendChild(d('profile-sep',{}));
