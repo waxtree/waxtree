@@ -1475,10 +1475,13 @@ function baseTitleKey(title){return title.replace(/\s*[\(\[][^\)\]]*[\)\]]/g,'')
 // hasSibling: another track in the same release shares this track's base
 // title (e.g. a plain "Alpha Decay" next to "Alpha Decay (Reshape)") — only
 // then do we trust a bare, keyword-less parenthetical as a remixer's name.
-// Either way, only the FIRST word of what's left is trusted as the alias —
-// everything after it ("Chevel Deconstructed Mix", "YHxM Stripped Mix",
-// "Mosca's Pure Joy Version") is a style descriptor, not part of the name.
-function extractRemixArtist(title,hasSibling){
+// Returns the raw candidate PHRASE before the trailing type keyword (e.g.
+// "Chevel Deconstructed", "Andrey Pushkarev") — whether the real alias is
+// the whole phrase or just its first word is ambiguous from text alone
+// ("Andrey Pushkarev Remix" is a two-word name; "Chevel Deconstructed Mix"
+// is a one-word name plus a style descriptor) and gets resolved against
+// real Discogs artist data by resolveRemixArtistCandidates() below.
+function extractRemixCandidate(title,hasSibling){
   const groups=[...title.matchAll(/[\(\[]([^\)\]]+)[\)\]]/g)].map(m=>m[1].trim());
   for(const g of groups){
     if(!g||REMIX_GENERIC_RE.test(g)||REMIX_PACKAGING_RE.test(g))continue;
@@ -1486,7 +1489,7 @@ function extractRemixArtist(title,hasSibling){
     const remainder=m?m[1].trim():(hasSibling?g:null);
     if(!remainder)continue;
     const firstWord=remainder.split(/\s+/)[0].replace(/['’]s$/i,'');
-    if(firstWord&&!REMIX_TYPE_WORD_RE.test(firstWord)&&!REMIX_GENERIC_RE.test(firstWord))return firstWord;
+    if(firstWord&&!REMIX_TYPE_WORD_RE.test(firstWord)&&!REMIX_GENERIC_RE.test(firstWord))return remainder;
   }
   return null;
 }
@@ -1557,6 +1560,48 @@ async function searchDiscogs(q){
   const data=await dReq('/database/search',{q,per_page:'25'});
   const r=data.results.filter(r=>r.type==='artist'||r.type==='label').map(r=>({id:r.id,type:r.type,title:r.title,thumb:r.thumb,uri:r.uri}));
   lsSet('s:'+q,r);return r;
+}
+
+// ── Remix-artist resolution ────────────────────────────────
+// A candidate phrase like "Andrey Pushkarev" or "Chevel Deconstructed" is
+// checked against real Discogs artist search results, longest word-count
+// first — e.g. for "Chevel Deconstructed" it tries "Chevel Deconstructed"
+// (no such artist), then "Chevel" (real artist, confirmed) — so the merged
+// Explore dropdown only ever offers an option Discogs actually recognizes.
+async function resolveRemixArtistCandidates(remainder){
+  const words=remainder.split(/\s+/);
+  let anySucceeded=false;
+  for(let n=words.length;n>=1;n--){
+    const candidate=words.slice(0,n).join(' ').replace(/['’]s$/i,'').trim();
+    if(!candidate||REMIX_TYPE_WORD_RE.test(candidate)||REMIX_GENERIC_RE.test(candidate))continue;
+    try{
+      const results=await searchDiscogs(candidate);
+      anySucceeded=true;
+      const hit=results.find(r=>r.type==='artist'&&r.title.replace(/\s*\(\d+\)$/,'').toLowerCase()===candidate.toLowerCase());
+      if(hit)return{name:hit.title,id:hit.id};
+    }catch{/* try a shorter candidate */}
+  }
+  return anySucceeded?null:undefined; // null = confirmed no artist found; undefined = couldn't check (network) — retry later
+}
+const remixResolveInFlight=new Set();
+// Synchronous cache lookup for use inside releaseCard()'s render — kicks
+// off background resolution on first sight of a candidate and returns
+// undefined (still resolving, show nothing yet) until resolveRemixArtistCandidates()
+// settles and triggers a re-render via rr().
+function getResolvedRemixArtist(remainder){
+  const ck='remix:'+remainder.toLowerCase();
+  const cached=lsGet(ck);
+  if(cached!==null)return cached; // false (confirmed no match) or {name,id}
+  if(!remixResolveInFlight.has(ck)){
+    remixResolveInFlight.add(ck);
+    resolveRemixArtistCandidates(remainder).then(result=>{
+      remixResolveInFlight.delete(ck);
+      if(result===undefined)return;
+      lsSet(ck,result===null?false:result);
+      rr();
+    }).catch(()=>{remixResolveInFlight.delete(ck);});
+  }
+  return undefined;
 }
 // MusicBrainz: 1 req/sec limit enforced server-side
 let mbLast=0;
@@ -2304,22 +2349,30 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
 
   // Remix artists parsed straight out of track titles (e.g. "Alpha Decay
   // (Reshape Mix)") fold into this same explore control as extra menu
-  // entries — see extractRemixArtist() — rather than a separate button.
+  // entries — see extractRemixCandidate() — rather than a separate button.
+  // Each candidate is verified against real Discogs artist data before it's
+  // ever shown (getResolvedRemixArtist), so a two-word alias like "Andrey
+  // Pushkarev" doesn't get truncated to just its first word.
   const baseTitleCounts=new Map();
   tracks.forEach(t=>{const k=baseTitleKey(t.title);baseTitleCounts.set(k,(baseTitleCounts.get(k)||0)+1);});
-  const remixArtists=new Set();
+  const remixCandidates=new Set();
   tracks.forEach(t=>{
-    const name=extractRemixArtist(t.title,baseTitleCounts.get(baseTitleKey(t.title))>1);
-    if(name)remixArtists.add(name);
+    const candidate=extractRemixCandidate(t.title,baseTitleCounts.get(baseTitleKey(t.title))>1);
+    if(candidate)remixCandidates.add(candidate);
   });
-  remixArtists.forEach(name=>exploreEntries.push({
+  const remixResolved=[];
+  remixCandidates.forEach(candidate=>{
+    const resolved=getResolvedRemixArtist(candidate);
+    if(resolved)remixResolved.push(resolved);
+  });
+  remixResolved.forEach(({name,id})=>exploreEntries.push({
     cls:'',
     text:`Explore remix artist: ${name}`,
-    onClick:()=>{st.q=name;doSearch();}
+    onClick:()=>addNode('artist',id,name,parentNodeId,getNode(parentNodeId)?.branchId)
   }));
 
   let exploreEls;
-  if(remixArtists.size>0&&exploreEntries.length>0){
+  if(remixResolved.length>0&&exploreEntries.length>0){
     const exploreOpen=st.exploreDropKey===group.key;
     const highlighted=exploreEntries.some(en=>en.cls==='esplora-label');
     const wrap=d('explore-wrap',{});
