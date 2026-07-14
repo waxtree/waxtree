@@ -1552,6 +1552,82 @@ const noEmbedIds=new Set();    // exists on YT but embedding disabled (101/150)
 
 function getYtId(uri){if(!uri)return null;const m=uri.match(/[?&]v=([a-zA-Z0-9_-]{11})/);return m?m[1]:null;}
 
+// ── YouTube auto-match (only ever runs when Discogs itself has no video) ──
+// A text-only search-and-guess version of this was tried and reverted
+// before for picking wrong videos. The decisive extra signal this time is
+// the uploader: YouTube auto-generates an "Artist - Topic" channel from
+// official Content ID/YouTube Music ingestion, and even a manual upload
+// from the artist's or label's own channel is named after them — so
+// requiring the channel name to contain the artist or label name (on top
+// of a title match and, when known, a duration match within 8s — the same
+// tolerance already used for library-Discogs matching) is a much stronger
+// bar than text search alone. No match on all three = no auto-embed, same
+// "No video in Discogs data" fallback as before.
+async function searchYouTubeApi(q){
+  const ck='yts:'+q;
+  const c=lsGet(ck);if(c)return c;
+  const res=await fetch('/api/yt-search?q='+encodeURIComponent(q));
+  const json=await res.json().catch(()=>({}));
+  if(!res.ok||json.error)throw new Error(json.error||'YouTube search failed ('+res.status+')');
+  const results=json.results||[];
+  lsSet(ck,results);
+  return results;
+}
+function findTrackAndNode(trackId){
+  for(const node of st.nodes){
+    const idx=node.data?.tracks?.findIndex(t=>t.id===trackId)??-1;
+    if(idx>=0)return{node,track:node.data.tracks[idx]};
+  }
+  return null;
+}
+const ytAutoMatchInFlight=new Set();
+function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
+  const ck='ytmatch:'+trackId;
+  const cached=lsGet(ck);
+  if(cached!==null)return cached; // false (confirmed no match) or a videoId string
+  if(ytAutoMatchInFlight.has(trackId))return undefined;
+  ytAutoMatchInFlight.add(trackId);
+  (async()=>{
+    let result;
+    try{
+      const q=(artistName||'')+' '+title;
+      const results=await searchYouTubeApi(q);
+      const titleN=normalizeStr(title);
+      const artistN=normalizeStr(artistName||'');
+      const labelN=normalizeStr(labelName||'');
+      const expectedSec=duration?parseDur(duration):0;
+      const hit=results.find(r=>{
+        const channelN=normalizeStr(r.channelTitle||'');
+        const channelMatches=(artistN&&channelN.includes(artistN))||(labelN&&channelN.includes(labelN));
+        if(!channelMatches)return false;
+        if(!normalizeStr(r.title||'').includes(titleN))return false;
+        if(expectedSec&&r.durationSec&&Math.abs(r.durationSec-expectedSec)>8)return false;
+        return true;
+      });
+      result=hit?hit.id:null;
+    }catch(e){
+      console.warn('WaxTree: YouTube auto-match failed for',title,e);
+      result=undefined; // network/config issue — don't cache, retry on a later attempt
+    }
+    ytAutoMatchInFlight.delete(trackId);
+    if(result===undefined)return;
+    lsSet(ck,result===null?false:result);
+    if(result){
+      // Persist onto the actual track object (same pattern resolveCoversInBackground
+      // uses) so it survives being re-rendered elsewhere — play button state,
+      // release cards, etc. — not just this one mini-player session.
+      const found=findTrackAndNode(trackId);
+      if(found){
+        found.track.videoId=result;
+        lsSet((found.node.type==='label'?'l8:':'a7:')+found.node.discogsId,found.node.data);
+      }
+      if(st.nowPlaying?.trackId===trackId)st.nowPlaying.videoId=result;
+    }
+    rr();
+  })();
+  return undefined;
+}
+
 function loadYtApi(){
   if(document.getElementById('yt-api-s'))return;
   const s=document.createElement('script');s.id='yt-api-s';
@@ -1627,6 +1703,12 @@ function doPlay(trackId,videoId,title,artistName){
   killYt();
   const w=document.getElementById('yt-wrap');if(w)w.remove();
   st.nowPlaying={trackId,videoId,title,artistName};rr();
+  if(!videoId){
+    const found=findTrackAndNode(trackId);
+    const labelName=found?(found.node.type==='label'?found.node.name:found.track.label):null;
+    const resolved=resolveTrackVideoId(trackId,title,artistName,found?.track?.duration,labelName);
+    if(resolved)st.nowPlaying.videoId=resolved; // already resolved/cached from an earlier attempt
+  }
 }
 function stopPlay(){
   killYt();
