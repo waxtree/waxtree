@@ -817,7 +817,7 @@ function computeLocalArtistFrequency(){
 function computeDiggingHeroes(allowBackgroundWork){
   const pool=[...st.discogsCollection,...st.discogsWantlist];
   const artists=new Map(),labels=new Map();
-  let vaKickoffsLeft=allowBackgroundWork?5:0;
+  let vaKickoffsLeft=allowBackgroundWork?15:0;
   const bumpArtist=(id,name,thumb,collInc)=>{
     const cur=artists.get(id)||{id,name,collectionCount:0,libraryCount:0,thumb:null};
     cur.collectionCount+=collInc;if(!cur.thumb&&thumb)cur.thumb=thumb;if(name&&!cur.name)cur.name=name;
@@ -842,7 +842,7 @@ function computeDiggingHeroes(allowBackgroundWork){
     // — a library with many qualifying artists just takes a few extra
     // renders to work all the way through, resolveHeroArtistName's own
     // cache means nothing gets re-searched once it's been checked once.
-    let localKickoffsLeft=allowBackgroundWork?8:0;
+    let localKickoffsLeft=allowBackgroundWork?20:0;
     computeLocalArtistFrequency().forEach(([artistNorm,count])=>{
       const cached=lsGet('heroArtist:'+artistNorm);
       let resolved=cached;
@@ -860,8 +860,8 @@ function computeDiggingHeroes(allowBackgroundWork){
   const total=x=>x.collectionCount+x.libraryCount;
   const byCount=(a,b)=>total(b)-total(a);
   return{
-    artists:[...artists.values()].filter(a=>total(a)>=2).sort(byCount).slice(0,12),
-    labels:[...labels.values()].filter(l=>l.collectionCount>=2).sort(byCount).slice(0,12),
+    artists:[...artists.values()].filter(a=>total(a)>=2).sort(byCount).slice(0,30),
+    labels:[...labels.values()].filter(l=>l.collectionCount>=2).sort(byCount).slice(0,30),
   };
 }
 
