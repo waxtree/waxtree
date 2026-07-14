@@ -1038,11 +1038,12 @@ let wtSession=null;
 // ── Demo data ──────────────────────────────────────────────
 const FREE_WOOD_LIMIT=3;
 const FREE_NODE_LIMIT=15;
-// Bump whenever buildTrackEntries/fetchLabelData's per-track output shape
-// changes — already-added label nodes carry their old node.data forever
-// otherwise (the l7/l8-style API-response cache bump alone doesn't reach
-// nodes a user already added; selectNode() below re-fetches them once).
-const LABEL_DATA_VERSION=2;
+// Bump whenever buildTrackEntries/fetchArtistData/fetchLabelData's
+// per-track output shape changes — already-added artist/label nodes carry
+// their old node.data forever otherwise (the a7/l8-style API-response
+// cache bump alone doesn't reach nodes a user already added; selectNode()
+// and the boot sweep below re-fetch them once each).
+const TRACK_DATA_VERSION=3;
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
@@ -1751,7 +1752,7 @@ function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
 }
 
 async function fetchArtistData(discogsId,isCancelled=()=>false){
-  const c=lsGet('a7:'+discogsId);if(c&&c.tracks?.length)return c;
+  const c=lsGet('a7:'+discogsId);if(c&&c.tracks?.length&&c._v===TRACK_DATA_VERSION)return c;
   const[artData,relData]=await Promise.all([
     dReq('/artists/'+discogsId),
     dReq('/artists/'+discogsId+'/releases',{per_page:'100',sort:'year',sort_order:'asc'})
@@ -1792,7 +1793,8 @@ async function fetchArtistData(discogsId,isCancelled=()=>false){
     aliases:(artData.aliases||[]).map(a=>({id:a.id,name:a.name,type:'artist'})),
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:labels,labelStr:labels.length?`Released on: ${labels.join(', ')}`:null},
     correlatedArtists:[],
-    tracks,trackCount:relData.pagination.items
+    tracks,trackCount:relData.pagination.items,
+    _v:TRACK_DATA_VERSION
   };
   lsSet('a7:'+discogsId,nd);
 
@@ -1818,7 +1820,7 @@ async function fetchArtistData(discogsId,isCancelled=()=>false){
 }
 
 async function fetchLabelData(discogsId,isCancelled=()=>false){
-  const c=lsGet('l8:'+discogsId);if(c)return c;
+  const c=lsGet('l8:'+discogsId);if(c&&c._v===TRACK_DATA_VERSION)return c;
   const[labData,relData]=await Promise.all([
     dReq('/labels/'+discogsId),
     dReq('/labels/'+discogsId+'/releases',{per_page:'100',sort:'year',sort_order:'asc'})
@@ -1861,7 +1863,7 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
     country:labData.country||null,
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:artists,artistStr:artists.length?`Artists include: ${artists.slice(0,5).join(', ')}`:null},
     tracks,trackCount:relData.pagination.items,
-    _v:LABEL_DATA_VERSION
+    _v:TRACK_DATA_VERSION
   };
   lsSet('l8:'+discogsId,nd);
   resolveCoversInBackground(needsCover,'l8:'+discogsId,isCancelled,nd);
@@ -1956,9 +1958,10 @@ function selectNode(id){
   // A node restored from the cloud backup (or never fully loaded) has no
   // cached Discogs data — fetch it now instead of rendering an empty panel.
   ensureNodeLoaded(id);
-  // Silently re-fetch a label node that was added before a track-data fix —
-  // otherwise it keeps showing whatever was baked into it back then forever.
-  if(n&&n.type==='label'&&n.loaded&&!n.loading&&n.data?._v!==LABEL_DATA_VERSION)retryNode(id);
+  // Silently re-fetch an artist/label node that was added before a
+  // track-data fix — otherwise it keeps showing whatever was baked into it
+  // back then forever.
+  if(n&&(n.type==='label'||n.type==='artist')&&n.loaded&&!n.loading&&n.data?._v!==TRACK_DATA_VERSION)retryNode(id);
   rr();
 }
 function togglePin(id){const n=getNode(id);if(n)n.pinned=!n.pinned;rr();}
@@ -3400,7 +3403,7 @@ sb.auth.getSession().then(({data:{session}})=>{
   // A plain page reload restores st.nodes from localStorage directly — it never
   // calls selectNode(), so the version check there alone would never fire for
   // a node that's already selected before the reload. Sweep once at boot too.
-  st.nodes.filter(n=>n.type==='label'&&n.loaded&&!n.loading&&n.data?._v!==LABEL_DATA_VERSION).forEach(n=>retryNode(n.id));
+  st.nodes.filter(n=>(n.type==='label'||n.type==='artist')&&n.loaded&&!n.loading&&n.data?._v!==TRACK_DATA_VERSION).forEach(n=>retryNode(n.id));
 });
 
 </script>
