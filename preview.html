@@ -724,29 +724,128 @@ function buildDiscogsCollEntry(bi){
 }
 
 // ── Digging heroes ─────────────────────────────────────────
-// Cheap to recompute on demand from the collection/wantlist already in
-// memory — not persisted. Requires a real Discogs id (not just a name) on
-// at least 2 releases, so every result here is something Follow/Open can
-// actually act on.
-function computeDiggingHeroes(){
+const isVariousCredit=name=>/^various(\s+artists)?$/i.test((name||'').trim());
+
+// A release credited to "Various" isn't an artist — it's Discogs' own
+// placeholder for compilations. Fetching the release's actual tracklist and
+// crediting each real per-track artist instead is the only way these
+// releases contribute anything meaningful to the ranking. Progressive: the
+// caller re-renders (rr()) once this resolves, and computeDiggingHeroes()
+// picks the cached breakdown up on its next call.
+const vaResolveInFlight=new Set();
+function resolveVariousArtists(releaseId){
+  const ck='va:'+releaseId;
+  const cached=lsGet(ck);
+  if(cached!==null)return cached;
+  if(!vaResolveInFlight.has(releaseId)){
+    vaResolveInFlight.add(releaseId);
+    (async()=>{
+      let result=[];
+      try{
+        const rd=await dReq('/releases/'+releaseId);
+        const seen=new Map();
+        (rd.tracklist||[]).forEach(t=>{
+          const a=t.artists?.[0];
+          if(!a?.id||seen.has(a.id))return;
+          seen.set(a.id,{id:a.id,name:stripDiscogsSuffix(a.name)});
+        });
+        result=[...seen.values()];
+      }catch(e){
+        console.warn('WaxTree: Various-artist breakdown failed for release',releaseId,e);
+        vaResolveInFlight.delete(releaseId);
+        return; // don't cache a failed attempt — retry on a later call
+      }
+      lsSet(ck,result);
+      vaResolveInFlight.delete(releaseId);
+      rr();
+    })();
+  }
+  return null;
+}
+
+// A local-library artist name (from the folder scan, already normalized —
+// see normalizeStr()/parseFilename(), untouched here) has no Discogs id of
+// its own. Resolve the most frequent ones against real Discogs artists the
+// same way remix credits are verified (getResolvedRemixArtist) — only a
+// confirmed exact-name match ever counts, same reasoning as there: a wrong
+// guess is worse than no guess.
+const heroArtistResolveInFlight=new Set();
+function resolveHeroArtistName(artistNorm){
+  const ck='heroArtist:'+artistNorm;
+  const cached=lsGet(ck);
+  if(cached!==null)return cached; // false (confirmed no match) or {id,name}
+  if(!heroArtistResolveInFlight.has(artistNorm)){
+    heroArtistResolveInFlight.add(artistNorm);
+    (async()=>{
+      let result;
+      try{
+        const results=await searchDiscogsArtist(artistNorm);
+        const hit=results.find(r=>normalizeStr(stripDiscogsSuffix(r.title))===artistNorm);
+        result=hit?{id:hit.id,name:hit.title}:null;
+      }catch(e){
+        console.warn('WaxTree: hero artist resolve failed for',artistNorm,e);
+        result=undefined; // network hiccup — don't cache, retry on a later call
+      }
+      heroArtistResolveInFlight.delete(artistNorm);
+      if(result===undefined)return;
+      lsSet(ck,result===null?false:result);
+      rr();
+    })();
+  }
+  return undefined;
+}
+
+function computeLocalArtistFrequency(){
+  const counts=new Map();
+  st.ownedTracks.forEach(t=>{
+    if(!t.artistNorm)return;
+    counts.set(t.artistNorm,(counts.get(t.artistNorm)||0)+1);
+  });
+  return[...counts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,15);
+}
+
+// allowBackgroundWork=false gives a read-only snapshot of whatever's
+// already resolved/cached (used just to decide whether to show the "Follow
+// Your Heroes" button) without kicking off new Discogs lookups — those are
+// only worth doing while the actual heroes modal is open and visible.
+function computeDiggingHeroes(allowBackgroundWork){
   const pool=[...st.discogsCollection,...st.discogsWantlist];
   const artists=new Map(),labels=new Map();
+  let vaKickoffsLeft=allowBackgroundWork?5:0;
+  const bumpArtist=(id,name,thumb,collInc)=>{
+    const cur=artists.get(id)||{id,name,collectionCount:0,libraryCount:0,thumb:null};
+    cur.collectionCount+=collInc;if(!cur.thumb&&thumb)cur.thumb=thumb;if(name&&!cur.name)cur.name=name;
+    artists.set(id,cur);
+  };
   pool.forEach(e=>{
-    if(e.artistExploreId){
-      const cur=artists.get(e.artistExploreId)||{id:e.artistExploreId,name:e.artistExploreName,count:0,thumb:null};
-      cur.count++;if(!cur.thumb&&e.thumb)cur.thumb=e.thumb;
-      artists.set(e.artistExploreId,cur);
+    if(e.artistExploreId&&!isVariousCredit(e.artistExploreName)){
+      bumpArtist(e.artistExploreId,e.artistExploreName,e.thumb,1);
+    }else if(e.artistExploreId&&isVariousCredit(e.artistExploreName)){
+      const breakdown=lsGet('va:'+e.id);
+      if(breakdown)breakdown.forEach(a=>bumpArtist(a.id,a.name,e.thumb,1));
+      else if(vaKickoffsLeft>0&&!vaResolveInFlight.has(e.id)){vaKickoffsLeft--;resolveVariousArtists(e.id);}
     }
     if(e.labelExploreId){
-      const cur=labels.get(e.labelExploreId)||{id:e.labelExploreId,name:e.labelExploreName,count:0,thumb:null};
-      cur.count++;if(!cur.thumb&&e.thumb)cur.thumb=e.thumb;
+      const cur=labels.get(e.labelExploreId)||{id:e.labelExploreId,name:e.labelExploreName,collectionCount:0,libraryCount:0,thumb:null};
+      cur.collectionCount++;if(!cur.thumb&&e.thumb)cur.thumb=e.thumb;
       labels.set(e.labelExploreId,cur);
     }
   });
-  const byCount=(a,b)=>b.count-a.count;
+  if(st.ownedTracks.length){
+    computeLocalArtistFrequency().forEach(([artistNorm,count])=>{
+      const resolved=allowBackgroundWork?resolveHeroArtistName(artistNorm):lsGet('heroArtist:'+artistNorm);
+      if(resolved){
+        const cur=artists.get(resolved.id)||{id:resolved.id,name:resolved.name,collectionCount:0,libraryCount:0,thumb:null};
+        cur.libraryCount+=count;
+        artists.set(resolved.id,cur);
+      }
+    });
+  }
+  const total=x=>x.collectionCount+x.libraryCount;
+  const byCount=(a,b)=>total(b)-total(a);
   return{
-    artists:[...artists.values()].filter(a=>a.count>=2).sort(byCount).slice(0,6),
-    labels:[...labels.values()].filter(l=>l.count>=2).sort(byCount).slice(0,6),
+    artists:[...artists.values()].filter(a=>total(a)>=2).sort(byCount).slice(0,12),
+    labels:[...labels.values()].filter(l=>l.collectionCount>=2).sort(byCount).slice(0,12),
   };
 }
 
@@ -784,9 +883,12 @@ async function syncDiscogsAccount(){
     st.discogsCollSyncedAt=new Date().toISOString();saveSt();
     // First sync ever for this account: surface the most-frequent artists/
     // labels once, rather than re-popping it on every later "Sync now".
-    if(!st.discogsHeroesSeen){
-      const heroes=computeDiggingHeroes();
-      if(heroes.artists.length||heroes.labels.length){st.heroesModal=true;st.discogsHeroesSeen=true;saveSt();}
+    // Various-artist breakdown and local-library resolution both need a
+    // moment to run in the background (see computeDiggingHeroes()), so
+    // this opens on there simply being enough raw material to work with —
+    // not on a synchronous result being ready the instant the sync ends.
+    if(!st.discogsHeroesSeen&&(collEntries.length+wantEntries.length>=5||st.ownedTracks.length>=20)){
+      st.heroesModal=true;st.discogsHeroesSeen=true;saveSt();
     }
   }catch(e){st.discogsSyncing=false;rr();throw e;}
   st.discogsSyncing=false;rr();
@@ -3378,8 +3480,11 @@ function buildApp(){
       }
       modal.appendChild(info);
 
-      const heroesPreview=computeDiggingHeroes();
-      if(heroesPreview.artists.length||heroesPreview.labels.length){
+      // Read-only snapshot (no new Discogs lookups) just to decide whether
+      // the button below is worth showing — resolution work only starts
+      // once the heroes modal itself is actually open.
+      const heroesPreview=computeDiggingHeroes(false);
+      if(heroesPreview.artists.length||heroesPreview.labels.length||st.discogsCollReleaseIds.length+st.discogsWantReleaseIds.length>=5||st.ownedTracks.length>=20){
         modal.appendChild(b('btn-sec',{style:'width:100%;margin-top:4px',onClick:()=>{st.discogsModal=false;st.heroesModal=true;rr();}},'🌲 Follow Your Heroes'));
       }
 
@@ -3416,14 +3521,14 @@ function buildApp(){
   // signal, worth turning into a one-tap Follow/Open instead of making the
   // user notice the pattern themselves.
   if(st.heroesModal){
-    const heroes=computeDiggingHeroes();
+    const heroes=computeDiggingHeroes(true);
     const overlay=d('overlay',{onClick:()=>{st.heroesModal=false;rr();}});
     const modal=d('modal heroes-modal',{onClick:e=>e.stopPropagation()});
     modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'4px'}},
       el('h2',{cls:'modal-title'},'🌲 Follow Your Heroes'),
       b('btn-sec',{onClick:()=>{st.heroesModal=false;rr();}},'×')
     ));
-    modal.appendChild(el('p',{cls:'modal-sub'},'We looked through your collection and wantlist — these are the artists and labels you keep coming back to.'));
+    modal.appendChild(el('p',{cls:'modal-sub'},'We looked through your collection, wantlist and local library — these are the artists and labels you keep coming back to.'));
     const buildHeroRow=(entry,type)=>{
       const isFollowed=st.follows.some(f=>f.discogs_id===entry.id&&f.type===type);
       const row=d('hero-row',{});
@@ -3432,7 +3537,10 @@ function buildApp(){
         :d('hero-thumb-ph',{},type==='label'?'🏷️':'🎤'));
       const mid=d('hero-mid',{});
       mid.appendChild(s('hero-name',entry.name||'Unknown'));
-      mid.appendChild(s('hero-count',entry.count+' releases in your crates'));
+      const parts=[];
+      if(entry.collectionCount)parts.push(entry.collectionCount+' release'+(entry.collectionCount===1?'':'s')+' in your crates');
+      if(entry.libraryCount)parts.push(entry.libraryCount+' track'+(entry.libraryCount===1?'':'s')+' in your library');
+      mid.appendChild(s('hero-count',parts.join(' + ')));
       row.appendChild(mid);
       const actions=d('hero-actions',{});
       actions.appendChild(b('follow-btn'+(isFollowed?' following':''),{onClick:()=>{
@@ -3452,6 +3560,12 @@ function buildApp(){
     if(heroes.labels.length){
       modal.appendChild(s('st-section','🏷️ Labels you dig'));
       heroes.labels.forEach(l=>modal.appendChild(buildHeroRow(l,'label')));
+    }
+    const stillWorking=vaResolveInFlight.size>0||heroArtistResolveInFlight.size>0;
+    if(stillWorking){
+      modal.appendChild(d('',{style:'font-size:12px;color:var(--text-m);padding:10px 0 2px;font-style:italic'},'Still going through Various-artist releases and your local library — more may show up in a moment…'));
+    }else if(!heroes.artists.length&&!heroes.labels.length){
+      modal.appendChild(d('',{style:'font-size:13px;color:var(--text-m);padding:10px 0'},'Nothing stood out yet — dig a little more and check back.'));
     }
     overlay.appendChild(modal);root.appendChild(overlay);
   }
