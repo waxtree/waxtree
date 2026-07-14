@@ -299,6 +299,8 @@ input,select{font:inherit;color:inherit}
 .daq-play:hover,.daq-play.has-video{color:var(--accent)}.daq-play.has-video:hover{background:var(--accent);color:#fff}
 .daq-rm{font-size:16px;color:var(--text-f);padding:3px 5px;border-radius:4px;flex-shrink:0;transition:color .15s;line-height:1}
 .daq-rm:hover{color:#5EC47B}
+/* ── Explore dropdown (label/artist/remix-artist merged) ─── */
+.explore-wrap{position:relative;flex-shrink:0}
 /* ── Playlist dropdown ─────── */
 .pl-wrap{position:relative;flex-shrink:0}
 .pl-drop{position:absolute;top:calc(100% + 4px);right:0;background:var(--bg-s);border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.28);z-index:300;min-width:176px;overflow:hidden}
@@ -1196,6 +1198,7 @@ const st={
   dasAscoltare:saved?.dasAscoltare||[],
   playlists:saved?.playlists||[],
   playlistDropId:null,playlistsModal:false,plRenameId:null,plRenameVal:'',
+  exploreDropKey:null,
   profileOpen:false,
   likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,discogsModal:false,discogsSyncing:false,
   follows:saved?.follows||[],
@@ -1454,6 +1457,30 @@ function normalTitle(t){
 function dedup(tracks){
   const seen=new Set();
   return tracks.filter(t=>{const dur=parseDur(t.duration);const b=dur>0?Math.floor(dur/30):-1;const k=`${normalTitle(t.title)}||${b}`;if(seen.has(k))return false;seen.add(k);return true;});
+}
+
+// ── Remix-artist detection ────────────────────────────────
+// Parenthetical text that names a version/edit rather than a remixer —
+// same non-remix vocabulary as normalTitle() above, kept in sync.
+const REMIX_GENERIC_RE=/^(original(?:\s+mix)?|album(?:\s+version)?|lp(?:\s+version)?|extended(?:\s+version)?|single(?:\s+version)?|full(?:\s+version)?|radio\s*(?:edit|version)?|main(?:\s+version)?|instrumental|acapella|a\s*cappella|clean|dirty|explicit|bonus(?:\s+track)?|intro|outro|interlude|continuous\s*mix|unmixed|demo|live)$/i;
+const REMIX_SUFFIX_RE=/^(.+?)\s+(?:remix|rmx|rework|refix|flip|bootleg|vip|edit|dub(?:\s*mix)?|mix)$/i;
+function baseTitleKey(title){return title.replace(/\s*[\(\[][^\)\]]*[\)\]]/g,'').trim().toLowerCase().replace(/\s+/g,' ');}
+// hasSibling: another track in the same release shares this track's base
+// title (e.g. a plain "Alpha Decay" next to "Alpha Decay (Reshape)") — only
+// then do we trust a bare, keyword-less parenthetical as a remixer's name.
+function extractRemixArtist(title,hasSibling){
+  const groups=[...title.matchAll(/[\(\[]([^\)\]]+)[\)\]]/g)].map(m=>m[1].trim());
+  for(const g of groups){
+    if(!g||REMIX_GENERIC_RE.test(g))continue;
+    const m=g.match(REMIX_SUFFIX_RE);
+    if(m){
+      const name=m[1].trim();
+      if(name&&!REMIX_GENERIC_RE.test(name))return name;
+    }else if(hasSibling){
+      return g;
+    }
+  }
+  return null;
 }
 
 // ── API ────────────────────────────────────────────────────
@@ -2243,24 +2270,63 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
 
   // ── RIGHT: explore + buy buttons (release-level; explore-artist deduped across
   // the group since a Various Artists release can credit a different artist per track)
-  const labelBtn=(first.label&&!first.fromLabel)?b('esplora-btn esplora-label',{
-    onClick:()=>{
-      if(first.labelId)addNode('label',first.labelId,first.label,parentNodeId,getNode(parentNodeId)?.branchId);
-      else{st.q=first.label;doSearch();}
-    }
-  },`Explore label: ${first.label} ›`):null;
-
+  const exploreEntries=[];
+  if(first.label&&!first.fromLabel){
+    exploreEntries.push({
+      cls:'esplora-label',
+      text:`Explore label: ${first.label}`,
+      onClick:()=>{
+        if(first.labelId)addNode('label',first.labelId,first.label,parentNodeId,getNode(parentNodeId)?.branchId);
+        else{st.q=first.label;doSearch();}
+      }
+    });
+  }
   const seenArtists=new Set();
-  const artistBtns=[];
   tracks.forEach(track=>{
     if(!track.exploreName)return;
     const key=track.exploreId||track.exploreName;
     if(seenArtists.has(key))return;
     seenArtists.add(key);
-    artistBtns.push(b('esplora-btn'+(track.fromLabel?' esplora-label':''),{
+    exploreEntries.push({
+      cls:track.fromLabel?'esplora-label':'',
+      text:`${track.exploreLabel||'Explore'}: ${track.exploreName}`,
       onClick:()=>addNode(track.exploreType||'artist',track.exploreId,track.exploreName,parentNodeId,getNode(parentNodeId)?.branchId)
-    },`${track.exploreLabel||'Explore'}: ${track.exploreName} ›`));
+    });
   });
+
+  // Remix artists parsed straight out of track titles (e.g. "Alpha Decay
+  // (Reshape Mix)") fold into this same explore control as extra menu
+  // entries — see extractRemixArtist() — rather than a separate button.
+  const baseTitleCounts=new Map();
+  tracks.forEach(t=>{const k=baseTitleKey(t.title);baseTitleCounts.set(k,(baseTitleCounts.get(k)||0)+1);});
+  const remixArtists=new Set();
+  tracks.forEach(t=>{
+    const name=extractRemixArtist(t.title,baseTitleCounts.get(baseTitleKey(t.title))>1);
+    if(name)remixArtists.add(name);
+  });
+  remixArtists.forEach(name=>exploreEntries.push({
+    cls:'',
+    text:`Explore remix artist: ${name}`,
+    onClick:()=>{st.q=name;doSearch();}
+  }));
+
+  let exploreEls;
+  if(remixArtists.size>0&&exploreEntries.length>0){
+    const exploreOpen=st.exploreDropKey===group.key;
+    const wrap=d('explore-wrap',{});
+    wrap.appendChild(b('esplora-btn explore-toggle',{
+      onClick:e=>{e.stopPropagation();st.exploreDropKey=exploreOpen?null:group.key;rr();}
+    },exploreOpen?'Explore ▴':'Explore ▾'));
+    if(exploreOpen){
+      const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
+      exploreEntries.forEach(en=>drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;en.onClick();}},en.text)));
+      wrap.appendChild(drop);
+      setTimeout(()=>{const h=()=>{st.exploreDropKey=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
+    }
+    exploreEls=[wrap];
+  }else{
+    exploreEls=exploreEntries.map(en=>b('esplora-btn'+(en.cls?' '+en.cls:''),{onClick:en.onClick},`${en.text} ›`));
+  }
 
   const releaseTitle=first.album||first.title;
   const bcDirect=findBcMatch(parentNodeId,releaseTitle)||tracks.map(t=>findBcMatch(parentNodeId,t.title)).find(Boolean);
@@ -2295,7 +2361,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     mid,
     d('rel-tracks',{},...trackRows),
     d('t-actions',{},
-      d('t-act-explore',{},labelBtn,...artistBtns),
+      d('t-act-explore',{},...exploreEls),
       d('t-act-buy',{},...buyBtns),
     ),
   );
