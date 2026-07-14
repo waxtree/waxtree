@@ -309,6 +309,16 @@ input,select{font:inherit;color:inherit}
 .pl-drop-item.checked{color:var(--accent)}
 .pl-drop-sep{height:1px;background:var(--border);margin:2px 0}
 .pl-drop-new{color:var(--accent);font-weight:600}
+/* ── Follow Your Heroes modal ─────── */
+.heroes-modal{max-width:640px;max-height:82vh;overflow-y:auto}
+.hero-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)}
+.hero-row:last-child{border-bottom:none}
+.hero-thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;background:var(--bg-e);border:1px solid var(--border)}
+.hero-thumb-ph{width:44px;height:44px;border-radius:8px;background:var(--bg-e);border:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px}
+.hero-mid{flex:1;min-width:0}
+.hero-name{display:block;font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hero-count{display:block;font-size:11.5px;color:var(--text-m);margin-top:1px}
+.hero-actions{display:flex;gap:6px;flex-shrink:0}
 /* ── Playlist modal ─────── */
 .pl-modal{max-width:520px}
 .pl-section-hd{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding:12px 0 6px;border-bottom:1px solid var(--border);margin-bottom:4px}
@@ -692,6 +702,54 @@ async function dOAuthProxy(path,params={}){
     return data;
   }
 }
+// Shared by both the collection and wantlist loops below — Discogs' two
+// endpoints return the same basic_information shape per item.
+function buildDiscogsCollEntry(bi){
+  const formatNames=(bi.formats||[]).map(f=>f.name);
+  return{
+    id:bi.id,
+    title:bi.title||'',
+    artist:(bi.artists||[]).map(a=>stripDiscogsSuffix(a.name)).join(', '),
+    year:bi.year||null,
+    thumb:bi.thumb||bi.cover_image||null,
+    isVinyl:formatNames.includes('Vinyl'),
+    isDigital:formatNames.includes('File'),
+    discogsUrl:`https://www.discogs.com/release/${bi.id}`,
+    artistExploreId:bi.artists?.[0]?.id||null,
+    artistExploreName:bi.artists?.[0]?stripDiscogsSuffix(bi.artists[0].name):null,
+    labelExploreId:bi.labels?.[0]?.id||null,
+    labelExploreName:bi.labels?.[0]?.name||null,
+    genres:(bi.styles?.length?bi.styles:bi.genres||[]).slice(0,3),
+  };
+}
+
+// ── Digging heroes ─────────────────────────────────────────
+// Cheap to recompute on demand from the collection/wantlist already in
+// memory — not persisted. Requires a real Discogs id (not just a name) on
+// at least 2 releases, so every result here is something Follow/Open can
+// actually act on.
+function computeDiggingHeroes(){
+  const pool=[...st.discogsCollection,...st.discogsWantlist];
+  const artists=new Map(),labels=new Map();
+  pool.forEach(e=>{
+    if(e.artistExploreId){
+      const cur=artists.get(e.artistExploreId)||{id:e.artistExploreId,name:e.artistExploreName,count:0,thumb:null};
+      cur.count++;if(!cur.thumb&&e.thumb)cur.thumb=e.thumb;
+      artists.set(e.artistExploreId,cur);
+    }
+    if(e.labelExploreId){
+      const cur=labels.get(e.labelExploreId)||{id:e.labelExploreId,name:e.labelExploreName,count:0,thumb:null};
+      cur.count++;if(!cur.thumb&&e.thumb)cur.thumb=e.thumb;
+      labels.set(e.labelExploreId,cur);
+    }
+  });
+  const byCount=(a,b)=>b.count-a.count;
+  return{
+    artists:[...artists.values()].filter(a=>a.count>=2).sort(byCount).slice(0,6),
+    labels:[...labels.values()].filter(l=>l.count>=2).sort(byCount).slice(0,6),
+  };
+}
+
 async function syncDiscogsAccount(){
   const username=st.discogsUser;
   if(!username)throw new Error('No Discogs account linked');
@@ -705,35 +763,31 @@ async function syncDiscogsAccount(){
       d.releases.forEach(r=>{
         const bi=r.basic_information;
         collRIds.push(bi.id);if(bi.master_id)collMIds.push(bi.master_id);
-        const formatNames=(bi.formats||[]).map(f=>f.name);
-        collEntries.push({
-          id:bi.id,
-          title:bi.title||'',
-          artist:(bi.artists||[]).map(a=>stripDiscogsSuffix(a.name)).join(', '),
-          year:bi.year||null,
-          thumb:bi.thumb||bi.cover_image||null,
-          isVinyl:formatNames.includes('Vinyl'),
-          isDigital:formatNames.includes('File'),
-          discogsUrl:`https://www.discogs.com/release/${bi.id}`,
-          artistExploreId:bi.artists?.[0]?.id||null,
-          artistExploreName:bi.artists?.[0]?stripDiscogsSuffix(bi.artists[0].name):null,
-          labelExploreId:bi.labels?.[0]?.id||null,
-          labelExploreName:bi.labels?.[0]?.name||null,
-          genres:(bi.styles?.length?bi.styles:bi.genres||[]).slice(0,3),
-        });
+        collEntries.push(buildDiscogsCollEntry(bi));
       });
       if(page>=d.pagination.pages)break;page++;
     }
-    let wp=1,wantRIds=[],wantMIds=[];
+    let wp=1,wantRIds=[],wantMIds=[],wantEntries=[];
     while(true){
       const d=await fetchPage(`/users/${username}/wants`,{per_page:'100',page:String(wp)});
-      d.wants.forEach(r=>{wantRIds.push(r.basic_information.id);if(r.basic_information.master_id)wantMIds.push(r.basic_information.master_id);});
+      d.wants.forEach(r=>{
+        const bi=r.basic_information;
+        wantRIds.push(bi.id);if(bi.master_id)wantMIds.push(bi.master_id);
+        wantEntries.push(buildDiscogsCollEntry(bi));
+      });
       if(wp>=d.pagination.pages)break;wp++;
     }
     st.discogsCollReleaseIds=collRIds;st.discogsCollMasterIds=collMIds;
     st.discogsCollection=collEntries;
     st.discogsWantReleaseIds=wantRIds;st.discogsWantMasterIds=wantMIds;
+    st.discogsWantlist=wantEntries;
     st.discogsCollSyncedAt=new Date().toISOString();saveSt();
+    // First sync ever for this account: surface the most-frequent artists/
+    // labels once, rather than re-popping it on every later "Sync now".
+    if(!st.discogsHeroesSeen){
+      const heroes=computeDiggingHeroes();
+      if(heroes.artists.length||heroes.labels.length){st.heroesModal=true;st.discogsHeroesSeen=true;saveSt();}
+    }
   }catch(e){st.discogsSyncing=false;rr();throw e;}
   st.discogsSyncing=false;rr();
 }
@@ -1135,6 +1189,7 @@ const DEMO_NODES=[{
 const SK='ct-v5';
 function loadSt(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch{return null;}}
 function loadDiscogsCollection(){try{const r=localStorage.getItem('wt-discogs-collection');return r?JSON.parse(r):[];}catch{return[];}}
+function loadDiscogsWantlist(){try{const r=localStorage.getItem('wt-discogs-wantlist');return r?JSON.parse(r):[];}catch{return[];}}
 function saveSt(){
   // Node.data (bio, images, full tracklists) used to be written to
   // localStorage in full, uncapped — for a long-time user with a large
@@ -1149,15 +1204,20 @@ function saveSt(){
   // reload their .data on demand via ensureNodeLoaded(), same mechanism
   // already used after a cloud restore.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
-  // discogsCollection (the full Vinyl/Digital release list, hundreds of
-  // entries for an active collector) lives in its own key so a quota issue
-  // there can never block saving the core app state below.
+  // discogsCollection/discogsWantlist (the full release lists, hundreds of
+  // entries for an active collector) live in their own keys so a quota
+  // issue there can never block saving the core app state below.
   try{localStorage.setItem('wt-discogs-collection',JSON.stringify(st.discogsCollection));}
   catch(e){
     if(e.name==='QuotaExceededError'&&purgeExpiredCache())
       try{localStorage.setItem('wt-discogs-collection',JSON.stringify(st.discogsCollection));}catch{}
   }
-  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt});
+  try{localStorage.setItem('wt-discogs-wantlist',JSON.stringify(st.discogsWantlist));}
+  catch(e){
+    if(e.name==='QuotaExceededError'&&purgeExpiredCache())
+      try{localStorage.setItem('wt-discogs-wantlist',JSON.stringify(st.discogsWantlist));}catch{}
+  }
+  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -1195,7 +1255,7 @@ async function pushStateToCloud(){
   // it's cheaply re-fetched on selectNode; only the tree structure itself
   // (which artist/label, which branch, pin/tag state) is irreplaceable.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
-  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,avatarDataUrl:getAvatarUrl()};
+  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,avatarDataUrl:getAvatarUrl()};
   try{
     const{error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});
     if(error)throw error;
@@ -1240,6 +1300,7 @@ async function hydrateFromCloud(){
     if(c.discogsWantReleaseIds)st.discogsWantReleaseIds=c.discogsWantReleaseIds;
     if(c.discogsWantMasterIds)st.discogsWantMasterIds=c.discogsWantMasterIds;
     if(c.discogsCollSyncedAt)st.discogsCollSyncedAt=c.discogsCollSyncedAt;
+    if(c.discogsHeroesSeen)st.discogsHeroesSeen=c.discogsHeroesSeen;
     if(c.avatarDataUrl){try{localStorage.setItem(AVATAR_KEY,c.avatarDataUrl);}catch{}}
     saveSt();
     ensureNodeLoaded(st.selectedId);
@@ -1281,7 +1342,9 @@ const st={
   libraryMatchRunning:false,libraryMatchProgress:{done:0,total:0,found:0},
   discogsWantReleaseIds:saved?.discogsWantReleaseIds||[],
   discogsWantMasterIds:saved?.discogsWantMasterIds||[],
+  discogsWantlist:loadDiscogsWantlist(),
   discogsCollSyncedAt:saved?.discogsCollSyncedAt||null,
+  discogsHeroesSeen:saved?.discogsHeroesSeen||false,heroesModal:false,
   searchCount:0,ownedTracks:[],isPremium:false,premiumModal:false,
   history:saved?.history||[],
 };
@@ -3315,6 +3378,11 @@ function buildApp(){
       }
       modal.appendChild(info);
 
+      const heroesPreview=computeDiggingHeroes();
+      if(heroesPreview.artists.length||heroesPreview.labels.length){
+        modal.appendChild(b('btn-sec',{style:'width:100%;margin-top:4px',onClick:()=>{st.discogsModal=false;st.heroesModal=true;rr();}},'🌲 Follow Your Heroes'));
+      }
+
       if(st.discogsSyncing){
         modal.appendChild(d('',{style:'font-size:13px;color:var(--accent);padding:6px 0;font-style:italic'},'Syncing… this may take a moment'));
       }
@@ -3329,14 +3397,62 @@ function buildApp(){
       if(!st.discogsSyncing){
         const disconnectBtn=b('btn-sec',{style:'width:100%;margin-top:8px',onClick:()=>{
           st.discogsOAuthToken='';st.discogsOAuthSecret='';st.discogsUser='';
-          st.discogsCollReleaseIds=[];st.discogsCollMasterIds=[];
-          st.discogsWantReleaseIds=[];st.discogsWantMasterIds=[];
-          st.discogsCollSyncedAt=null;saveSt();rr();
+          st.discogsCollReleaseIds=[];st.discogsCollMasterIds=[];st.discogsCollection=[];
+          st.discogsWantReleaseIds=[];st.discogsWantMasterIds=[];st.discogsWantlist=[];
+          st.discogsCollSyncedAt=null;st.discogsHeroesSeen=false;saveSt();rr();
         }},'Disconnect Discogs account');
         modal.appendChild(disconnectBtn);
       }
     }
 
+    overlay.appendChild(modal);root.appendChild(overlay);
+  }
+
+  // ── Follow Your Heroes modal ────────────────────────────────
+  // Surfaced once automatically right after the first-ever Discogs sync
+  // (see syncDiscogsAccount()), and reachable afterwards from the button
+  // above — the artists/labels showing up over and over across a
+  // collection + wantlist are a pretty reliable "you clearly love this"
+  // signal, worth turning into a one-tap Follow/Open instead of making the
+  // user notice the pattern themselves.
+  if(st.heroesModal){
+    const heroes=computeDiggingHeroes();
+    const overlay=d('overlay',{onClick:()=>{st.heroesModal=false;rr();}});
+    const modal=d('modal heroes-modal',{onClick:e=>e.stopPropagation()});
+    modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'4px'}},
+      el('h2',{cls:'modal-title'},'🌲 Follow Your Heroes'),
+      b('btn-sec',{onClick:()=>{st.heroesModal=false;rr();}},'×')
+    ));
+    modal.appendChild(el('p',{cls:'modal-sub'},'We looked through your collection and wantlist — these are the artists and labels you keep coming back to.'));
+    const buildHeroRow=(entry,type)=>{
+      const isFollowed=st.follows.some(f=>f.discogs_id===entry.id&&f.type===type);
+      const row=d('hero-row',{});
+      row.appendChild(entry.thumb
+        ?el('img',{cls:'hero-thumb',src:entry.thumb,alt:'',loading:'lazy'})
+        :d('hero-thumb-ph',{},type==='label'?'🏷️':'🎤'));
+      const mid=d('hero-mid',{});
+      mid.appendChild(s('hero-name',entry.name||'Unknown'));
+      mid.appendChild(s('hero-count',entry.count+' releases in your crates'));
+      row.appendChild(mid);
+      const actions=d('hero-actions',{});
+      actions.appendChild(b('follow-btn'+(isFollowed?' following':''),{onClick:()=>{
+        toggleFollow({discogsId:entry.id,type,name:entry.name,data:{imageUrl:entry.thumb||null}});
+      }},isFollowed?'✓ Following':'+ Follow'));
+      actions.appendChild(b('btn-sec',{onClick:()=>{
+        st.heroesModal=false;
+        addNode(type,entry.id,entry.name,null,st.activeBranchId);
+      }},'Open ›'));
+      row.appendChild(actions);
+      return row;
+    };
+    if(heroes.artists.length){
+      modal.appendChild(s('st-section','🎤 Artists you dig'));
+      heroes.artists.forEach(a=>modal.appendChild(buildHeroRow(a,'artist')));
+    }
+    if(heroes.labels.length){
+      modal.appendChild(s('st-section','🏷️ Labels you dig'));
+      heroes.labels.forEach(l=>modal.appendChild(buildHeroRow(l,'label')));
+    }
     overlay.appendChild(modal);root.appendChild(overlay);
   }
 
