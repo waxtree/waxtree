@@ -1107,7 +1107,7 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=3;
+const TRACK_DATA_VERSION=4;
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
@@ -1823,9 +1823,15 @@ function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
 
 async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=false){
   const c=lsGet('a7:'+discogsId);if(c&&c.tracks?.length&&c._v===TRACK_DATA_VERSION)return c;
+  // Newest-first: fetchReleaseBatches below stops once it hits the 200-track
+  // cap, so for a discography bigger than that, whichever end we start from
+  // is the only end that ever gets fetched. Oldest-first meant a prolific
+  // artist's most recent releases (often the ones actually worth digging
+  // for) could be excluded entirely if their back catalog alone exceeded
+  // the cap.
   const[artData,relData]=await Promise.all([
     dReq('/artists/'+discogsId),
-    dReq('/artists/'+discogsId+'/releases',{per_page:'100',sort:'year',sort_order:'asc'})
+    dReq('/artists/'+discogsId+'/releases',{per_page:'100',sort:'year',sort_order:'desc'})
   ]);
   const rawBio=artData.profile?stripBio(artData.profile):null;
   const imageUrl=artData.images?.find(i=>i.type==='primary')?.uri||artData.images?.[0]?.uri||null;
@@ -1899,9 +1905,13 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
 
 async function fetchLabelData(discogsId,isCancelled=()=>false){
   const c=lsGet('l8:'+discogsId);if(c&&c._v===TRACK_DATA_VERSION)return c;
+  // Newest-first — see fetchArtistData()'s comment above the same change.
+  // A label with a big back catalog was showing releases up to ~2020 and
+  // no newer, digital-only ones included, purely because the 200-track cap
+  // was being spent walking oldest-to-newest and never got there.
   const[labData,relData]=await Promise.all([
     dReq('/labels/'+discogsId),
-    dReq('/labels/'+discogsId+'/releases',{per_page:'100',sort:'year',sort_order:'asc'})
+    dReq('/labels/'+discogsId+'/releases',{per_page:'100',sort:'year',sort_order:'desc'})
   ]);
   const rawBio=labData.profile?stripBio(labData.profile):null;
   const labImgUrl=labData.images?.find(i=>i.type==='primary')?.uri||labData.images?.[0]?.uri||null;
