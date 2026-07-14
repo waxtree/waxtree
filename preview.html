@@ -1115,7 +1115,7 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=5;
+const TRACK_DATA_VERSION=6;
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
@@ -1742,7 +1742,11 @@ const stripDiscogsSuffix=n=>(n||'').replace(/\s\(\d+\)$/,'');
 function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb=''){
   const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.title);
   if(!tracklist.length)return[];
-  const isDigital=(rd.formats||[]).some(f=>/^file$/i.test(f.name)||(f.descriptions||[]).some(d=>/mp3|flac|wav|aac|digital|lossless/i.test(d)));
+  // A vinyl-with-download-code release is very common and Discogs represents
+  // it as ONE "Vinyl" format entry whose descriptions mention the download,
+  // not a separate "File" entry — miss that wording and a release that's
+  // genuinely both ends up mislabeled "Only Vinyl".
+  const isDigital=(rd.formats||[]).some(f=>/^file$/i.test(f.name)||(f.descriptions||[]).some(d=>/mp3|flac|wav|aac|digital|lossless|download/i.test(d)));
   const hasVinyl=(rd.formats||[]).some(f=>/vinyl/i.test(f.name));
   const labelId=rd.labels?.[0]?.id||null;
   const labelName=rd.labels?.[0]?.name||relLabelHint||'';
