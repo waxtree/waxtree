@@ -1111,7 +1111,7 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=6;
+const TRACK_DATA_VERSION=7;
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
@@ -1735,7 +1735,7 @@ function genreColor(g){
 // Discogs suffixes an artist name with " (N)" to disambiguate same-named
 // artists (e.g. "Artist Name (2)") — strip it for display everywhere.
 const stripDiscogsSuffix=n=>(n||'').replace(/\s\(\d+\)$/,'');
-function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb=''){
+function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='',vinylTitles=null){
   const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.title);
   if(!tracklist.length)return[];
   // A vinyl-with-download-code release is very common and Discogs represents
@@ -1743,7 +1743,12 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
   // not a separate "File" entry — miss that wording and a release that's
   // genuinely both ends up mislabeled "Only Vinyl".
   const isDigital=(rd.formats||[]).some(f=>/^file$/i.test(f.name)||(f.descriptions||[]).some(d=>/mp3|flac|wav|aac|digital|lossless|download/i.test(d)));
-  const hasVinyl=(rd.formats||[]).some(f=>/vinyl/i.test(f.name));
+  // Discogs is treated as the authoritative, ~complete database for vinyl
+  // specifically — a vinyl pressing and its digital-only counterpart are
+  // often two separate release listings, so also check for a sibling entry
+  // (same catalog, matching title) that IS vinyl before concluding there's
+  // no vinyl pressing at all.
+  const hasVinyl=(rd.formats||[]).some(f=>/vinyl/i.test(f.name))||!!vinylTitles?.has(normalizeStr(rd.title||''));
   const labelId=rd.labels?.[0]?.id||null;
   const labelName=rd.labels?.[0]?.name||relLabelHint||'';
   const year=rd.year||relYear;
@@ -1848,6 +1853,11 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
 
   const mainRels=relData.releases.filter(r=>r.role==='Main');
   const relList=mainRels.length>0?mainRels:relData.releases;
+  // Built from the same release list already in hand — no extra requests.
+  // A vinyl pressing and its digital-only counterpart are frequently two
+  // separate Discogs listings; this catches the vinyl one by title even
+  // when the specific entry fetched below turns out to be the digital one.
+  const vinylTitles=new Set(relData.releases.filter(r=>/vinyl/i.test(r.format||'')).map(r=>normalizeStr(r.title||'')));
   const{rawTracks,needsCover}=await fetchReleaseBatches(relList,200,isCancelled,async rel=>{
     let fetchId,releaseUrl,rd;
     if(rel.type==='master'){
@@ -1858,7 +1868,7 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
       fetchId=rel.id;releaseUrl=`https://www.discogs.com/release/${rel.id}`;
       rd=await dReq('/releases/'+fetchId);
     }
-    const entries=buildTrackEntries(rd,fetchId,releaseUrl,rel.year,rel.label,rel.thumb||'');
+    const entries=buildTrackEntries(rd,fetchId,releaseUrl,rel.year,rel.label,rel.thumb||'',vinylTitles);
     const needsCoverItem=(entries.length&&!entries[0].thumbUrl)
       ?{entries,artistName:artData.name,releaseTitle:rd.title||rel.title||'',year:rd.year||rel.year}
       :null;
@@ -1926,11 +1936,16 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
   const labImgUrl=labData.images?.find(i=>i.type==='primary')?.uri||labData.images?.[0]?.uri||null;
   const wikiP=(!rawBio||rawBio.length<60||!labImgUrl)?fetchWikipediaData(labData.name):Promise.resolve(null);
 
+  // Built from the same release list already in hand — no extra requests.
+  // A vinyl pressing and its digital-only counterpart are frequently two
+  // separate Discogs listings; this catches the vinyl one by title even
+  // when the specific entry fetched below turns out to be the digital one.
+  const vinylTitles=new Set(relData.releases.filter(r=>/vinyl/i.test(r.format||'')).map(r=>normalizeStr(r.title||'')));
   const{rawTracks,needsCover}=await fetchReleaseBatches(relData.releases,200,isCancelled,async rel=>{
     const rd=await dReq('/releases/'+rel.id);
     const artistId=rd.artists?.[0]?.id||null;
     const artistName=stripDiscogsSuffix(rd.artists?.[0]?.name||rel.artist||'');
-    const entries=buildTrackEntries(rd,rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,artistName,rel.thumb||'');
+    const entries=buildTrackEntries(rd,rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,artistName,rel.thumb||'',vinylTitles);
     entries.forEach(e=>{
       // Various Artists release: use the per-track credit instead of the
       // release-level "Various" placeholder, for both the displayed
