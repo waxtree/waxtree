@@ -1669,7 +1669,7 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
   const year=rd.year||relYear;
   const videos=rd.videos||[];
   const normV=s=>s.toLowerCase().replace(/\b0+([1-9])/g,'$1').replace(/[^a-z0-9]/g,'');
-  const tl=tracklist.slice(0,4);
+  const tl=tracklist;
   const allTN=tl.map(t=>normV(t.title));
   function matchVideo(idx){
     const tn=allTN[idx];if(!videos.length||tn.length<4)return null;
