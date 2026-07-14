@@ -1463,22 +1463,30 @@ function dedup(tracks){
 // Parenthetical text that names a version/edit rather than a remixer —
 // same non-remix vocabulary as normalTitle() above, kept in sync.
 const REMIX_GENERIC_RE=/^(original(?:\s+mix)?|album(?:\s+version)?|lp(?:\s+version)?|extended(?:\s+version)?|single(?:\s+version)?|full(?:\s+version)?|radio\s*(?:edit|version)?|main(?:\s+version)?|instrumental|acapella|a\s*cappella|clean|dirty|explicit|bonus(?:\s+track)?|intro|outro|interlude|continuous\s*mix|unmixed|demo|live)$/i;
-const REMIX_SUFFIX_RE=/^(.+?)\s+(?:remix|rmx|rework|refix|flip|bootleg|vip|edit|dub(?:\s*mix)?|mix)$/i;
+// Packaging descriptors (same vocabulary normalTitle() strips) — never a
+// remixer either, e.g. "(Limited Edition)" next to a plain sibling track.
+const REMIX_PACKAGING_RE=/^(limited|special|collector'?s?|deluxe|colour?e?d?|promo|numbered|reissue|re-?press|remaster(?:ed)?|anniversary|hand[\s-]?stamp(?:ed)?|picture\s*disc|clear|splatter|vinyl)\b/i;
+// Generic mix/edit TYPE words — never the remixer's own name, even when
+// they're the first word left after stripping a trailing keyword (e.g.
+// "(Extended Mix)" -> "Extended" must NOT be read as an artist).
+const REMIX_TYPE_WORD_RE=/^(original|album|lp|extended|single|full|radio|main|club|vocal|instrumental|acapella|dub|vip|clean|dirty|explicit|bonus|intro|outro|interlude|continuous|unmixed|demo|live|alternate|alternative|special|reprise|unreleased)$/i;
+const REMIX_SUFFIX_RE=/^(.+?)\s+(?:remix|rmx|rework|refix|flip|bootleg|vip|edit|dub(?:\s*mix)?|mix|version)$/i;
 function baseTitleKey(title){return title.replace(/\s*[\(\[][^\)\]]*[\)\]]/g,'').trim().toLowerCase().replace(/\s+/g,' ');}
 // hasSibling: another track in the same release shares this track's base
 // title (e.g. a plain "Alpha Decay" next to "Alpha Decay (Reshape)") — only
 // then do we trust a bare, keyword-less parenthetical as a remixer's name.
+// Either way, only the FIRST word of what's left is trusted as the alias —
+// everything after it ("Chevel Deconstructed Mix", "YHxM Stripped Mix",
+// "Mosca's Pure Joy Version") is a style descriptor, not part of the name.
 function extractRemixArtist(title,hasSibling){
   const groups=[...title.matchAll(/[\(\[]([^\)\]]+)[\)\]]/g)].map(m=>m[1].trim());
   for(const g of groups){
-    if(!g||REMIX_GENERIC_RE.test(g))continue;
+    if(!g||REMIX_GENERIC_RE.test(g)||REMIX_PACKAGING_RE.test(g))continue;
     const m=g.match(REMIX_SUFFIX_RE);
-    if(m){
-      const name=m[1].trim();
-      if(name&&!REMIX_GENERIC_RE.test(name))return name;
-    }else if(hasSibling){
-      return g;
-    }
+    const remainder=m?m[1].trim():(hasSibling?g:null);
+    if(!remainder)continue;
+    const firstWord=remainder.split(/\s+/)[0].replace(/['’]s$/i,'');
+    if(firstWord&&!REMIX_TYPE_WORD_RE.test(firstWord)&&!REMIX_GENERIC_RE.test(firstWord))return firstWord;
   }
   return null;
 }
