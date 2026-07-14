@@ -882,6 +882,12 @@ async function matchLibraryWithDiscogs(){
   st.libraryMatchProgress={done:0,total:remaining.length,found:0};
   if(st.discogsModal)rr();
   const matches=loadDigitalMatches();
+  // Batches with few/no Discogs hits can finish in well under a second —
+  // without a floor, a full app re-render on every single one (while the
+  // modal watching progress is open) fires far more often than a human
+  // reading a counter needs, which is exactly what made the background
+  // content behind the modal visibly jump/scroll on every tick.
+  let lastProgressRr=0;
 
   for(let i=0;i<remaining.length;i+=DIGITAL_MATCH_BATCH){
     if(!st.libraryMatchRunning)break; // cancelled mid-run
@@ -934,8 +940,9 @@ async function matchLibraryWithDiscogs(){
     // Only worth a full app re-render while the Sync Libraries modal (the
     // only place this progress is shown) is actually open — otherwise this
     // fires every batch for the whole run and visibly disrupts scroll on
-    // whatever the user has navigated to elsewhere in the meantime.
-    if(st.discogsModal)rr();
+    // whatever the user has navigated to elsewhere in the meantime. Even
+    // then, at most once a second — plenty for a progress counter.
+    if(st.discogsModal&&Date.now()-lastProgressRr>=1000){lastProgressRr=Date.now();rr();}
   }
   st.libraryMatchRunning=false;
   if(st.discogsModal)rr();
@@ -1290,7 +1297,13 @@ function paint(){
   const active=document.activeElement;
   const restoreFocus=(active&&active.classList?.contains('s-input'))?active.selectionStart:null;
   root.innerHTML='';root.appendChild(buildApp());
-  Object.entries(scrolls).forEach(([k,v])=>{const e=root.querySelector(`[data-sc="${k}"]`);if(e)e.scrollTop=v;});
+  const restoreScroll=()=>Object.entries(scrolls).forEach(([k,v])=>{const e=root.querySelector(`[data-sc="${k}"]`);if(e)e.scrollTop=v;});
+  restoreScroll();
+  // A rebuild that lands while something above the fold is still settling
+  // (e.g. a modal whose height shifts as its progress text grows a digit)
+  // can have the assignment above clamped or overridden before layout is
+  // final — re-apply once more after the browser has actually painted.
+  requestAnimationFrame(restoreScroll);
   if(restoreFocus!==null){
     const inp=root.querySelector('.s-input');
     if(inp){inp.focus();try{inp.setSelectionRange(restoreFocus,restoreFocus);}catch{}}
