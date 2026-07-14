@@ -2313,8 +2313,9 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   let exploreEls;
   if(remixArtists.size>0&&exploreEntries.length>0){
     const exploreOpen=st.exploreDropKey===group.key;
+    const highlighted=exploreEntries.some(en=>en.cls==='esplora-label');
     const wrap=d('explore-wrap',{});
-    wrap.appendChild(b('esplora-btn explore-toggle',{
+    wrap.appendChild(b('esplora-btn explore-toggle'+(highlighted?' esplora-label':''),{
       onClick:e=>{e.stopPropagation();st.exploreDropKey=exploreOpen?null:group.key;rr();}
     },exploreOpen?'Explore ▴':'Explore ▾'));
     if(exploreOpen){
