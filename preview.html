@@ -795,6 +795,37 @@ function resolveHeroArtistName(artistNorm){
   return undefined;
 }
 
+// The collection/wantlist entries only carry a release cover (whichever
+// release happened to trip the detection) — not the artist's/label's own
+// Discogs profile photo. Fetched separately, lightweight (just the
+// artist/label record itself, not fetchArtistData()'s whole discography
+// pull) since this only ever runs for the small final hero list, not every
+// candidate considered along the way.
+const heroImageResolveInFlight=new Set();
+function resolveHeroProfileImage(type,discogsId){
+  const ck=(type==='label'?'lblimg:':'artimg:')+discogsId;
+  const cached=lsGet(ck);
+  if(cached!==null)return cached||null; // '' -> null (no photo on file), or a URL
+  if(!heroImageResolveInFlight.has(ck)){
+    heroImageResolveInFlight.add(ck);
+    (async()=>{
+      let url;
+      try{
+        const data=await dReq(type==='label'?'/labels/'+discogsId:'/artists/'+discogsId);
+        url=data.images?.find(i=>i.type==='primary')?.uri||data.images?.[0]?.uri||'';
+      }catch(e){
+        console.warn('WaxTree: hero profile image fetch failed for',type,discogsId,e);
+        heroImageResolveInFlight.delete(ck);
+        return; // don't cache — retry on a later call
+      }
+      heroImageResolveInFlight.delete(ck);
+      lsSet(ck,url);
+      rr();
+    })();
+  }
+  return undefined;
+}
+
 // No top-N cap here — every artist with at least LOCAL_HERO_MIN_TRACKS
 // tracks in the library is a legitimate candidate (10 tracks by the same
 // artist is already a clear "you like this" signal on its own). What's
@@ -859,10 +890,16 @@ function computeDiggingHeroes(allowBackgroundWork){
   }
   const total=x=>x.collectionCount+x.libraryCount;
   const byCount=(a,b)=>total(b)-total(a);
-  return{
-    artists:[...artists.values()].filter(a=>total(a)>=2).sort(byCount).slice(0,30),
-    labels:[...labels.values()].filter(l=>l.collectionCount>=2).sort(byCount).slice(0,30),
-  };
+  const topArtists=[...artists.values()].filter(a=>total(a)>=2).sort(byCount).slice(0,30);
+  const topLabels=[...labels.values()].filter(l=>l.collectionCount>=2).sort(byCount).slice(0,30);
+  // Only ever resolved for the small final list actually shown, not every
+  // candidate considered above — a release cover stays the fallback until
+  // (if ever) a real profile photo comes back.
+  if(allowBackgroundWork){
+    topArtists.forEach(a=>{const img=resolveHeroProfileImage('artist',a.id);if(img)a.thumb=img;});
+    topLabels.forEach(l=>{const img=resolveHeroProfileImage('label',l.id);if(img)l.thumb=img;});
+  }
+  return{artists:topArtists,labels:topLabels};
 }
 
 async function syncDiscogsAccount(){
