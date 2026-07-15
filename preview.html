@@ -1574,6 +1574,34 @@ async function searchYouTubeApi(q){
   lsSet(ck,results);
   return results;
 }
+// Costs ~3 units total (channels.list + playlistItems.list + a batched
+// videos.list), regardless of how many tracks get checked against the
+// result — versus 100+ units for every single search.list call. Once
+// ytChannelMap below has an artist's/label's channel on file, every later
+// track by them can be checked here first instead of paying for a search.
+async function fetchChannelUploads(channelId){
+  const ck='ytch:'+channelId;
+  const c=lsGet(ck);if(c)return c;
+  const res=await fetch('/api/yt-search?channelId='+encodeURIComponent(channelId));
+  const json=await res.json().catch(()=>({}));
+  if(res.status===429){pauseYtQuota(6);throw new Error(json.error||'YouTube quota exceeded');}
+  if(!res.ok||json.error)throw new Error(json.error||'YouTube channel lookup failed ('+res.status+')');
+  const results=json.results||[];
+  lsSet(ck,results);
+  return results;
+}
+// Confirmed matches (and confirmed non-matches) never expire — a video, once
+// found, doesn't need re-verifying, and re-searching something already
+// checked is pure waste against a quota this tight. Plain non-expiring
+// localStorage, same treatment as wt-digital-matches/wt-owned elsewhere.
+function loadYtMatches(){try{const r=localStorage.getItem('wt-yt-matches');return r?JSON.parse(r):{};}catch{return{};}}
+function saveYtMatches(m){try{localStorage.setItem('wt-yt-matches',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist YouTube matches:',e);}}
+let ytMatches=loadYtMatches();
+// artistNorm/labelNorm -> their confirmed YouTube channel id, so the next
+// track by the same artist/label can skip straight to fetchChannelUploads().
+function loadYtChannelMap(){try{const r=localStorage.getItem('wt-yt-channels');return r?JSON.parse(r):{};}catch{return{};}}
+function saveYtChannelMap(m){try{localStorage.setItem('wt-yt-channels',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist YouTube channel map:',e);}}
+let ytChannelMap=loadYtChannelMap();
 function findTrackAndNode(trackId){
   for(const node of st.nodes){
     const idx=node.data?.tracks?.findIndex(t=>t.id===trackId)??-1;
@@ -1622,44 +1650,71 @@ function pauseYtQuota(hours){
   try{localStorage.setItem(YT_QUOTA_PAUSE_KEY,String(Date.now()+hours*3600000));}catch{}
 }
 function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
-  const ck='ytmatch:'+trackId;
-  const cached=lsGet(ck);
-  if(cached!==null)return cached; // false (confirmed no match) or a videoId string
+  if(trackId in ytMatches)return ytMatches[trackId]; // false (confirmed no match) or a videoId string — permanent
   if(isYtQuotaPaused())return undefined; // known exhausted — don't even try
   if(ytAutoMatchInFlight.has(trackId))return undefined;
   ytAutoMatchInFlight.add(trackId);
   (async()=>{
     let result;
     try{
-      // Quoted phrases, not a loose bag of words: YouTube's search API
-      // (unlike the consumer website) ranks loose queries by loose semantic
-      // relevance, not exact terms — an artist whose name doubles as a
-      // common word (e.g. "Vedik" vs. "Vedic") gets swamped by unrelated
-      // results otherwise, even though the right video is on YouTube.
-      const q=`"${artistName||''}" "${title}"`;
-      const results=await searchYouTubeApi(q);
       const titleN=normalizeStr(title);
       const artistN=normalizeStr(artistName||'');
       const labelN=normalizeStr(labelName||'');
       const expectedSec=duration?parseDur(duration):0;
-      const hit=results.find(r=>{
-        if(!normalizeStr(r.title||'').includes(titleN))return false;
-        const channelN=normalizeStr(r.channelTitle||'');
-        const channelMatches=(artistN&&channelN.includes(artistN))||(labelN&&channelN.includes(labelN));
-        if(channelMatches){
-          // Uploader confirmed as the artist/label (or their YouTube-generated
-          // "Topic" channel) — a looser duration tolerance is fine here.
-          if(expectedSec&&r.durationSec&&Math.abs(r.durationSec-expectedSec)>8)return false;
-          return true;
+
+      // Cheap path first: if a previous track already confirmed this
+      // artist's or label's channel, check their own uploads (~3 units,
+      // no search.list quota spent) before ever paying for a search.
+      // Already saved in ytChannelMap when it was first confirmed, so
+      // nothing more to persist here on a hit.
+      const knownChannelId=ytChannelMap[artistN]||ytChannelMap[labelN];
+      let hit=null;
+      if(knownChannelId){
+        try{
+          const uploads=await fetchChannelUploads(knownChannelId);
+          hit=uploads.find(r=>normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
+        }catch(e){
+          console.warn('WaxTree: channel-uploads lookup failed, falling back to search for',title,e);
         }
-        // Third-party upload (fan channel, blog, etc.) — the channel gives no
-        // signal either way, so only trust a tight duration agreement: a
-        // matching title AND a near-exact duration match is too specific a
-        // coincidence for unrelated content, but a loose title match alone
-        // is not enough (that's exactly what got the earlier attempt reverted).
-        if(!expectedSec||!r.durationSec)return false;
-        return Math.abs(r.durationSec-expectedSec)<=3;
-      });
+      }
+
+      if(!hit){
+        // Quoted phrases, not a loose bag of words: YouTube's search API
+        // (unlike the consumer website) ranks loose queries by loose semantic
+        // relevance, not exact terms — an artist whose name doubles as a
+        // common word (e.g. "Vedik" vs. "Vedic") gets swamped by unrelated
+        // results otherwise, even though the right video is on YouTube.
+        const q=`"${artistName||''}" "${title}"`;
+        const results=await searchYouTubeApi(q);
+        hit=results.find(r=>{
+          if(!normalizeStr(r.title||'').includes(titleN))return false;
+          const channelN=normalizeStr(r.channelTitle||'');
+          const channelMatches=(artistN&&channelN.includes(artistN))||(labelN&&channelN.includes(labelN));
+          if(channelMatches){
+            // Uploader confirmed as the artist/label (or their YouTube-generated
+            // "Topic" channel) — a looser duration tolerance is fine here.
+            if(expectedSec&&r.durationSec&&Math.abs(r.durationSec-expectedSec)>8)return false;
+            return true;
+          }
+          // Third-party upload (fan channel, blog, etc.) — the channel gives no
+          // signal either way, so only trust a tight duration agreement: a
+          // matching title AND a near-exact duration match is too specific a
+          // coincidence for unrelated content, but a loose title match alone
+          // is not enough (that's exactly what got the earlier attempt reverted).
+          if(!expectedSec||!r.durationSec)return false;
+          return Math.abs(r.durationSec-expectedSec)<=3;
+        })||null;
+        if(hit?.channelId){
+          const channelN=normalizeStr(hit.channelTitle||'');
+          // Only remember the channel for the identity it actually matched —
+          // a third-party upload's channel isn't the artist's, so nothing to
+          // shortcut next time.
+          let learned=false;
+          if(artistN&&channelN.includes(artistN)){ytChannelMap[artistN]=hit.channelId;learned=true;}
+          if(labelN&&channelN.includes(labelN)){ytChannelMap[labelN]=hit.channelId;learned=true;}
+          if(learned)saveYtChannelMap(ytChannelMap);
+        }
+      }
       result=hit?hit.id:null;
     }catch(e){
       console.warn('WaxTree: YouTube auto-match failed for',title,e);
@@ -1667,7 +1722,8 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
     }
     ytAutoMatchInFlight.delete(trackId);
     if(result===undefined)return;
-    lsSet(ck,result===null?false:result);
+    ytMatches[trackId]=result===null?false:result;
+    saveYtMatches(ytMatches);
     if(result){
       // Persist onto the actual track object (same pattern resolveCoversInBackground
       // uses) so it survives being re-rendered elsewhere — play button state,
@@ -2695,9 +2751,8 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     // immediately, no budget spent.
     let resolvedVideoId=track.videoId;
     if(!resolvedVideoId){
-      const cachedYt=lsGet('ytmatch:'+track.id);
-      if(cachedYt!==null){
-        resolvedVideoId=cachedYt||null;
+      if(track.id in ytMatches){
+        resolvedVideoId=ytMatches[track.id]||null;
       }else if(ytAutoMatchInFlight.has(track.id)||tryYtKickoffBudget()){
         resolveTrackVideoId(track.id,track.title,displayArtist,track.duration,isLabel?nodeName:track.label);
       }
