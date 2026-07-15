@@ -676,17 +676,26 @@ async function extractAllMetadata(handles,onProgress){
   return results;
 }
 
+// track.altIds carries the ids of any other release-variant rows that got
+// folded into this one by mergeReleaseVariantTracks() (e.g. a coloured
+// vinyl pressing merged into the plain digital listing of the same EP) —
+// checked too, so owning ANY variant still surfaces the badge, not just
+// whichever variant happened to be kept as the display row.
 function inDiscogsCollection(track){
   if(!st.discogsCollReleaseIds.length&&!st.discogsCollMasterIds.length)return false;
-  const raw=track.id?.split('-')[0];if(!raw)return false;
-  if(raw.startsWith('m'))return st.discogsCollMasterIds.includes(parseInt(raw.slice(1)));
-  return st.discogsCollReleaseIds.includes(parseInt(raw));
+  return[track.id,...(track.altIds||[])].some(id=>{
+    const raw=id?.split('-')[0];if(!raw)return false;
+    if(raw.startsWith('m'))return st.discogsCollMasterIds.includes(parseInt(raw.slice(1)));
+    return st.discogsCollReleaseIds.includes(parseInt(raw));
+  });
 }
 function inDiscogsWantlist(track){
   if(!st.discogsWantReleaseIds.length&&!st.discogsWantMasterIds.length)return false;
-  const raw=track.id?.split('-')[0];if(!raw)return false;
-  if(raw.startsWith('m'))return st.discogsWantMasterIds.includes(parseInt(raw.slice(1)));
-  return st.discogsWantReleaseIds.includes(parseInt(raw));
+  return[track.id,...(track.altIds||[])].some(id=>{
+    const raw=id?.split('-')[0];if(!raw)return false;
+    if(raw.startsWith('m'))return st.discogsWantMasterIds.includes(parseInt(raw.slice(1)));
+    return st.discogsWantReleaseIds.includes(parseInt(raw));
+  });
 }
 async function edgeFn(body){
   const res=await fetch('/api/discogs-oauth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -2765,15 +2774,45 @@ async function uploadAvatar(file){
 function getAvatarUrl(){return localStorage.getItem(AVATAR_KEY)||null;}
 
 // ── Release card (groups all tracks of one EP/Album into one row) ──
+// Collapses same-titled tracks that came from different Discogs release-id
+// variants of one release (e.g. a coloured vinyl pressing and a plain
+// digital-only listing of the exact same EP) into a single row — keeps
+// whichever copy already has the most complete data and fills in gaps from
+// the rest, recording their ids as altIds so inDiscogsCollection()/
+// inDiscogsWantlist() still catch a match on ANY variant afterwards.
+function mergeReleaseVariantTracks(tracks){
+  const byTitle=new Map();
+  tracks.forEach(t=>{
+    const key=normalizeStr(t.title);
+    const existing=byTitle.get(key);
+    if(!existing){byTitle.set(key,{...t,altIds:[]});return;}
+    if(t.id!==existing.id)existing.altIds.push(t.id);
+    if(!existing.duration&&t.duration)existing.duration=t.duration;
+    if(!existing.videoId&&t.videoId)existing.videoId=t.videoId;
+    if(!existing.bpm&&t.bpm)existing.bpm=t.bpm;
+    if(!existing.thumbUrl&&t.thumbUrl)existing.thumbUrl=t.thumbUrl;
+    if(t.hasVinyl)existing.hasVinyl=true;
+    if(t.digital)existing.digital=true;
+  });
+  return[...byTitle.values()];
+}
 function groupTracksByRelease(tracks){
   const groups=[];
   const byKey=new Map();
   for(const t of tracks){
-    const key=t.discogsUrl||t.id; // release-level, identical for every track of that release
+    // Group by the release's conceptual identity (title, plus the credited
+    // artist when browsing a label, where different artists can release
+    // same-titled EPs) rather than by Discogs release id — a vinyl
+    // pressing, a coloured variant, and a separate digital-only listing of
+    // the exact same EP are still, to a digger, "the same release" and
+    // shouldn't turn into two or three near-identical cards each missing
+    // some of the ownership tags the others have.
+    const key=normalizeStr(t.album||t.title)+'|'+normalizeStr(t.label||'');
     let g=byKey.get(key);
     if(!g){g={key,tracks:[]};byKey.set(key,g);groups.push(g);}
     g.tracks.push(t);
   }
+  groups.forEach(g=>{g.tracks=mergeReleaseVariantTracks(g.tracks);});
   return groups;
 }
 
@@ -2980,8 +3019,10 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   // Discogs is a crate-digger's marketplace/database for physical media —
   // a release with no vinyl pressing at all (digital-only) has nothing to
   // redirect to there. A release bundling both digital and vinyl formats
-  // still gets the button.
-  const digitalOnly=first.digital&&!first.hasVinyl;
+  // still gets the button. Checked across every track in the (now
+  // merged-by-title) group, not just first — a vinyl-only bonus track
+  // shouldn't make the whole release look vinyl-less, or vice versa.
+  const digitalOnly=tracks.some(t=>t.digital)&&!tracks.some(t=>t.hasVinyl);
   if(first.discogsUrl&&!digitalOnly)buyBtns.push(el('a',{cls:'buy-btn dg',href:first.discogsUrl,target:'_blank',rel:'noreferrer'},'Discogs ↗'));
 
   return d('rel-card',{},
