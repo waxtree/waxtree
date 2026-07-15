@@ -166,6 +166,10 @@ input,select{font:inherit;color:inherit}
 .lib-tab{flex:1;padding:10px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg-e);color:var(--text-m);font-size:13px;font-weight:600;cursor:pointer;transition:border-color .15s,color .15s,background .15s;font-family:inherit}
 .lib-tab:hover{border-color:var(--accent)}
 .lib-tab.active{border-color:var(--accent);color:var(--accent);background:rgba(94,196,123,.1)}
+.lib-search{position:relative;margin:10px 0 4px}
+.lib-search-input{width:100%;padding:8px 12px 8px 32px;border-radius:10px;background:var(--bg-e);border:1.5px solid var(--border);color:var(--text);font-size:13px;font-family:inherit;outline:none;box-sizing:border-box}
+.lib-search-input:focus{border-color:var(--accent)}
+.lib-search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--text-f);pointer-events:none}
 .follows-list{max-height:420px;overflow-y:auto;margin:12px 0 4px}
 .follows-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
 .follows-item:last-child{border-bottom:none}
@@ -1527,7 +1531,7 @@ const st={
   discogsCollReleaseIds:saved?.discogsCollReleaseIds||[],
   discogsCollMasterIds:saved?.discogsCollMasterIds||[],
   discogsCollection:loadDiscogsCollection(),
-  librariesModal:false,librariesTab:'vinyl',
+  librariesModal:false,librariesTab:'vinyl',librariesSearch:'',
   libraryMatchRunning:false,libraryMatchProgress:{done:0,total:0,found:0},
   discogsWantReleaseIds:saved?.discogsWantReleaseIds||[],
   discogsWantMasterIds:saved?.discogsWantMasterIds||[],
@@ -1547,11 +1551,18 @@ let bcCacheMap={};     // nodeId → {tracks,loading,err}
 {const sw=parseInt(localStorage.getItem('wt-sb-w'));if(sw>=160&&sw<=520)document.documentElement.style.setProperty('--sb-w',sw+'px');}
 let pending=false;
 function rr(){saveSt();if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;paint();});}
+// Text inputs that get torn down and rebuilt on every paint() like
+// everything else — without this, typing into one loses focus after each
+// character, since the freshly-rebuilt element is a different DOM node than
+// the one that was focused a moment ago. Add a class here for any future
+// live-filtering input that needs to survive its own onInput-triggered rr().
+const RESTORE_FOCUS_CLASSES=['s-input','lib-search-input'];
 function paint(){
   const root=document.getElementById('root');
   const scrolls={};root.querySelectorAll('[data-sc]').forEach(e=>{scrolls[e.dataset.sc]=e.scrollTop;});
   const active=document.activeElement;
-  const restoreFocus=(active&&active.classList?.contains('s-input'))?active.selectionStart:null;
+  const restoreFocusCls=RESTORE_FOCUS_CLASSES.find(c=>active?.classList?.contains(c));
+  const restoreFocus=restoreFocusCls?active.selectionStart:null;
   root.innerHTML='';root.appendChild(buildApp());
   const restoreScroll=()=>Object.entries(scrolls).forEach(([k,v])=>{const e=root.querySelector(`[data-sc="${k}"]`);if(e)e.scrollTop=v;});
   restoreScroll();
@@ -1561,7 +1572,7 @@ function paint(){
   // final — re-apply once more after the browser has actually painted.
   requestAnimationFrame(restoreScroll);
   if(restoreFocus!==null){
-    const inp=root.querySelector('.s-input');
+    const inp=root.querySelector('.'+restoreFocusCls);
     if(inp){inp.focus();try{inp.setSelectionRange(restoreFocus,restoreFocus);}catch{}}
   }
   syncYtPlayer();
@@ -3770,12 +3781,26 @@ function buildApp(){
     });
     modal.appendChild(tabs);
 
-    const entries=st.librariesTab==='vinyl'?vinylEntries:digitalEntries;
+    const searchWrap=d('lib-search',{});
+    searchWrap.appendChild(s('lib-search-icon','🔍'));
+    searchWrap.appendChild(el('input',{cls:'lib-search-input',type:'text',placeholder:'Search artist, release or label…',value:st.librariesSearch,
+      onInput:e=>{st.librariesSearch=e.target.value;rr();},
+    }));
+    modal.appendChild(searchWrap);
+
+    const allEntries=st.librariesTab==='vinyl'?vinylEntries:digitalEntries;
+    const searchQ=st.librariesSearch.trim().toLowerCase();
+    const entries=searchQ?allEntries.filter(rel=>{
+      const haystack=[rel.title,rel.artist,rel.labelExploreName,...(rel.genres||[])].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(searchQ);
+    }):allEntries;
     const list=d('follows-list',{});
     if(!entries.length){
       let msg='No releases here yet.';
       let onClick=null;
-      if(st.librariesTab==='vinyl'&&!st.discogsCollSyncedAt){
+      if(allEntries.length&&searchQ){
+        msg=`No matches for "${st.librariesSearch.trim()}".`;
+      } else if(st.librariesTab==='vinyl'&&!st.discogsCollSyncedAt){
         msg='Sync your Discogs collection to see it here.';
         onClick=()=>{st.librariesModal=false;st.discogsModal=true;rr();};
       } else if(st.librariesTab==='digital'&&!st.ownedTracks.length){
