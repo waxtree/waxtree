@@ -417,6 +417,20 @@ input,select{font:inherit;color:inherit}
 .yt-fallback p{font-size:12px;color:var(--text-m)}
 .yt-fallback a{font-size:12px;color:var(--accent);text-decoration:none;padding:6px 14px;border:1px solid var(--accent);border-radius:20px;transition:background .15s}
 .yt-fallback a:hover{background:rgba(94,196,123,.12)}
+/* Custom transport bar for Discogs-confirmed videos — replaces the native
+   YouTube control bar (hidden via the player's own controls:0 param) with
+   our own play/pause + draggable seek, while the video itself stays
+   visible per YouTube's API terms (no audio-only extraction, no hiding
+   the player's identity). */
+.yt-custom-controls{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-s)}
+.yt-custom-play{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;line-height:1}
+.yt-custom-play:hover{opacity:.88}
+.yt-custom-time{font-size:10px;color:var(--text-m);flex-shrink:0;min-width:26px;text-align:center;font-variant-numeric:tabular-nums}
+.yt-custom-seek{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:var(--border);outline:none;cursor:pointer;margin:0}
+.yt-custom-seek::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:11px;height:11px;border-radius:50%;background:var(--accent);cursor:pointer;transition:transform .1s}
+.yt-custom-seek::-webkit-slider-thumb:hover{transform:scale(1.25)}
+.yt-custom-seek::-moz-range-thumb{width:11px;height:11px;border-radius:50%;background:var(--accent);border:none;cursor:pointer}
+.yt-custom-seek::-moz-range-progress{background:var(--accent);height:4px;border-radius:2px}
 /* ── Right panel (outside #root, never rebuilt) ─────── */
 #right-panel{position:fixed;right:0;width:260px;top:0;bottom:0;display:none;flex-direction:column;background:var(--bg-s);border-left:1px solid var(--border);z-index:50}
 #yt-host{flex-shrink:0;overflow:hidden;display:none}
@@ -1593,6 +1607,28 @@ function positionYtHost(){
 // ── YouTube ────────────────────────────────────────────────
 let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=null,ytPollId=null,ytBadgeTimerId=null,ytTitle='',ytArtist='';
 function findTrack(id){for(const n of st.nodes){const t=n.data?.tracks?.find(t=>t.id===id);if(t)return t;}return null;}
+// ── Custom transport bar (Discogs-confirmed videos only — see doPlay()) ──
+function fmtTime(s){
+  if(!isFinite(s)||s<0)s=0;
+  const m=Math.floor(s/60),sec=Math.floor(s%60);
+  return m+':'+String(sec).padStart(2,'0');
+}
+let ytScrubbing=false; // true while the user is actively dragging the seek bar
+function updateCustomSeekUI(t){
+  if(ytScrubbing||!ytPlayer)return;
+  const seek=document.getElementById('yt-custom-seek');
+  const curT=document.getElementById('yt-custom-cur');
+  const durT=document.getElementById('yt-custom-dur');
+  if(!seek)return;
+  const dur=ytPlayer.getDuration?.()||0;
+  if(dur>0)seek.value=String(Math.round((t/dur)*1000));
+  if(curT)curT.textContent=fmtTime(t);
+  if(durT&&dur>0)durT.textContent=fmtTime(dur);
+}
+function updateCustomPlayPause(isPlaying){
+  const btn=document.getElementById('yt-custom-play');
+  if(btn)btn.textContent=isPlaying?'⏸':'▶';
+}
 function tryBadge(){
   if(ytTid&&(ytAccSec>=3||ytSkips>=2)&&!st.listens[ytTid]?.badged){
     st.listens[ytTid]={badged:true};
@@ -1810,7 +1846,13 @@ function createYtPlayer(){
   if(!window.YT?.Player||ytPlayer)return;
   const host=document.getElementById('yt-iframe-host');if(!host)return;
   ytTid=st.nowPlaying.trackId;ytTitle=st.nowPlaying.title||'';ytArtist=st.nowPlaying.artistName||'';
-  ytAccSec=0;ytPlayStart=null;ytSkips=0;ytLastTime=null;
+  ytAccSec=0;ytPlayStart=null;ytSkips=0;ytLastTime=null;ytScrubbing=false;
+  // Discogs-confirmed videos get our own transport bar (controls:0 hides
+  // YouTube's native one, which is an officially supported player param —
+  // the video itself stays visible, satisfying the API terms). Auto-matched
+  // videos (see doPlay()) keep the native YouTube controls for now, while
+  // that matching feature is still being verified.
+  const custom=!!st.nowPlaying.fromDiscogs;
   if(ytBadgeTimerId){clearTimeout(ytBadgeTimerId);ytBadgeTimerId=null;}
   if(ytPollId){clearInterval(ytPollId);ytPollId=null;}
   ytPollId=setInterval(()=>{
@@ -1818,14 +1860,16 @@ function createYtPlayer(){
     const t=ytPlayer.getCurrentTime();
     if(ytLastTime!==null){const delta=t-ytLastTime;if(delta<-0.5||delta>3.0){ytSkips++;tryBadge();}}
     ytLastTime=t;
+    if(custom)updateCustomSeekUI(t);
   },500);
   ytPlayer=new YT.Player('yt-iframe-host',{
     host:'https://www.youtube-nocookie.com',
     height:'191',width:'340',videoId:st.nowPlaying.videoId,
-    playerVars:{autoplay:1,modestbranding:1,rel:0,fs:0},
+    playerVars:{autoplay:1,modestbranding:1,rel:0,fs:0,...(custom?{controls:0,disablekb:1,iv_load_policy:3}:{})},
     events:{
-      onReady(){positionYtHost();},
+      onReady(){positionYtHost();if(custom)updateCustomPlayPause(true);},
       onStateChange(e){
+        if(custom)updateCustomPlayPause(e.data===YT.PlayerState.PLAYING);
         if(e.data===YT.PlayerState.PLAYING){
           ytPlayStart=Date.now();ytLastTime=null;
           if(ytBadgeTimerId)clearTimeout(ytBadgeTimerId);
@@ -1871,12 +1915,17 @@ function killYt(){if(ytBadgeTimerId){clearTimeout(ytBadgeTimerId);ytBadgeTimerId
 function doPlay(trackId,videoId,title,artistName){
   killYt();
   const w=document.getElementById('yt-wrap');if(w)w.remove();
-  st.nowPlaying={trackId,videoId,title,artistName};rr();
+  // Only a video Discogs itself already had gets the custom transport bar —
+  // ytMatches only ever contains entries the auto-match feature resolved
+  // (see resolveTrackVideoId()), so a track already in there is auto-matched
+  // even if its videoId has since been persisted onto the track too.
+  const fromDiscogs=!!videoId&&!(trackId in ytMatches);
+  st.nowPlaying={trackId,videoId,title,artistName,fromDiscogs};rr();
   if(!videoId){
     const found=findTrackAndNode(trackId);
     const labelName=found?(found.node.type==='label'?found.node.name:found.track.label):null;
     const resolved=resolveTrackVideoId(trackId,title,artistName,found?.track?.duration,labelName);
-    if(resolved)st.nowPlaying.videoId=resolved; // already resolved/cached from an earlier attempt
+    if(resolved)st.nowPlaying.videoId=resolved; // already resolved/cached from an earlier attempt — still auto-matched, not fromDiscogs
   }
 }
 function stopPlay(){
@@ -1940,6 +1989,31 @@ function syncYtPlayer(){
   if(np.videoId&&!noEmbedIds.has(np.videoId)&&!invalidYtIds.has(np.videoId)){
     const videoWrap=document.createElement('div');videoWrap.className='yt-video-wrap';
     const host=document.createElement('div');host.id='yt-iframe-host';videoWrap.appendChild(host);wrap.appendChild(videoWrap);
+    if(np.fromDiscogs){
+      const controls=document.createElement('div');controls.className='yt-custom-controls';
+      const playBtn=document.createElement('button');playBtn.className='yt-custom-play';playBtn.id='yt-custom-play';playBtn.title='Play/pause';playBtn.textContent='▶';
+      playBtn.addEventListener('click',()=>{
+        if(!ytPlayer?.getPlayerState)return;
+        if(ytPlayer.getPlayerState()===YT.PlayerState.PLAYING)ytPlayer.pauseVideo();else ytPlayer.playVideo();
+      });
+      const curT=document.createElement('span');curT.className='yt-custom-time';curT.id='yt-custom-cur';curT.textContent='0:00';
+      const seek=document.createElement('input');seek.type='range';seek.min='0';seek.max='1000';seek.value='0';seek.className='yt-custom-seek';seek.id='yt-custom-seek';
+      const durT=document.createElement('span');durT.className='yt-custom-time';durT.id='yt-custom-dur';durT.textContent='0:00';
+      seek.addEventListener('input',()=>{
+        ytScrubbing=true;
+        const dur=ytPlayer?.getDuration?.()||0;
+        curT.textContent=fmtTime((seek.value/1000)*dur);
+      });
+      const commitSeek=()=>{
+        const dur=ytPlayer?.getDuration?.()||0;
+        ytPlayer?.seekTo?.((seek.value/1000)*dur,true);
+        ytScrubbing=false;
+      };
+      seek.addEventListener('change',commitSeek);
+      seek.addEventListener('mouseup',commitSeek);
+      controls.appendChild(playBtn);controls.appendChild(curT);controls.appendChild(seek);controls.appendChild(durT);
+      wrap.appendChild(controls);
+    }
     ytHost.appendChild(wrap);loadYtApi();setTimeout(()=>{if(window.YT?.Player)createYtPlayer();},120);
   } else {
     const isNoEmbed=noEmbedIds.has(np.videoId);
