@@ -1581,6 +1581,13 @@ function findTrackAndNode(trackId){
   return null;
 }
 const ytAutoMatchInFlight=new Set();
+// Reset once per buildContent() call (a node can have 100+ tracks with no
+// Discogs video) — bounds how many brand-new YouTube searches a single
+// render kicks off, since the Data API's free-tier quota is easily burned
+// through by resolving an entire tracklist at once. Already-cached/
+// in-flight tracks aren't affected; a big list just clears over a few more
+// renders as each batch resolves and re-renders.
+let ytKickoffBudget=0;
 function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
   const ck='ytmatch:'+trackId;
   const cached=lsGet(ck);
@@ -2636,10 +2643,26 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     const displayArtist=isLabel?track.label:nodeName;
     const liked=!!st.likes[track.id],badged=!!st.listens[track.id]?.badged;
     const owned=isOwned(track.title,displayArtist);
-    const videoOk=track.videoId&&!invalidYtIds.has(track.videoId);
+    // Every track without a Discogs video is a candidate here, not just
+    // the one the user happens to click play on — bounded by
+    // ytKickoffBudget (reset once per buildContent() call) so a big
+    // tracklist resolves over a few renders instead of one API-quota-
+    // draining burst. A cache hit from an earlier attempt (this render or
+    // a previous one) applies immediately, no budget spent.
+    let resolvedVideoId=track.videoId;
+    if(!resolvedVideoId){
+      const cachedYt=lsGet('ytmatch:'+track.id);
+      if(cachedYt!==null){
+        resolvedVideoId=cachedYt||null;
+      }else if(ytKickoffBudget>0||ytAutoMatchInFlight.has(track.id)){
+        if(!ytAutoMatchInFlight.has(track.id))ytKickoffBudget--;
+        resolveTrackVideoId(track.id,track.title,displayArtist,track.duration,isLabel?nodeName:track.label);
+      }
+    }
+    const videoOk=resolvedVideoId&&!invalidYtIds.has(resolvedVideoId);
     const playBtn=b('rel-play'+(videoOk?' has-video':''),{
       title:videoOk?'Play':'Search on YouTube',
-      onClick:()=>doPlay(track.id,track.videoId,track.title,displayArtist)
+      onClick:()=>doPlay(track.id,resolvedVideoId,track.title,displayArtist)
     },'▶');
 
     const inDaq=st.dasAscoltare.some(q=>q.id===track.id);
@@ -2940,6 +2963,7 @@ function buildSidebar(){
 
 // ── Content panel ──────────────────────────────────────────
 function buildContent(){
+  ytKickoffBudget=6;
   const panel=d('content',{'data-sc':'ct'});
   if(!st.selectedId){panel.appendChild(d('empty-panel',{},s('empty-icon','🌿'),s('empty-title','No node selected'),s('empty-hint','Search for an artist or label and select it from the sidebar')));return panel;}
   const node=getNode(st.selectedId);if(!node)return panel;
