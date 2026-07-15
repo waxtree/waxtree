@@ -1609,12 +1609,22 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
       const labelN=normalizeStr(labelName||'');
       const expectedSec=duration?parseDur(duration):0;
       const hit=results.find(r=>{
+        if(!normalizeStr(r.title||'').includes(titleN))return false;
         const channelN=normalizeStr(r.channelTitle||'');
         const channelMatches=(artistN&&channelN.includes(artistN))||(labelN&&channelN.includes(labelN));
-        if(!channelMatches)return false;
-        if(!normalizeStr(r.title||'').includes(titleN))return false;
-        if(expectedSec&&r.durationSec&&Math.abs(r.durationSec-expectedSec)>8)return false;
-        return true;
+        if(channelMatches){
+          // Uploader confirmed as the artist/label (or their YouTube-generated
+          // "Topic" channel) — a looser duration tolerance is fine here.
+          if(expectedSec&&r.durationSec&&Math.abs(r.durationSec-expectedSec)>8)return false;
+          return true;
+        }
+        // Third-party upload (fan channel, blog, etc.) — the channel gives no
+        // signal either way, so only trust a tight duration agreement: a
+        // matching title AND a near-exact duration match is too specific a
+        // coincidence for unrelated content, but a loose title match alone
+        // is not enough (that's exactly what got the earlier attempt reverted).
+        if(!expectedSec||!r.durationSec)return false;
+        return Math.abs(r.durationSec-expectedSec)<=3;
       });
       result=hit?hit.id:null;
     }catch(e){
