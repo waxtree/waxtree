@@ -1590,7 +1590,12 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
   (async()=>{
     let result;
     try{
-      const q=(artistName||'')+' '+title;
+      // Quoted phrases, not a loose bag of words: YouTube's search API
+      // (unlike the consumer website) ranks loose queries by loose semantic
+      // relevance, not exact terms — an artist whose name doubles as a
+      // common word (e.g. "Vedik" vs. "Vedic") gets swamped by unrelated
+      // results otherwise, even though the right video is on YouTube.
+      const q=`"${artistName||''}" "${title}"`;
       const results=await searchYouTubeApi(q);
       const titleN=normalizeStr(title);
       const artistN=normalizeStr(artistName||'');
