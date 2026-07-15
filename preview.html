@@ -1582,18 +1582,30 @@ function findTrackAndNode(trackId){
   return null;
 }
 const ytAutoMatchInFlight=new Set();
-// Time-windowed, not reset-per-render: buildContent() runs on nearly every
-// app re-render (liking a track, opening a dropdown, anything), so a
-// counter reset there in practice allowed far more than intended per
-// minute of actual browsing. This caps new kickoffs to a fixed number per
-// rolling window regardless of how often the app repaints — the YouTube
-// Data API's free-tier daily quota is easy to burn through otherwise (a
-// single label page with a 100+ track catalog and no video data at all
-// exhausted a full day's quota within about two hours during testing).
+// The free-tier YouTube Data API quota is 10,000 units/day, and each
+// resolution costs ~101 (100 for search.list + ~1 for videos.list) — that's
+// only about 99 resolutions/day, TOTAL, shared across every session hitting
+// this one server-side API key. A short burst-rate window alone (what this
+// used to be — 6 per 10s) allows tens of thousands per day if sustained,
+// nowhere close to what the quota can actually absorb. The real constraint
+// has to be a running daily count, checked against Google's own reset
+// schedule (midnight Pacific Time, not the browser's local midnight).
+const YT_DAILY_LIMIT=60; // stays comfortably under the ~99/day ceiling
+const YT_DAILY_BUDGET_KEY='wt-yt-daily-budget';
+function pacificDayKey(){
+  return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+}
 function tryYtKickoffBudget(){
   const now=Date.now();
   if(now-ytKickoffWindow.start>10000){ytKickoffWindow={count:0,start:now};}
-  if(ytKickoffWindow.count>=6)return false;
+  if(ytKickoffWindow.count>=2)return false; // still avoid firing a burst in one instant
+  let daily;
+  try{daily=JSON.parse(localStorage.getItem(YT_DAILY_BUDGET_KEY)||'null');}catch{daily=null;}
+  const today=pacificDayKey();
+  if(!daily||daily.day!==today)daily={day:today,count:0};
+  if(daily.count>=YT_DAILY_LIMIT)return false;
+  daily.count++;
+  try{localStorage.setItem(YT_DAILY_BUDGET_KEY,JSON.stringify(daily));}catch{}
   ytKickoffWindow.count++;
   return true;
 }
