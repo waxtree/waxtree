@@ -1074,7 +1074,14 @@ async function searchDiscogsArtist(q){
   const r=(data.results||[]).map(x=>({id:x.id,title:x.title,thumb:x.thumb,uri:x.uri}));
   lsSet(ck,r);return r;
 }
-const DIGITAL_MATCH_BATCH=6;
+// The cheap step (searchDiscogsArtist) is what dominates throughput on a
+// library this size — most local artist names won't have a Discogs match
+// at all, so most batches never even reach the heavier fetchArtistData()
+// step. dReq()'s own rate limiter (45 req/60s) queues everything correctly
+// regardless of how many searches get submitted at once, so a bigger batch
+// here just means more useful work queued per round trip, not a risk of
+// actually exceeding the real limit.
+const DIGITAL_MATCH_BATCH=15;
 async function matchLibraryWithDiscogs(){
   if(st.libraryMatchRunning)return;
   if(!st.ownedTracks.length)return;
@@ -1289,8 +1296,12 @@ function buildLibraryMatchSection(){
   const checkedCount=loadCheckedArtists().size;
   const totalArtistsCount=new Set(st.ownedTracks.map(t=>t.artistNorm).filter(Boolean)).size;
   const allChecked=totalArtistsCount>0&&checkedCount>=totalArtistsCount;
+  // checkedCount already reflects this run's progress too (saveCheckedArtists()
+  // persists after every batch), so it's the true cumulative total, not just
+  // what's happened since this specific run started — showing both makes it
+  // clear a big library is steadily being worked through, not restarting.
   const sub=st.libraryMatchRunning
-    ?`Matching… ${st.libraryMatchProgress.done}/${st.libraryMatchProgress.total} artists this run (${st.libraryMatchProgress.found} new tracks found so far)`
+    ?`Matching… ${checkedCount}/${totalArtistsCount} artists checked overall (${st.libraryMatchProgress.done}/${st.libraryMatchProgress.total} this run) — ${st.libraryMatchProgress.found} new tracks found so far`
     :(digitalCount||checkedCount
       ?`${digitalCount} tracks matched from ${checkedCount}/${totalArtistsCount} artists checked — visible in My Libraries → Digital`
       :'Find your local tracks on Discogs, artist by artist. Can take a while on a large library — runs in the background.');
@@ -4021,6 +4032,18 @@ sb.auth.getSession().then(({data:{session}})=>{
   // calls selectNode(), so the version check there alone would never fire for
   // a node that's already selected before the reload. Sweep once at boot too.
   st.nodes.filter(n=>(n.type==='label'||n.type==='artist')&&n.loaded&&!n.loading&&n.data?._v!==TRACK_DATA_VERSION).forEach(n=>retryNode(n.id));
+  // Resume the library<->Discogs match automatically if there's unfinished
+  // work and the user has engaged with it before (checked at least one
+  // artist already). A refresh always stops any in-progress run — it's
+  // just in-memory JS state — and requiring a fresh "Continue matching"
+  // click every single time made a 3000-artist library feel like it kept
+  // restarting instead of steadily making progress. Clicking Stop still
+  // works as expected — it just won't auto-resume again until the next reload.
+  if(st.ownedTracks.length){
+    const checkedNow=loadCheckedArtists();
+    const totalArtistsNow=new Set(st.ownedTracks.map(t=>t.artistNorm).filter(Boolean)).size;
+    if(checkedNow.size>0&&checkedNow.size<totalArtistsNow)matchLibraryWithDiscogs();
+  }
 });
 
 </script>
