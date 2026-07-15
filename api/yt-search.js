@@ -27,7 +27,11 @@ export default async function handler(req, res) {
     searchUrl.searchParams.set('q', q)
     searchUrl.searchParams.set('key', YT_API_KEY)
     const sr = await fetch(searchUrl)
-    if (!sr.ok) return res.status(sr.status).json({ error: `YouTube search ${sr.status}` })
+    if (!sr.ok) {
+      const body = await sr.json().catch(() => null)
+      const reason = body?.error?.errors?.[0]?.reason || body?.error?.status || ''
+      return res.status(sr.status).json({ error: `YouTube search ${sr.status}${reason ? ` (${reason})` : ''}` })
+    }
     const sd = await sr.json()
     const ids = (sd.items || []).map(it => it.id?.videoId).filter(Boolean)
     if (!ids.length) return res.status(200).json({ results: [] })
@@ -37,7 +41,11 @@ export default async function handler(req, res) {
     videosUrl.searchParams.set('id', ids.join(','))
     videosUrl.searchParams.set('key', YT_API_KEY)
     const vr = await fetch(videosUrl)
-    if (!vr.ok) return res.status(vr.status).json({ error: `YouTube videos ${vr.status}` })
+    if (!vr.ok) {
+      const body = await vr.json().catch(() => null)
+      const reason = body?.error?.errors?.[0]?.reason || body?.error?.status || ''
+      return res.status(vr.status).json({ error: `YouTube videos ${vr.status}${reason ? ` (${reason})` : ''}` })
+    }
     const vd = await vr.json()
 
     const results = (vd.items || []).map(v => ({
