@@ -1568,6 +1568,7 @@ async function searchYouTubeApi(q){
   const c=lsGet(ck);if(c)return c;
   const res=await fetch('/api/yt-search?q='+encodeURIComponent(q));
   const json=await res.json().catch(()=>({}));
+  if(res.status===429){pauseYtQuota(6);throw new Error(json.error||'YouTube quota exceeded');}
   if(!res.ok||json.error)throw new Error(json.error||'YouTube search failed ('+res.status+')');
   const results=json.results||[];
   lsSet(ck,results);
@@ -1581,17 +1582,38 @@ function findTrackAndNode(trackId){
   return null;
 }
 const ytAutoMatchInFlight=new Set();
-// Reset once per buildContent() call (a node can have 100+ tracks with no
-// Discogs video) — bounds how many brand-new YouTube searches a single
-// render kicks off, since the Data API's free-tier quota is easily burned
-// through by resolving an entire tracklist at once. Already-cached/
-// in-flight tracks aren't affected; a big list just clears over a few more
-// renders as each batch resolves and re-renders.
-let ytKickoffBudget=0;
+// Time-windowed, not reset-per-render: buildContent() runs on nearly every
+// app re-render (liking a track, opening a dropdown, anything), so a
+// counter reset there in practice allowed far more than intended per
+// minute of actual browsing. This caps new kickoffs to a fixed number per
+// rolling window regardless of how often the app repaints — the YouTube
+// Data API's free-tier daily quota is easy to burn through otherwise (a
+// single label page with a 100+ track catalog and no video data at all
+// exhausted a full day's quota within about two hours during testing).
+function tryYtKickoffBudget(){
+  const now=Date.now();
+  if(now-ytKickoffWindow.start>10000){ytKickoffWindow={count:0,start:now};}
+  if(ytKickoffWindow.count>=6)return false;
+  ytKickoffWindow.count++;
+  return true;
+}
+let ytKickoffWindow={count:0,start:0};
+// Circuit breaker: once the API confirms the daily quota is out, stop
+// attempting anything further for a while instead of hitting 429 on every
+// track — both wasteful and noisy, and won't succeed again until Google's
+// quota resets (midnight Pacific Time).
+const YT_QUOTA_PAUSE_KEY='wt-yt-quota-paused-until';
+function isYtQuotaPaused(){
+  try{return Date.now()<parseInt(localStorage.getItem(YT_QUOTA_PAUSE_KEY)||'0',10);}catch{return false;}
+}
+function pauseYtQuota(hours){
+  try{localStorage.setItem(YT_QUOTA_PAUSE_KEY,String(Date.now()+hours*3600000));}catch{}
+}
 function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
   const ck='ytmatch:'+trackId;
   const cached=lsGet(ck);
   if(cached!==null)return cached; // false (confirmed no match) or a videoId string
+  if(isYtQuotaPaused())return undefined; // known exhausted — don't even try
   if(ytAutoMatchInFlight.has(trackId))return undefined;
   ytAutoMatchInFlight.add(trackId);
   (async()=>{
@@ -2655,17 +2677,16 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     const owned=isOwned(track.title,displayArtist);
     // Every track without a Discogs video is a candidate here, not just
     // the one the user happens to click play on — bounded by
-    // ytKickoffBudget (reset once per buildContent() call) so a big
-    // tracklist resolves over a few renders instead of one API-quota-
-    // draining burst. A cache hit from an earlier attempt (this render or
-    // a previous one) applies immediately, no budget spent.
+    // tryYtKickoffBudget()'s rolling time window so a big tracklist
+    // resolves gradually instead of one API-quota-draining burst. A cache
+    // hit from an earlier attempt (this render or a previous one) applies
+    // immediately, no budget spent.
     let resolvedVideoId=track.videoId;
     if(!resolvedVideoId){
       const cachedYt=lsGet('ytmatch:'+track.id);
       if(cachedYt!==null){
         resolvedVideoId=cachedYt||null;
-      }else if(ytKickoffBudget>0||ytAutoMatchInFlight.has(track.id)){
-        if(!ytAutoMatchInFlight.has(track.id))ytKickoffBudget--;
+      }else if(ytAutoMatchInFlight.has(track.id)||tryYtKickoffBudget()){
         resolveTrackVideoId(track.id,track.title,displayArtist,track.duration,isLabel?nodeName:track.label);
       }
     }
@@ -2973,7 +2994,6 @@ function buildSidebar(){
 
 // ── Content panel ──────────────────────────────────────────
 function buildContent(){
-  ytKickoffBudget=6;
   const panel=d('content',{'data-sc':'ct'});
   if(!st.selectedId){panel.appendChild(d('empty-panel',{},s('empty-icon','🌿'),s('empty-title','No node selected'),s('empty-hint','Search for an artist or label and select it from the sidebar')));return panel;}
   const node=getNode(st.selectedId);if(!node)return panel;
