@@ -1347,8 +1347,50 @@ function buildLibraryMatchSection(){
 
 // ── Auth ───────────────────────────────────────────────────
 const {createClient}=window.supabase;
-const sb=createClient('https://asmnqlqvlpcwcaaughuu.supabase.co','sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ');
+const SB_URL='https://asmnqlqvlpcwcaaughuu.supabase.co';
+const SB_KEY='sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ';
+const sb=createClient(SB_URL,SB_KEY);
 let wtSession=null;
+
+// ── Digging events (Phase 0 of the taste engine) ───────────
+// Append-only behavioral log (see supabase/digging_events.sql). The
+// exploration edges — which artist/label a digger jumped to and from
+// where — are the one dataset no other platform records; logging starts
+// now so the future recommendation engine has real history to learn
+// from instead of starting cold. Fire-and-forget by design: a dropped
+// batch is acceptable, blocking or retry loops in the UI path are not.
+let dgQueue=[];
+let dgFlushTimer=null;
+function logEvent(event,payload){
+  if(!wtSession)return;
+  dgQueue.push({user_id:wtSession.user.id,event,payload});
+  if(dgQueue.length>=10){flushEvents();return;}
+  if(!dgFlushTimer)dgFlushTimer=setTimeout(flushEvents,5000);
+}
+async function flushEvents(){
+  if(dgFlushTimer){clearTimeout(dgFlushTimer);dgFlushTimer=null;}
+  if(!dgQueue.length||!wtSession)return;
+  const batch=dgQueue;dgQueue=[];
+  try{
+    const{error}=await sb.from('digging_events').insert(batch);
+    if(error)throw error;
+  }catch(e){
+    console.warn('WaxTree: digging-event batch dropped:',e?.message||e);
+  }
+}
+// supabase-js inserts don't survive tab close — use a keepalive fetch
+// straight to the REST endpoint for the final flush instead.
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='hidden'||!dgQueue.length||!wtSession)return;
+  const batch=dgQueue;dgQueue=[];
+  try{
+    fetch(SB_URL+'/rest/v1/digging_events',{
+      method:'POST',keepalive:true,
+      headers:{'Content-Type':'application/json',apikey:SB_KEY,Authorization:'Bearer '+wtSession.access_token,Prefer:'return=minimal'},
+      body:JSON.stringify(batch),
+    });
+  }catch{}
+});
 
 // ── Demo data ──────────────────────────────────────────────
 const FREE_WOOD_LIMIT=3;
@@ -1648,6 +1690,7 @@ function tryBadge(){
       thumbUrl:tr?.thumbUrl||null,videoId:st.nowPlaying?.videoId||null,
       exploreId:tr?.exploreId||null,exploreType:tr?.exploreType||'artist',exploreName:tr?.exploreName||ytArtist});
     if(st.history.length>300)st.history.length=300; // unbounded otherwise — this is per-play, not per-search
+    logEvent('play',{track_id:ytTid,title:ytTitle,artist:ytArtist,label:tr?.label||null,genre:tr?.genre||null,year:tr?.year||null});
     rr();
   }
 }
@@ -2533,6 +2576,11 @@ function addNode(type,discogsId,name,parentId,branchId){
   const existing=st.nodes.find(n=>n.discogsId===discogsId&&n.branchId===bid);
   if(existing){selectNode(existing.id);return;}
   if(!st.isPremium&&st.nodes.filter(n=>n.branchId===bid).length>=FREE_NODE_LIMIT){st.premiumModal=true;rr();return;}
+  // The exploration edge — where the digger jumped from is as much the
+  // signal as where they landed. No parent = entered via search.
+  const parent=parentId?getNode(parentId):null;
+  logEvent('explore',{type,discogs_id:discogsId,name,
+    parent_type:parent?.type||null,parent_discogs_id:parent?.discogsId||null,parent_name:parent?.name||null});
   const id='n'+Date.now();
   const node={id,branchId:bid,type,discogsId,name,parentId:parentId||null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null};
   st.nodes=[...st.nodes,node];st.selectedId=id;st.activeBranchId=bid;
@@ -2600,7 +2648,11 @@ function addTag(nodeId,tag){
   st.tagNodeId=null;st.tagVal='';rr();
 }
 function removeTag(nodeId,tag){const n=getNode(nodeId);if(n)n.tags=n.tags.filter(t=>t!==tag);rr();}
-function toggleLike(id){st.likes[id]=!st.likes[id];rr();}
+function toggleLike(id){
+  st.likes[id]=!st.likes[id];
+  if(st.likes[id]){const tr=findTrack(id);logEvent('like',{track_id:id,title:tr?.title||null,artist:tr?.trackArtistName||tr?.label||null,genre:tr?.genre||null,year:tr?.year||null});}
+  rr();
+}
 function removeChip(name){st.chips=st.chips.filter(c=>c!==name);rr();}
 function addBranch(){if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){st.premiumModal=true;rr();return;}const id='b'+Date.now();st.branches=[...st.branches,{id,name:'Branch '+(st.branches.length+1)}];st.activeBranchId=id;rr();}
 function removeBranch(id){
@@ -2809,6 +2861,7 @@ function toggleFollow(node){
     st.follows=st.follows.filter(f=>f.discogs_id!==node.discogsId||f.type!==node.type);
   } else {
     st.follows=[{id:Date.now(),discogs_id:node.discogsId,type:node.type,name:node.name,thumb:node.data?.imageUrl||null,followed_at:new Date().toISOString()},...st.follows];
+    logEvent('follow',{type:node.type,discogs_id:node.discogsId,name:node.name});
   }
   saveSt();rr();
 }
@@ -2948,7 +3001,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
       const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
       const llItem=b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
         if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);
-        else st.dasAscoltare=[...st.dasAscoltare,trackWithArtist];
+        else{st.dasAscoltare=[...st.dasAscoltare,trackWithArtist];logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null});}
         st.playlistDropId=null;rr();
       }},inDaq?'✓ Listen Later':'Listen Later');
       drop.appendChild(llItem);
@@ -2956,7 +3009,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
         const inPl=pl.tracks.some(t=>t.id===track.id);
         const plItem=b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
           if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==track.id);
-          else pl.tracks=[...pl.tracks,trackWithArtist];
+          else{pl.tracks=[...pl.tracks,trackWithArtist];logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null});}
           st.playlistDropId=null;rr();
         }},inPl?'✓ '+pl.name:pl.name);
         drop.appendChild(plItem);
@@ -2966,6 +3019,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
         const name=prompt('Playlist name:','');
         if(!name?.trim())return;
         st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackWithArtist]}];
+        logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null});
         st.playlistDropId=null;rr();
       }},'+ New playlist'));
       plWrap.appendChild(drop);
