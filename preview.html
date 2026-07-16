@@ -2921,16 +2921,16 @@ function buildPlantLoader(label='Loading…'){
 function classifyError(msg){
   const m=(msg||'').toLowerCase();
   if(m.includes('rate_limit')||m.includes('rate limit')||m.includes('too many'))
-    return{title:'Discogs è occupato',sub:'Troppi artisti aperti di fila. Aspetta un secondo e riprova.',retry:true};
+    return{title:'Discogs is busy',sub:'Too many artists opened in a row. Wait a second and try again.',retry:true};
   if(m.includes('failed to fetch')||m.includes('networkerror')||m.includes('network')||m.includes('load failed'))
-    return{title:'Nessuna connessione',sub:'Controlla la rete e riprova.',retry:true};
+    return{title:'No connection',sub:'Check your network and try again.',retry:true};
   if(m.includes('timeout')||m.includes('timed out')||m.includes('aborted'))
-    return{title:'Risposta troppo lenta',sub:'La richiesta ha impiegato troppo tempo. Riprova tra un momento.',retry:true};
+    return{title:'Response too slow',sub:'The request took too long. Try again in a moment.',retry:true};
   if(m.includes('503')||m.includes('502')||m.includes('500')||m.includes('offline'))
-    return{title:'Discogs non risponde',sub:'Il servizio è momentaneamente offline. Riprova tra poco.',retry:true};
+    return{title:'Discogs isn\'t responding',sub:'The service is temporarily offline. Try again shortly.',retry:true};
   if(m.includes('404')||m.includes('not found'))
-    return{title:'Non trovato su Discogs',sub:'Questo artista o label potrebbe non esistere più.',retry:false};
-  return{title:'Qualcosa è andato storto',sub:'Riprova, o cerca un altro artista.',retry:true};
+    return{title:'Not found on Discogs',sub:'This artist or label may no longer exist.',retry:false};
+  return{title:'Something went wrong',sub:'Try again, or search for another artist.',retry:true};
 }
 
 function buildErrorPanel(node){
@@ -2955,7 +2955,7 @@ function buildErrorPanel(node){
   if(retry){
     const btn=document.createElement('button');
     btn.className='err-retry';
-    btn.textContent='Riprova';
+    btn.textContent='Retry';
     btn.onclick=()=>retryNode(node.id);
     wrap.appendChild(btn);
   }
