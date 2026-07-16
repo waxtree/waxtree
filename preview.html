@@ -1692,11 +1692,11 @@ function buildTasteProfile(){
 // dReq() calls once a day per taste shift, not per render — dReq()'s own
 // 45 req/60s throttle easily absorbs that one-time cost.
 let discoverCache=null,discoverLoading=false;
-async function refreshDiscoverCache(topStyle,seen){
+async function refreshDiscoverCache(seedStyle,seen){
   if(discoverLoading)return;
   discoverLoading=true;
   try{
-    const sd=await dReq('/database/search',{style:topStyle,type:'release',sort:'have',sort_order:'desc',per_page:'20'});
+    const sd=await dReq('/database/search',{style:seedStyle,type:'release',sort:'have',sort_order:'desc',per_page:'20'});
     const cand=new Map();
     for(const rel of (sd.results||[]).slice(0,15)){
       try{
@@ -1718,14 +1718,14 @@ async function refreshDiscoverCache(topStyle,seen){
       }catch{/* one bad release shouldn't sink the whole batch */}
     }
     const items=[...cand.values()].sort((a,b)=>b.have-a.have).slice(0,6);
-    lsSet('discover:'+topStyle,items);
-    discoverCache={topStyle,items};
+    lsSet('discover:'+seedStyle,items);
+    discoverCache={seedStyle,items};
   }catch(e){
     console.warn('WaxTree: discover refresh failed:',e?.message||e);
     // Mark this style as "done" for the session even on failure — otherwise
     // every render (paint() runs on essentially every state change) would
     // retry immediately, since nothing else marks the attempt as resolved.
-    discoverCache={topStyle,items:[]};
+    discoverCache={seedStyle,items:[]};
   }
   finally{discoverLoading=false;rr();}
 }
@@ -1734,16 +1734,28 @@ function renderRelatedTracks(){
   if(!host)return;
   host.innerHTML='';
   host.appendChild(s('rp-corr-hd','Discover'));
-  const profile=buildTasteProfile();
-  const topStyle=Object.entries(profile.genreW).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  if(!topStyle){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
-  if(discoverCache?.topStyle!==topStyle){
-    const cached=lsGet('discover:'+topStyle);
-    if(cached){discoverCache={topStyle,items:cached};}
+  // Seed from what's actually playing, not the whole-account taste profile —
+  // aggregating across the entire collection picked styles with zero
+  // relation to the track on screen (e.g. a Breakbeat-heavy collection
+  // burying a Dub Techno track currently playing). Discogs lists styles
+  // broad-to-specific in practice (e.g. "Techno, Dub Techno") and this
+  // panel exists to go deep on the specific one, so prefer the last tag,
+  // not the first. Only fall back to the aggregate profile when idle.
+  const nowTrack=st.nowPlaying?findTrack(st.nowPlaying.trackId):null;
+  const nowStyles=nowTrack?.genre?nowTrack.genre.split(' · ').filter(Boolean):[];
+  let seedStyle=nowStyles[nowStyles.length-1];
+  if(!seedStyle){
+    const profile=buildTasteProfile();
+    seedStyle=Object.entries(profile.genreW).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  }
+  if(!seedStyle){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
+  if(discoverCache?.seedStyle!==seedStyle){
+    const cached=lsGet('discover:'+seedStyle);
+    if(cached){discoverCache={seedStyle,items:cached};}
     else{
       if(!discoverLoading){
         const seen=new Set(st.nodes.map(n=>n.type+':'+n.discogsId));
-        refreshDiscoverCache(topStyle,seen);
+        refreshDiscoverCache(seedStyle,seen);
       }
       host.appendChild(s('rp-coming-soon',discoverLoading?'Finding picks…':'Explore more to see picks'));
       return;
