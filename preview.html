@@ -326,6 +326,10 @@ input,select{font:inherit;color:inherit}
 /* ── Playlist modal ─────── */
 .pl-modal{max-width:520px}
 .pl-section-hd{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding:12px 0 6px;border-bottom:1px solid var(--border);margin-bottom:4px}
+.genre-section-hd{display:flex;align-items:center;justify-content:space-between;width:100%;padding:9px 12px;margin:10px 0 4px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg-e);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;transition:border-color .15s}
+.genre-section-hd:hover{border-color:var(--accent)}
+.genre-section-hd:first-child{margin-top:0}
+.daq-genres{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .pl-section-cnt{font-size:11px;color:var(--text-f);font-weight:400;text-transform:none;letter-spacing:0;display:flex;align-items:center;gap:8px}
 .pl-new-row{display:flex;gap:8px;margin:8px 0 16px}
 .pl-new-input{flex:1;padding:7px 12px;border-radius:8px;background:var(--bg-e);border:1.5px solid var(--border);color:var(--text);font-size:13px;font-family:inherit;outline:none}
@@ -1568,6 +1572,7 @@ const st={
   exploreDropKey:null,
   profileOpen:false,
   likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,discogsModal:false,discogsSyncing:false,
+  likesGenreOpen:new Set(), // which genre sections are expanded in My Likes — transient, not persisted
   follows:saved?.follows||[],
   discogsUser:saved?.discogsUser||'',
   discogsOAuthToken:saved?.discogsOAuthToken||'',
@@ -3930,24 +3935,55 @@ function buildApp(){
         }
       });
     });
+    // A track liked straight from the mini-player can be a Related Tracks
+    // pick that never belonged to any open node — without this it'd be
+    // liked (the heart shows filled) but silently missing from this list.
+    Object.values(discoveredTracks).forEach(t=>{
+      if(st.likes[t.id]&&!seen.has(t.id)){seen.add(t.id);likedTracks.push(t);}
+    });
     const list=d('daq-list',{});
     if(!likedTracks.length){list.appendChild(d('daq-empty',{},'No liked tracks — use ♡ on tracks to add them'));}
     else{
+      // Grouped by primary genre (the first of up to 4 style tags) instead
+      // of one long flat list — easier to scan once likes pile up.
+      const groups=new Map();
       likedTracks.forEach(track=>{
-        const item=d('daq-item',{});
-        if(track.thumbUrl)item.appendChild(el('img',{cls:'daq-art',src:track.thumbUrl,alt:'',loading:'lazy'}));
-        else item.appendChild(d('daq-art-ph',{},'♫'));
-        const info=d('daq-info',{});
-        info.appendChild(s('daq-title',track.title));
-        const meta=[track.artistName,track.year,track.label].filter(Boolean).join(' · ');
-        info.appendChild(s('daq-meta',meta));
-        item.appendChild(info);
-        if(track.videoId&&!invalidYtIds.has(track.videoId)){
-          const pb=b('daq-play has-video',{title:'Play',onClick:()=>{doPlay(track.id,track.videoId,track.title,track.artistName);st.likesModal=false;rr();}});
-          pb.textContent='▶';item.appendChild(pb);
-        }
-        item.appendChild(b('daq-rm',{title:'Remove like',onClick:()=>{st.likes[track.id]=false;rr();}},'×'));
-        list.appendChild(item);
+        const g=(track.genre||'').split(' · ')[0]||'Unknown';
+        if(!groups.has(g))groups.set(g,[]);
+        groups.get(g).push(track);
+      });
+      const sortedGenres=[...groups.keys()].sort((a,b)=>groups.get(b).length-groups.get(a).length);
+      sortedGenres.forEach(g=>{
+        const tracks=groups.get(g);
+        const isOpen=st.likesGenreOpen.has(g);
+        const c=genreColor(g);
+        const hd=b('genre-section-hd',{style:{borderColor:c+'66'},onClick:()=>{
+          if(isOpen)st.likesGenreOpen.delete(g);else st.likesGenreOpen.add(g);rr();
+        }},el('span',{style:{color:c}},g+' · '+tracks.length),s('',isOpen?'▴':'▾'));
+        list.appendChild(hd);
+        if(!isOpen)return;
+        tracks.forEach(track=>{
+          const item=d('daq-item',{});
+          if(track.thumbUrl)item.appendChild(el('img',{cls:'daq-art',src:track.thumbUrl,alt:'',loading:'lazy'}));
+          else item.appendChild(d('daq-art-ph',{},'♫'));
+          const info=d('daq-info',{});
+          info.appendChild(s('daq-title',track.title));
+          const meta=[track.artistName,track.year,track.label].filter(Boolean).join(' · ');
+          info.appendChild(s('daq-meta',meta));
+          const genres=track.genre?track.genre.split(' · '):[];
+          if(genres.length){
+            const gRow=d('daq-genres',{});
+            genres.forEach(gg=>{const gc=genreColor(gg);gRow.appendChild(el('span',{cls:'genre-badge',style:`background:${gc}1A;border-color:${gc}66;color:${gc}`},gg));});
+            info.appendChild(gRow);
+          }
+          item.appendChild(info);
+          if(track.videoId&&!invalidYtIds.has(track.videoId)){
+            const pb=b('daq-play has-video',{title:'Play',onClick:()=>{doPlay(track.id,track.videoId,track.title,track.artistName);st.likesModal=false;rr();}});
+            pb.textContent='▶';item.appendChild(pb);
+          }
+          item.appendChild(b('daq-rm',{title:'Remove like',onClick:()=>{st.likes[track.id]=false;rr();}},'×'));
+          list.appendChild(item);
+        });
       });
     }
     modal.appendChild(list);
