@@ -1661,10 +1661,10 @@ function playAdjacentTrack(dir){
 let relatedCache=null,relatedLoading=false;
 async function searchByStyleYear(style,year){
   if(year){
-    const withYear=await dReq('/database/search',{style,type:'release',year:String(year),per_page:'20'});
+    const withYear=await dReq('/database/search',{style,type:'release',year:String(year),per_page:'40'});
     if((withYear.results||[]).length>=5)return withYear.results;
   }
-  const broader=await dReq('/database/search',{style,type:'release',sort:'have',sort_order:'desc',per_page:'25'});
+  const broader=await dReq('/database/search',{style,type:'release',sort:'have',sort_order:'desc',per_page:'40'});
   return broader.results||[];
 }
 // Genre+year alone still surfaced artists the user already owns a pile of
@@ -1693,13 +1693,18 @@ async function refreshRelatedTracks(nowTrack,seen,known){
     if(!seedStyle){relatedCache={trackKey,items:[]};return;}
     const results=await searchByStyleYear(seedStyle,nowTrack.year);
     const cand=[];
-    for(const rel of results.slice(0,15)){
+    for(const rel of results.slice(0,30)){
       try{
         const rd=await dReq('/releases/'+rel.id);
         const releaseArtist=rd.artists?.[0]?{id:rd.artists[0].id,name:stripDiscogsSuffix(rd.artists[0].name)}:null;
         const entries=buildTrackEntries(rd,'disc-'+rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,null,rel.thumb);
         entries.forEach(t=>{
           if(!t.videoId)return; // must actually be playable, same rule as before
+          // A normal (non-various-artist) release has no per-track artist
+          // credit — trackArtistId is only set for compilations — so fall
+          // back to the release's own artist and store it back on the
+          // candidate itself, not just in these local variables, or every
+          // single-artist release would silently lose its artist identity.
           const artistId=t.trackArtistId||releaseArtist?.id||null;
           const artistName=t.trackArtistName||releaseArtist?.name||'';
           if(artistId&&seen.has('artist:'+artistId))return;
@@ -1710,19 +1715,20 @@ async function refreshRelatedTracks(nowTrack,seen,known){
           const overlap=styles.filter(s=>tStyles.includes(s)).length;
           const yearDiff=(t.year&&nowTrack.year)?Math.abs(t.year-nowTrack.year):10;
           const sc=overlap*10-yearDiff*0.5;
-          cand.push({...t,artistName,sc});
+          cand.push({...t,artistName,trackArtistId:artistId,sc});
         });
       }catch{/* one bad release shouldn't sink the whole batch */}
     }
-    // Cap one track per artist — otherwise a single EP with several
+    // Cap two tracks per artist — otherwise a single EP with several
     // equally-well-matched tracks (same style, same year) fills every slot
     // and the panel stops being a spread of new artists to discover.
-    const seenArtist=new Set(),items=[];
+    const artistCounts=new Map(),items=[];
     for(const t of cand.sort((a,b)=>b.sc-a.sc)){
       const ak=t.trackArtistId||t.artistName;
-      if(seenArtist.has(ak))continue;
-      seenArtist.add(ak);items.push(t);
-      if(items.length>=6)break;
+      const n=artistCounts.get(ak)||0;
+      if(n>=2)continue;
+      artistCounts.set(ak,n+1);items.push(t);
+      if(items.length>=14)break;
     }
     items.forEach(t=>{discoveredTracks[t.id]=t;});
     lsSet('related:'+trackKey,items);
@@ -1776,6 +1782,23 @@ function renderRelatedTracks(){
     info.appendChild(s('daq-title',t.title));
     info.appendChild(s('daq-meta',[t.artistName,t.year].filter(Boolean).join(' · ')));
     row.appendChild(info);
+    // Same explore-dropdown pattern used for Various Artists/remix credits
+    // elsewhere (st.exploreDropKey) — lets a suggestion be grown into a
+    // real tree node without first having to play it.
+    const dropKey='rel-'+t.id;
+    const exploreOpen=st.exploreDropKey===dropKey;
+    const wrap=d('explore-wrap',{});
+    wrap.appendChild(b('esplora-btn explore-toggle',{
+      onClick:e=>{e.stopPropagation();st.exploreDropKey=exploreOpen?null:dropKey;rr();}
+    },exploreOpen?'Explore ▴':'Explore ▾'));
+    if(exploreOpen){
+      const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
+      if(t.trackArtistId)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('artist',t.trackArtistId,t.artistName,null,st.activeBranchId);}},'Explore artist'));
+      if(t.labelId)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('label',t.labelId,t.label,null,st.activeBranchId);}},'Explore label'));
+      wrap.appendChild(drop);
+      setTimeout(()=>{const h=()=>{st.exploreDropKey=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
+    }
+    row.appendChild(wrap);
     host.appendChild(row);
   });
 }
