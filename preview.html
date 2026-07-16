@@ -497,7 +497,7 @@ input,select{font:inherit;color:inherit}
 <div id="right-panel">
   <div id="rp-np-empty">▶&nbsp;&nbsp;Nothing playing</div>
   <div id="yt-host"></div>
-  <div id="related-tracks"><span class="rp-corr-hd">Related Tracks</span><span class="rp-coming-soon">Coming Soon</span></div>
+  <div id="related-tracks"><span class="rp-corr-hd">Discover</span><span class="rp-coming-soon">Explore more to see picks</span></div>
 </div>
 
 <div class="cookie-banner" id="cookieBanner">
@@ -1680,56 +1680,70 @@ function buildTasteProfile(){
   });
   return{genreW,labelW,decadeW};
 }
-function scoreRelatedTrack(track,nowTrack,profile){
+// Surfacing tracks from nodes already open in the tree is redundant — the
+// user would've seen them in that node's own results already. The actual
+// discovery signal is one hop OUT: other artists credited on a label
+// you've opened, or other labels an artist you've opened has released on.
+// That data is already sitting in the tracks fetched for every open node
+// (trackArtistId/trackArtistName, labelId/label) — this never fetches
+// anything new, it just mines what's already there for names that don't
+// have a node yet.
+function findAffineCandidates(){
+  const seen=new Set(st.nodes.map(n=>n.type+':'+n.discogsId));
+  const cand=new Map();
+  const add=(type,id,name,parentNodeId,tr)=>{
+    if(!id||!name)return;
+    const key=type+':'+id;
+    if(seen.has(key))return;
+    if(!cand.has(key))cand.set(key,{type,discogsId:id,name,parentNodeId,tracks:[]});
+    cand.get(key).tracks.push(tr);
+  };
+  st.nodes.forEach(node=>{
+    (node.data?.tracks||[]).forEach(t=>{
+      add('artist',t.trackArtistId,t.trackArtistName,node.id,t);
+      add('label',t.labelId,t.label,node.id,t);
+    });
+  });
+  return[...cand.values()];
+}
+function scoreAffineCandidate(c,nowTrack,profile){
   const norm=x=>(x||'').trim().toLowerCase();
-  const cGenres=track.genre?track.genre.split(' · '):[];
   const nGenres=nowTrack?.genre?nowTrack.genre.split(' · '):[];
   let sc=0;
-  cGenres.forEach(g=>{
-    const k=norm(g);
-    sc+=profile.genreW[k]||0;
-    if(nGenres.some(ng=>norm(ng)===k))sc+=6; // direct overlap with the track currently playing
+  c.tracks.forEach(t=>{
+    const cGenres=t.genre?t.genre.split(' · '):[];
+    cGenres.forEach(g=>{
+      const k=norm(g);
+      sc+=profile.genreW[k]||0;
+      if(nGenres.some(ng=>norm(ng)===k))sc+=6; // extra relevance if something's playing right now
+    });
+    const lk=norm(t.label);
+    sc+=(profile.labelW[lk]||0)*0.5; // halved: label already counted once via the candidate's own identity below
+    const dk=t.year?Math.floor(t.year/10)*10:null;
+    if(dk!=null)sc+=(profile.decadeW[dk]||0)*0.3;
   });
-  const lk=norm(track.label);
-  sc+=profile.labelW[lk]||0;
-  if(nowTrack?.label&&norm(nowTrack.label)===lk)sc+=5;
-  const dk=track.year?Math.floor(track.year/10)*10:null;
-  if(dk!=null)sc+=(profile.decadeW[dk]||0)*0.3;
+  sc/=c.tracks.length; // average, not sum — a label with 20 tracklisted tracks shouldn't win purely on volume
+  sc+=Math.min(c.tracks.length,5)*0.4; // small corroboration bonus: more shared tracks = more confidence
   return sc;
 }
 function renderRelatedTracks(){
   const host=document.getElementById('related-tracks');
   if(!host)return;
-  const np=st.nowPlaying;
-  if(!np){host.innerHTML='';host.appendChild(s('rp-corr-hd','Related Tracks'));host.appendChild(s('rp-coming-soon','Play something to see picks'));return;}
-  const nowTrack=findTrack(np.trackId);
-  const seen=new Set([np.trackId]);
-  const pool=[];
-  st.nodes.forEach(n=>{
-    (n.data?.tracks||[]).forEach(t=>{
-      if(seen.has(t.id))return;
-      seen.add(t.id);
-      // Only surfaces tracks with an already-resolved video (Discogs-native
-      // or a previously cached auto-match) — deliberately never triggers a
-      // fresh YouTube lookup just to populate this sidebar, given how tight
-      // the search.list daily quota already is (see resolveTrackVideoId()).
-      if(!(t.videoId||ytMatches[t.id]))return;
-      pool.push(t);
-    });
-  });
   host.innerHTML='';
-  host.appendChild(s('rp-corr-hd','Related Tracks'));
-  if(!pool.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
+  host.appendChild(s('rp-corr-hd','Discover'));
+  const candidates=findAffineCandidates();
+  if(!candidates.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
+  const nowTrack=st.nowPlaying?findTrack(st.nowPlaying.trackId):null;
   const profile=buildTasteProfile();
-  const ranked=pool.map(t=>({t,sc:scoreRelatedTrack(t,nowTrack,profile)})).sort((a,b)=>b.sc-a.sc).slice(0,6);
-  ranked.forEach(({t})=>{
-    const artistName=t.trackArtistName||t.label||'';
-    const row=d('rp-rel-row',{onClick:()=>doPlay(t.id,t.videoId||ytMatches[t.id],t.title,artistName)});
-    if(t.thumbUrl)row.appendChild(el('img',{cls:'daq-art',src:t.thumbUrl,alt:'',loading:'lazy'}));
+  const ranked=candidates.map(c=>({c,sc:scoreAffineCandidate(c,nowTrack,profile)})).sort((a,b)=>b.sc-a.sc).slice(0,6);
+  ranked.forEach(({c})=>{
+    const thumb=c.tracks.find(t=>t.thumbUrl)?.thumbUrl;
+    const row=d('rp-rel-row',{onClick:()=>addNode(c.type,c.discogsId,c.name,c.parentNodeId,getNode(c.parentNodeId)?.branchId)});
+    if(thumb)row.appendChild(el('img',{cls:'daq-art',src:thumb,alt:'',loading:'lazy'}));
     else row.appendChild(d('daq-art-ph',{},'♫'));
     const info=d('daq-info',{});
-    info.appendChild(s('daq-title',t.title));
-    info.appendChild(s('daq-meta',[artistName,t.year].filter(Boolean).join(' · ')));
+    info.appendChild(s('daq-title',c.name));
+    info.appendChild(s('daq-meta',(c.type==='label'?'Label':'Artist')+' · new'));
     row.appendChild(info);
     host.appendChild(row);
   });
