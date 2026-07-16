@@ -748,7 +748,7 @@ function buildDiscogsCollEntry(bi){
     artistExploreName:bi.artists?.[0]?stripDiscogsSuffix(bi.artists[0].name):null,
     labelExploreId:bi.labels?.[0]?.id||null,
     labelExploreName:bi.labels?.[0]?.name||null,
-    genres:(bi.styles?.length?bi.styles:bi.genres||[]).slice(0,3),
+    genres:(bi.styles?.length?bi.styles:bi.genres||[]).slice(0,4),
   };
 }
 
@@ -1402,7 +1402,7 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=7;
+const TRACK_DATA_VERSION=8; // bumped: styles now keep up to 4 tags instead of 2
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
@@ -2500,7 +2500,12 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
   }
   const img=rd.images?.find(i=>i.type==='primary')||rd.images?.[0];
   const thumbUrl=img?.uri150||img?.uri||relThumb||null;
-  const styleList=(rd.styles||[]).slice(0,2);
+  // Keep up to 4 styles, not just the first 2 — a release genuinely tagged
+  // "House, Techno, Minimal Techno, Tech House" loses real identifying
+  // detail (and Related Tracks' style-overlap matching loses precision)
+  // if only the first two survive. Still capped, since some releases carry
+  // 8-9 tags and showing all of them stops being useful.
+  const styleList=(rd.styles||[]).slice(0,4);
   const genre=styleList.length?styleList.join(' · '):(rd.genres?.[0]||null);
   // BPM: try release notes, then per-track notes
   const relNotes=(rd.notes||'');
