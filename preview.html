@@ -70,7 +70,7 @@ input,select{font:inherit;color:inherit}
 .chip:hover .chip-rm,.chip-rm:hover{opacity:1;color:var(--accent)}
 
 /* ── Main layout ─────────────── */
-.main{display:grid;grid-template-columns:var(--sb-w,252px) 4px 1fr 260px;flex:1;overflow:hidden;min-height:0}
+.main{display:grid;grid-template-columns:var(--sb-w,252px) 4px 1fr 320px;flex:1;overflow:hidden;min-height:0}
 .sb-resize{cursor:col-resize;background:var(--border);transition:background .15s;flex-shrink:0}
 .sb-resize:hover,.sb-resize.dragging{background:var(--accent)}
 
@@ -436,7 +436,7 @@ input,select{font:inherit;color:inherit}
 .yt-custom-seek::-moz-range-thumb{width:11px;height:11px;border-radius:50%;background:var(--accent);border:none;cursor:pointer}
 .yt-custom-seek::-moz-range-progress{background:var(--accent);height:4px;border-radius:2px}
 /* ── Right panel (outside #root, never rebuilt) ─────── */
-#right-panel{position:fixed;right:0;width:260px;top:0;bottom:0;display:none;flex-direction:column;background:var(--bg-s);border-left:1px solid var(--border);z-index:50}
+#right-panel{position:fixed;right:0;width:320px;top:0;bottom:0;display:none;flex-direction:column;background:var(--bg-s);border-left:1px solid var(--border);z-index:50}
 #yt-host{flex-shrink:0;overflow:hidden;display:none}
 #related-tracks{flex:1;overflow-y:auto;padding:12px;min-height:0}
 /* .rp is an invisible grid spacer — visual content is in #right-panel */
@@ -2209,7 +2209,45 @@ function syncYtPlayer(){
   const prevBtn=document.createElement('button');prevBtn.className='yt-nav';prevBtn.title='Previous track';prevBtn.textContent='⏮';prevBtn.disabled=curIdx<=0;prevBtn.addEventListener('click',()=>playAdjacentTrack(-1));
   const nextBtn=document.createElement('button');nextBtn.className='yt-nav';nextBtn.title='Next track';nextBtn.textContent='⏭';nextBtn.disabled=curIdx<0||curIdx>=tracks.length-1;nextBtn.addEventListener('click',()=>playAdjacentTrack(1));
   const cb=document.createElement('button');cb.className='yt-close';cb.textContent='×';cb.addEventListener('click',stopPlay);
-  hdr.appendChild(info);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
+  // Like/queue for whatever's actually playing, not just for suggestions —
+  // findTrack() resolves both tree tracks and Related Tracks picks (see
+  // discoveredTracks) so genre/year/label are available here too.
+  const fullTrack=findTrack(np.trackId);
+  const liked=!!st.likes[np.trackId];
+  const likeBtn=b('t-like'+(liked?' liked':''),{title:'Like',onClick:()=>toggleLike(np.trackId)},liked?'♥':'♡');
+  const trackForQueue={id:np.trackId,title:np.title,artistName:np.artistName,videoId:np.videoId,year:fullTrack?.year,label:fullTrack?.label,genre:fullTrack?.genre,thumbUrl:fullTrack?.thumbUrl};
+  const inDaq=st.dasAscoltare.some(q=>q.id===np.trackId);
+  const isDropOpen=st.playlistDropId===np.trackId;
+  const plWrap=d('pl-wrap',{});
+  plWrap.appendChild(b('t-daq'+(inDaq?' queued':''),{title:'Add to playlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:np.trackId;rr();}},'🏷️'));
+  if(isDropOpen){
+    const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
+    const logQ=()=>logEvent('queue',{track_id:np.trackId,title:np.title,artist:np.artistName,genre:fullTrack?.genre||null,year:fullTrack?.year||null});
+    drop.appendChild(b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
+      if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==np.trackId);
+      else{st.dasAscoltare=[...st.dasAscoltare,trackForQueue];logQ();}
+      st.playlistDropId=null;rr();
+    }},inDaq?'✓ Listen Later':'Listen Later'));
+    st.playlists.forEach(pl=>{
+      const inPl=pl.tracks.some(t=>t.id===np.trackId);
+      drop.appendChild(b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
+        if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==np.trackId);
+        else{pl.tracks=[...pl.tracks,trackForQueue];logQ();}
+        st.playlistDropId=null;rr();
+      }},inPl?'✓ '+pl.name:pl.name));
+    });
+    drop.appendChild(d('pl-drop-sep',{}));
+    drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
+      const name=prompt('Playlist name:','');
+      if(!name?.trim())return;
+      st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackForQueue]}];
+      logQ();
+      st.playlistDropId=null;rr();
+    }},'+ New playlist'));
+    plWrap.appendChild(drop);
+    setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
+  }
+  hdr.appendChild(info);hdr.appendChild(likeBtn);hdr.appendChild(plWrap);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
   const q=encodeURIComponent(np.artistName+' '+np.title);
   if(np.videoId&&!noEmbedIds.has(np.videoId)&&!invalidYtIds.has(np.videoId)){
     const videoWrap=document.createElement('div');videoWrap.className='yt-video-wrap';
