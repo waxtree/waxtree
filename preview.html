@@ -1685,12 +1685,17 @@ function updateCustomPlayPause(isPlaying){
 function tryBadge(){
   if(ytTid&&(ytAccSec>=3||ytSkips>=2)&&!st.listens[ytTid]?.badged){
     st.listens[ytTid]={badged:true};
-    const tr=findTrack(ytTid);
+    const found=findTrackAndNode(ytTid);
+    const tr=found?.track||findTrack(ytTid);
     st.history.unshift({id:ytTid,title:ytTitle,artistName:ytArtist,ts:Date.now(),
       thumbUrl:tr?.thumbUrl||null,videoId:st.nowPlaying?.videoId||null,
       exploreId:tr?.exploreId||null,exploreType:tr?.exploreType||'artist',exploreName:tr?.exploreName||ytArtist});
     if(st.history.length>300)st.history.length=300; // unbounded otherwise — this is per-play, not per-search
-    logEvent('play',{track_id:ytTid,title:ytTitle,artist:ytArtist,label:tr?.label||null,genre:tr?.genre||null,year:tr?.year||null});
+    // node_discogs_id links this play back to the exact node it happened
+    // under (see 'explore' events) so a later "plays vs likes per node"
+    // ratio can be computed by ID, not by fuzzy-matching artist/label text.
+    logEvent('play',{track_id:ytTid,title:ytTitle,artist:ytArtist,label:tr?.label||null,genre:tr?.genre||null,year:tr?.year||null,
+      node_type:found?.node?.type||null,node_discogs_id:found?.node?.discogsId||null,node_name:found?.node?.name||null});
     rr();
   }
 }
@@ -2650,7 +2655,12 @@ function addTag(nodeId,tag){
 function removeTag(nodeId,tag){const n=getNode(nodeId);if(n)n.tags=n.tags.filter(t=>t!==tag);rr();}
 function toggleLike(id){
   st.likes[id]=!st.likes[id];
-  if(st.likes[id]){const tr=findTrack(id);logEvent('like',{track_id:id,title:tr?.title||null,artist:tr?.trackArtistName||tr?.label||null,genre:tr?.genre||null,year:tr?.year||null});}
+  if(st.likes[id]){
+    const found=findTrackAndNode(id);
+    const tr=found?.track;
+    logEvent('like',{track_id:id,title:tr?.title||null,artist:tr?.trackArtistName||tr?.label||null,genre:tr?.genre||null,year:tr?.year||null,
+      node_type:found?.node?.type||null,node_discogs_id:found?.node?.discogsId||null,node_name:found?.node?.name||null});
+  }
   rr();
 }
 function removeChip(name){st.chips=st.chips.filter(c=>c!==name);rr();}
@@ -2957,6 +2967,7 @@ function groupTracksByRelease(tracks){
 function releaseCard(group,parentNodeId,isLabel,nodeName){
   const tracks=group.tracks;
   const first=tracks[0];
+  const relNode=getNode(parentNodeId); // node identity for 'queue' events below
 
   // Release artwork (identical thumbUrl across the group)
   const art=first.thumbUrl
@@ -3001,7 +3012,8 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
       const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
       const llItem=b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
         if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);
-        else{st.dasAscoltare=[...st.dasAscoltare,trackWithArtist];logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null});}
+        else{st.dasAscoltare=[...st.dasAscoltare,trackWithArtist];logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null,
+          node_type:relNode?.type||null,node_discogs_id:relNode?.discogsId||null,node_name:relNode?.name||null});}
         st.playlistDropId=null;rr();
       }},inDaq?'✓ Listen Later':'Listen Later');
       drop.appendChild(llItem);
@@ -3009,7 +3021,8 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
         const inPl=pl.tracks.some(t=>t.id===track.id);
         const plItem=b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
           if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==track.id);
-          else{pl.tracks=[...pl.tracks,trackWithArtist];logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null});}
+          else{pl.tracks=[...pl.tracks,trackWithArtist];logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null,
+          node_type:relNode?.type||null,node_discogs_id:relNode?.discogsId||null,node_name:relNode?.name||null});}
           st.playlistDropId=null;rr();
         }},inPl?'✓ '+pl.name:pl.name);
         drop.appendChild(plItem);
@@ -3019,7 +3032,8 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
         const name=prompt('Playlist name:','');
         if(!name?.trim())return;
         st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackWithArtist]}];
-        logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null});
+        logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null,
+          node_type:relNode?.type||null,node_discogs_id:relNode?.discogsId||null,node_name:relNode?.name||null});
         st.playlistDropId=null;rr();
       }},'+ New playlist'));
       plWrap.appendChild(drop);
