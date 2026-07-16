@@ -497,7 +497,7 @@ input,select{font:inherit;color:inherit}
 <div id="right-panel">
   <div id="rp-np-empty">▶&nbsp;&nbsp;Nothing playing</div>
   <div id="yt-host"></div>
-  <div id="related-tracks"><span class="rp-corr-hd">Discover</span><span class="rp-coming-soon">Explore more to see picks</span></div>
+  <div id="related-tracks"><span class="rp-corr-hd">Related Tracks</span><span class="rp-coming-soon">Play something to see picks</span></div>
 </div>
 
 <div class="cookie-banner" id="cookieBanner">
@@ -1646,130 +1646,114 @@ function playAdjacentTrack(dir){
   doPlay(next.id,next.videoId,next.title,artist);
 }
 
-// ── Taste profile (Phase 1 of the taste engine) ──────────────
-// Built entirely from data already in memory (collection, wantlist,
-// likes, queue, listen history) — no cold start, no extra API calls.
-// digging_events is insert-only by design (see logEvent) and is never
-// read back here; this is a separate, immediately-usable signal that
-// happens to share the same long-term goal.
-// Weights favor stronger intent: owning a record outweighs liking a
-// track, which outweighs wanting one, which outweighs passively queuing
-// or listening to one.
-function buildTasteProfile(){
-  const genreW={},labelW={},decadeW={};
-  const norm=x=>(x||'').trim().toLowerCase();
-  const decadeOf=y=>y?Math.floor(y/10)*10:null;
-  const score=(genres,label,year,w)=>{
-    (genres||[]).forEach(g=>{const k=norm(g);if(k)genreW[k]=(genreW[k]||0)+w;});
-    const lk=norm(label);if(lk)labelW[lk]=(labelW[lk]||0)+w;
-    const dk=decadeOf(year);if(dk!=null)decadeW[dk]=(decadeW[dk]||0)+w;
-  };
-  st.discogsCollection.forEach(e=>score(e.genres,e.labelExploreName,e.year,3));
-  st.discogsWantlist.forEach(e=>score(e.genres,e.labelExploreName,e.year,1.5));
-  Object.keys(st.likes).forEach(id=>{
-    if(!st.likes[id])return;
-    const tr=findTrack(id);if(!tr)return;
-    score(tr.genre?tr.genre.split(' · '):[],tr.label,tr.year,2);
-  });
-  [...st.dasAscoltare,...st.playlists.flatMap(p=>p.tracks)].forEach(tr=>{
-    score(tr.genre?tr.genre.split(' · '):[],tr.label,tr.year,1);
-  });
-  st.history.forEach(h=>{
-    const tr=findTrack(h.id);if(!tr)return;
-    score(tr.genre?tr.genre.split(' · '):[],tr.label,tr.year,0.5);
-  });
-  return{genreW,labelW,decadeW};
+// Related Tracks: actual playable tracks correlated to whatever's playing
+// right now, from artists/labels not yet explored — third design in a row
+// after real feedback each time. Mining the open tree only surfaced names
+// already visible on screen; a whole-account taste profile picked styles
+// disconnected from the specific track playing. This version searches
+// Discogs for OTHER releases matching the now-playing track's own style(s)
+// AND release year (both are exact filters Discogs' own search applies,
+// not a client-side guess), pulls real tracklists off the results, and
+// scores each candidate by how many of the now-playing track's style tags
+// it shares plus year closeness. Cached per exact track id (not per style)
+// so switching tracks always re-searches — a shared style was previously
+// reusing stale picks across genuinely different tracks.
+let relatedCache=null,relatedLoading=false;
+async function searchByStyleYear(style,year){
+  if(year){
+    const withYear=await dReq('/database/search',{style,type:'release',year:String(year),per_page:'20'});
+    if((withYear.results||[]).length>=5)return withYear.results;
+  }
+  const broader=await dReq('/database/search',{style,type:'release',sort:'have',sort_order:'desc',per_page:'25'});
+  return broader.results||[];
 }
-// Mining only the tree already open (one hop from an explored node) still
-// surfaced names the user could already see by scrolling that node's own
-// results — real feedback from testing. Genuine discovery has to reach
-// past the explored tree entirely: search Discogs itself for well-known
-// releases in the taste profile's strongest style (sorted by community
-// "have" — Discogs has no native "similar artist"/"similar label"
-// endpoint, so popularity within the right style is the closest proxy),
-// then keep only the artists/labels that aren't already a node. Cached
-// 24h per style via lsGet/lsSet so this only ever costs a handful of
-// dReq() calls once a day per taste shift, not per render — dReq()'s own
-// 45 req/60s throttle easily absorbs that one-time cost.
-let discoverCache=null,discoverLoading=false;
-async function refreshDiscoverCache(seedStyle,seen){
-  if(discoverLoading)return;
-  discoverLoading=true;
+async function refreshRelatedTracks(nowTrack,seen){
+  if(relatedLoading)return;
+  relatedLoading=true;
+  const trackKey=nowTrack.id;
   try{
-    const sd=await dReq('/database/search',{style:seedStyle,type:'release',sort:'have',sort_order:'desc',per_page:'20'});
-    const cand=new Map();
-    for(const rel of (sd.results||[]).slice(0,15)){
+    const styles=nowTrack.genre?nowTrack.genre.split(' · ').filter(Boolean):[];
+    const seedStyle=styles[styles.length-1]||styles[0];
+    if(!seedStyle){relatedCache={trackKey,items:[]};return;}
+    const results=await searchByStyleYear(seedStyle,nowTrack.year);
+    const cand=[];
+    for(const rel of results.slice(0,15)){
       try{
         const rd=await dReq('/releases/'+rel.id);
-        const thumb=rd.images?.[0]?.uri150||rel.thumb||null;
-        const genre=(rd.styles?.length?rd.styles:rd.genres||[]).slice(0,2).join(' · ');
-        const year=rd.year||rel.year||null;
-        const have=rel.community?.have||0;
-        (rd.artists||[]).forEach(a=>{
-          const key='artist:'+a.id;
-          if(seen.has(key)||cand.has(key))return;
-          cand.set(key,{type:'artist',discogsId:a.id,name:stripDiscogsSuffix(a.name),thumb,genre,year,have});
-        });
-        (rd.labels||[]).forEach(l=>{
-          const key='label:'+l.id;
-          if(seen.has(key)||cand.has(key))return;
-          cand.set(key,{type:'label',discogsId:l.id,name:l.name,thumb,genre,year,have});
+        const releaseArtist=rd.artists?.[0]?{id:rd.artists[0].id,name:stripDiscogsSuffix(rd.artists[0].name)}:null;
+        const entries=buildTrackEntries(rd,'disc-'+rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,null,rel.thumb);
+        entries.forEach(t=>{
+          if(!t.videoId)return; // must actually be playable, same rule as before
+          const artistId=t.trackArtistId||releaseArtist?.id||null;
+          const artistName=t.trackArtistName||releaseArtist?.name||'';
+          if(artistId&&seen.has('artist:'+artistId))return;
+          if(t.labelId&&seen.has('label:'+t.labelId))return;
+          const tStyles=t.genre?t.genre.split(' · '):[];
+          const overlap=styles.filter(s=>tStyles.includes(s)).length;
+          const yearDiff=(t.year&&nowTrack.year)?Math.abs(t.year-nowTrack.year):10;
+          const sc=overlap*10-yearDiff*0.5;
+          cand.push({...t,artistName,sc});
         });
       }catch{/* one bad release shouldn't sink the whole batch */}
     }
-    const items=[...cand.values()].sort((a,b)=>b.have-a.have).slice(0,6);
-    lsSet('discover:'+seedStyle,items);
-    discoverCache={seedStyle,items};
+    // Cap one track per artist — otherwise a single EP with several
+    // equally-well-matched tracks (same style, same year) fills every slot
+    // and the panel stops being a spread of new artists to discover.
+    const seenArtist=new Set(),items=[];
+    for(const t of cand.sort((a,b)=>b.sc-a.sc)){
+      const ak=t.trackArtistId||t.artistName;
+      if(seenArtist.has(ak))continue;
+      seenArtist.add(ak);items.push(t);
+      if(items.length>=6)break;
+    }
+    items.forEach(t=>{discoveredTracks[t.id]=t;});
+    lsSet('related:'+trackKey,items);
+    relatedCache={trackKey,items};
   }catch(e){
-    console.warn('WaxTree: discover refresh failed:',e?.message||e);
-    // Mark this style as "done" for the session even on failure — otherwise
-    // every render (paint() runs on essentially every state change) would
-    // retry immediately, since nothing else marks the attempt as resolved.
-    discoverCache={seedStyle,items:[]};
+    console.warn('WaxTree: related-tracks refresh failed:',e?.message||e);
+    // Mark this track as "done" for the session even on failure —
+    // otherwise every render (paint() runs on nearly every state change)
+    // would retry immediately, since nothing else marks it resolved.
+    relatedCache={trackKey,items:[]};
   }
-  finally{discoverLoading=false;rr();}
+  finally{relatedLoading=false;rr();}
 }
 function renderRelatedTracks(){
   const host=document.getElementById('related-tracks');
   if(!host)return;
   host.innerHTML='';
-  host.appendChild(s('rp-corr-hd','Discover'));
-  // Seed from what's actually playing, not the whole-account taste profile —
-  // aggregating across the entire collection picked styles with zero
-  // relation to the track on screen (e.g. a Breakbeat-heavy collection
-  // burying a Dub Techno track currently playing). Discogs lists styles
-  // broad-to-specific in practice (e.g. "Techno, Dub Techno") and this
-  // panel exists to go deep on the specific one, so prefer the last tag,
-  // not the first. Only fall back to the aggregate profile when idle.
-  const nowTrack=st.nowPlaying?findTrack(st.nowPlaying.trackId):null;
-  const nowStyles=nowTrack?.genre?nowTrack.genre.split(' · ').filter(Boolean):[];
-  let seedStyle=nowStyles[nowStyles.length-1];
-  if(!seedStyle){
-    const profile=buildTasteProfile();
-    seedStyle=Object.entries(profile.genreW).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  }
-  if(!seedStyle){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
-  if(discoverCache?.seedStyle!==seedStyle){
-    const cached=lsGet('discover:'+seedStyle);
-    if(cached){discoverCache={seedStyle,items:cached};}
+  host.appendChild(s('rp-corr-hd','Related Tracks'));
+  const np=st.nowPlaying;
+  if(!np){host.appendChild(s('rp-coming-soon','Play something to see picks'));return;}
+  const nowTrack=findTrack(np.trackId);
+  if(!nowTrack?.genre){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
+  if(relatedCache?.trackKey!==np.trackId){
+    const cached=lsGet('related:'+np.trackId);
+    if(cached){cached.forEach(t=>{discoveredTracks[t.id]=t;});relatedCache={trackKey:np.trackId,items:cached};}
     else{
-      if(!discoverLoading){
+      if(!relatedLoading){
         const seen=new Set(st.nodes.map(n=>n.type+':'+n.discogsId));
-        refreshDiscoverCache(seedStyle,seen);
+        refreshRelatedTracks(nowTrack,seen);
       }
-      host.appendChild(s('rp-coming-soon',discoverLoading?'Finding picks…':'Explore more to see picks'));
+      host.appendChild(s('rp-coming-soon',relatedLoading?'Finding picks…':'Explore more to see picks'));
       return;
     }
   }
-  const items=(discoverCache?.items||[]).filter(it=>!st.nodes.some(n=>n.type===it.type&&n.discogsId===it.discogsId));
+  // Re-checked at render time too, in case one of these got explored since
+  // the cache was built (e.g. the user clicked into it directly).
+  const items=(relatedCache?.items||[]).filter(t=>{
+    const artistExplored=t.trackArtistId&&st.nodes.some(n=>n.type==='artist'&&n.discogsId===t.trackArtistId);
+    const labelExplored=t.labelId&&st.nodes.some(n=>n.type==='label'&&n.discogsId===t.labelId);
+    return !artistExplored&&!labelExplored;
+  });
   if(!items.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
-  items.forEach(it=>{
-    const row=d('rp-rel-row',{onClick:()=>addNode(it.type,it.discogsId,it.name,null,st.activeBranchId)});
-    if(it.thumb)row.appendChild(el('img',{cls:'daq-art',src:it.thumb,alt:'',loading:'lazy'}));
+  items.forEach(t=>{
+    const row=d('rp-rel-row',{onClick:()=>doPlay(t.id,t.videoId,t.title,t.artistName)});
+    if(t.thumbUrl)row.appendChild(el('img',{cls:'daq-art',src:t.thumbUrl,alt:'',loading:'lazy'}));
     else row.appendChild(d('daq-art-ph',{},'♫'));
     const info=d('daq-info',{});
-    info.appendChild(s('daq-title',it.name));
-    info.appendChild(s('daq-meta',[it.type==='label'?'Label':'Artist',it.genre,it.year].filter(Boolean).join(' · ')));
+    info.appendChild(s('daq-title',t.title));
+    info.appendChild(s('daq-meta',[t.artistName,t.year].filter(Boolean).join(' · ')));
     row.appendChild(info);
     host.appendChild(row);
   });
@@ -1791,7 +1775,13 @@ function positionYtHost(){
 
 // ── YouTube ────────────────────────────────────────────────
 let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=null,ytPollId=null,ytBadgeTimerId=null,ytTitle='',ytArtist='';
-function findTrack(id){for(const n of st.nodes){const t=n.data?.tracks?.find(t=>t.id===id);if(t)return t;}return null;}
+// discoveredTracks holds tracks surfaced by Related Tracks (see below) —
+// they don't belong to any open node, so the tree scan above can't see
+// them. Without this fallback, playing a suggested track would make it
+// unresolvable to itself on the very next render (breaks metadata, the
+// custom transport bar, and Related Tracks' own refresh-on-track-change).
+let discoveredTracks={};
+function findTrack(id){for(const n of st.nodes){const t=n.data?.tracks?.find(t=>t.id===id);if(t)return t;}return discoveredTracks[id]||null;}
 // ── Custom transport bar (Discogs-confirmed videos only — see doPlay()) ──
 function fmtTime(s){
   if(!isFinite(s)||s<0)s=0;
