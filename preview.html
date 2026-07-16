@@ -1667,7 +1667,23 @@ async function searchByStyleYear(style,year){
   const broader=await dReq('/database/search',{style,type:'release',sort:'have',sort_order:'desc',per_page:'25'});
   return broader.results||[];
 }
-async function refreshRelatedTracks(nowTrack,seen){
+// Genre+year alone still surfaced artists the user already owns a pile of
+// (e.g. Basic Channel — a dub techno giant, so genre/year match easily,
+// but useless as a "discovery" if the collection already has most of
+// their catalog). Cross-reference the synced libraries — Discogs
+// collection/wantlist and the local file-library scan — and exclude any
+// artist/label already well represented there, not just ones already
+// open as a node.
+function buildKnownFromLibrary(){
+  const artists=new Set(),labels=new Set();
+  const addA=n=>{const k=normalizeStr(n);if(k)artists.add(k);};
+  const addL=n=>{const k=normalizeStr(n);if(k)labels.add(k);};
+  st.discogsCollection.forEach(e=>{addA(e.artistExploreName);addL(e.labelExploreName);});
+  st.discogsWantlist.forEach(e=>{addA(e.artistExploreName);addL(e.labelExploreName);});
+  st.ownedTracks.forEach(t=>{if(t.artistNorm)artists.add(t.artistNorm);});
+  return{artists,labels};
+}
+async function refreshRelatedTracks(nowTrack,seen,known){
   if(relatedLoading)return;
   relatedLoading=true;
   const trackKey=nowTrack.id;
@@ -1688,6 +1704,8 @@ async function refreshRelatedTracks(nowTrack,seen){
           const artistName=t.trackArtistName||releaseArtist?.name||'';
           if(artistId&&seen.has('artist:'+artistId))return;
           if(t.labelId&&seen.has('label:'+t.labelId))return;
+          if(known.artists.has(normalizeStr(artistName)))return; // already own/want plenty of this artist
+          if(t.label&&known.labels.has(normalizeStr(t.label)))return;
           const tStyles=t.genre?t.genre.split(' · '):[];
           const overlap=styles.filter(s=>tStyles.includes(s)).length;
           const yearDiff=(t.year&&nowTrack.year)?Math.abs(t.year-nowTrack.year):10;
@@ -1733,18 +1751,21 @@ function renderRelatedTracks(){
     else{
       if(!relatedLoading){
         const seen=new Set(st.nodes.map(n=>n.type+':'+n.discogsId));
-        refreshRelatedTracks(nowTrack,seen);
+        refreshRelatedTracks(nowTrack,seen,buildKnownFromLibrary());
       }
       host.appendChild(s('rp-coming-soon',relatedLoading?'Finding picks…':'Explore more to see picks'));
       return;
     }
   }
-  // Re-checked at render time too, in case one of these got explored since
-  // the cache was built (e.g. the user clicked into it directly).
+  // Re-checked at render time too, in case one of these got explored (or
+  // synced into the library) since the cache was built.
+  const known=buildKnownFromLibrary();
   const items=(relatedCache?.items||[]).filter(t=>{
     const artistExplored=t.trackArtistId&&st.nodes.some(n=>n.type==='artist'&&n.discogsId===t.trackArtistId);
     const labelExplored=t.labelId&&st.nodes.some(n=>n.type==='label'&&n.discogsId===t.labelId);
-    return !artistExplored&&!labelExplored;
+    const artistKnown=known.artists.has(normalizeStr(t.artistName));
+    const labelKnown=t.label&&known.labels.has(normalizeStr(t.label));
+    return !artistExplored&&!labelExplored&&!artistKnown&&!labelKnown;
   });
   if(!items.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
   items.forEach(t=>{
