@@ -1680,70 +1680,84 @@ function buildTasteProfile(){
   });
   return{genreW,labelW,decadeW};
 }
-// Surfacing tracks from nodes already open in the tree is redundant — the
-// user would've seen them in that node's own results already. The actual
-// discovery signal is one hop OUT: other artists credited on a label
-// you've opened, or other labels an artist you've opened has released on.
-// That data is already sitting in the tracks fetched for every open node
-// (trackArtistId/trackArtistName, labelId/label) — this never fetches
-// anything new, it just mines what's already there for names that don't
-// have a node yet.
-function findAffineCandidates(){
-  const seen=new Set(st.nodes.map(n=>n.type+':'+n.discogsId));
-  const cand=new Map();
-  const add=(type,id,name,parentNodeId,tr)=>{
-    if(!id||!name)return;
-    const key=type+':'+id;
-    if(seen.has(key))return;
-    if(!cand.has(key))cand.set(key,{type,discogsId:id,name,parentNodeId,tracks:[]});
-    cand.get(key).tracks.push(tr);
-  };
-  st.nodes.forEach(node=>{
-    (node.data?.tracks||[]).forEach(t=>{
-      add('artist',t.trackArtistId,t.trackArtistName,node.id,t);
-      add('label',t.labelId,t.label,node.id,t);
-    });
-  });
-  return[...cand.values()];
-}
-function scoreAffineCandidate(c,nowTrack,profile){
-  const norm=x=>(x||'').trim().toLowerCase();
-  const nGenres=nowTrack?.genre?nowTrack.genre.split(' · '):[];
-  let sc=0;
-  c.tracks.forEach(t=>{
-    const cGenres=t.genre?t.genre.split(' · '):[];
-    cGenres.forEach(g=>{
-      const k=norm(g);
-      sc+=profile.genreW[k]||0;
-      if(nGenres.some(ng=>norm(ng)===k))sc+=6; // extra relevance if something's playing right now
-    });
-    const lk=norm(t.label);
-    sc+=(profile.labelW[lk]||0)*0.5; // halved: label already counted once via the candidate's own identity below
-    const dk=t.year?Math.floor(t.year/10)*10:null;
-    if(dk!=null)sc+=(profile.decadeW[dk]||0)*0.3;
-  });
-  sc/=c.tracks.length; // average, not sum — a label with 20 tracklisted tracks shouldn't win purely on volume
-  sc+=Math.min(c.tracks.length,5)*0.4; // small corroboration bonus: more shared tracks = more confidence
-  return sc;
+// Mining only the tree already open (one hop from an explored node) still
+// surfaced names the user could already see by scrolling that node's own
+// results — real feedback from testing. Genuine discovery has to reach
+// past the explored tree entirely: search Discogs itself for well-known
+// releases in the taste profile's strongest style (sorted by community
+// "have" — Discogs has no native "similar artist"/"similar label"
+// endpoint, so popularity within the right style is the closest proxy),
+// then keep only the artists/labels that aren't already a node. Cached
+// 24h per style via lsGet/lsSet so this only ever costs a handful of
+// dReq() calls once a day per taste shift, not per render — dReq()'s own
+// 45 req/60s throttle easily absorbs that one-time cost.
+let discoverCache=null,discoverLoading=false;
+async function refreshDiscoverCache(topStyle,seen){
+  if(discoverLoading)return;
+  discoverLoading=true;
+  try{
+    const sd=await dReq('/database/search',{style:topStyle,type:'release',sort:'have',sort_order:'desc',per_page:'20'});
+    const cand=new Map();
+    for(const rel of (sd.results||[]).slice(0,15)){
+      try{
+        const rd=await dReq('/releases/'+rel.id);
+        const thumb=rd.images?.[0]?.uri150||rel.thumb||null;
+        const genre=(rd.styles?.length?rd.styles:rd.genres||[]).slice(0,2).join(' · ');
+        const year=rd.year||rel.year||null;
+        const have=rel.community?.have||0;
+        (rd.artists||[]).forEach(a=>{
+          const key='artist:'+a.id;
+          if(seen.has(key)||cand.has(key))return;
+          cand.set(key,{type:'artist',discogsId:a.id,name:stripDiscogsSuffix(a.name),thumb,genre,year,have});
+        });
+        (rd.labels||[]).forEach(l=>{
+          const key='label:'+l.id;
+          if(seen.has(key)||cand.has(key))return;
+          cand.set(key,{type:'label',discogsId:l.id,name:l.name,thumb,genre,year,have});
+        });
+      }catch{/* one bad release shouldn't sink the whole batch */}
+    }
+    const items=[...cand.values()].sort((a,b)=>b.have-a.have).slice(0,6);
+    lsSet('discover:'+topStyle,items);
+    discoverCache={topStyle,items};
+  }catch(e){
+    console.warn('WaxTree: discover refresh failed:',e?.message||e);
+    // Mark this style as "done" for the session even on failure — otherwise
+    // every render (paint() runs on essentially every state change) would
+    // retry immediately, since nothing else marks the attempt as resolved.
+    discoverCache={topStyle,items:[]};
+  }
+  finally{discoverLoading=false;rr();}
 }
 function renderRelatedTracks(){
   const host=document.getElementById('related-tracks');
   if(!host)return;
   host.innerHTML='';
   host.appendChild(s('rp-corr-hd','Discover'));
-  const candidates=findAffineCandidates();
-  if(!candidates.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
-  const nowTrack=st.nowPlaying?findTrack(st.nowPlaying.trackId):null;
   const profile=buildTasteProfile();
-  const ranked=candidates.map(c=>({c,sc:scoreAffineCandidate(c,nowTrack,profile)})).sort((a,b)=>b.sc-a.sc).slice(0,6);
-  ranked.forEach(({c})=>{
-    const thumb=c.tracks.find(t=>t.thumbUrl)?.thumbUrl;
-    const row=d('rp-rel-row',{onClick:()=>addNode(c.type,c.discogsId,c.name,c.parentNodeId,getNode(c.parentNodeId)?.branchId)});
-    if(thumb)row.appendChild(el('img',{cls:'daq-art',src:thumb,alt:'',loading:'lazy'}));
+  const topStyle=Object.entries(profile.genreW).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  if(!topStyle){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
+  if(discoverCache?.topStyle!==topStyle){
+    const cached=lsGet('discover:'+topStyle);
+    if(cached){discoverCache={topStyle,items:cached};}
+    else{
+      if(!discoverLoading){
+        const seen=new Set(st.nodes.map(n=>n.type+':'+n.discogsId));
+        refreshDiscoverCache(topStyle,seen);
+      }
+      host.appendChild(s('rp-coming-soon',discoverLoading?'Finding picks…':'Explore more to see picks'));
+      return;
+    }
+  }
+  const items=(discoverCache?.items||[]).filter(it=>!st.nodes.some(n=>n.type===it.type&&n.discogsId===it.discogsId));
+  if(!items.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
+  items.forEach(it=>{
+    const row=d('rp-rel-row',{onClick:()=>addNode(it.type,it.discogsId,it.name,null,st.activeBranchId)});
+    if(it.thumb)row.appendChild(el('img',{cls:'daq-art',src:it.thumb,alt:'',loading:'lazy'}));
     else row.appendChild(d('daq-art-ph',{},'♫'));
     const info=d('daq-info',{});
-    info.appendChild(s('daq-title',c.name));
-    info.appendChild(s('daq-meta',(c.type==='label'?'Label':'Artist')+' · new'));
+    info.appendChild(s('daq-title',it.name));
+    info.appendChild(s('daq-meta',[it.type==='label'?'Label':'Artist',it.genre,it.year].filter(Boolean).join(' · ')));
     row.appendChild(info);
     host.appendChild(row);
   });
