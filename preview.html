@@ -1669,26 +1669,100 @@ function playAdjacentTrack(dir){
   doPlay(next.id,next.videoId,next.title,artist);
 }
 
-// Related Tracks: actual playable tracks correlated to whatever's playing
-// right now, from artists/labels not yet explored — third design in a row
-// after real feedback each time. Mining the open tree only surfaced names
-// already visible on screen; a whole-account taste profile picked styles
-// disconnected from the specific track playing. This version searches
-// Discogs for OTHER releases matching the now-playing track's own style(s)
-// AND release year (both are exact filters Discogs' own search applies,
-// not a client-side guess), pulls real tracklists off the results, and
-// scores each candidate by how many of the now-playing track's style tags
-// it shares plus year closeness. Cached per exact track id (not per style)
-// so switching tracks always re-searches — a shared style was previously
-// reusing stale picks across genuinely different tracks.
+// ── Related Tracks: multi-factor taste model + live ranking ─────────────
+// Design history, each step from real user feedback: mining the open tree
+// only surfaced names already on screen; a whole-account style profile
+// picked styles disconnected from the track playing; style+year search
+// alone matched genre but ignored everything the user's behavior says.
+// Current design separates two concerns:
+//   1. CANDIDATE GATHERING (refreshRelatedTracks) — Discogs searches
+//      seeded from the now-playing track's own styles, cached per track.
+//   2. RANKING (renderRelatedTracks) — re-scored at render time against a
+//      taste model rebuilt from live behavior, so every new like, queue,
+//      library sync or listen immediately re-orders what's suggested.
+//      That's the "learns as you feed it" property: not a trained network
+//      (true collaborative ML needs the multi-user digging_events data,
+//      accumulating server-side since Phase 0), but an online model whose
+//      weights are recomputed from the user's own accumulated signals.
 let relatedCache=null,relatedLoading=false;
-async function searchByStyleYear(style,year){
-  if(year){
-    const withYear=await dReq('/database/search',{style,type:'release',year:String(year),per_page:'40'});
-    if((withYear.results||[]).length>=5)return withYear.results;
+
+// The taste model. Factors, in rough order of intent strength:
+// - style COMBINATIONS from liked/owned tracks ("Techno + Dub Techno"
+//   together is a much more specific fingerprint than either tag alone —
+//   scored above single styles for exactly that reason)
+// - single-style weights from likes > collection > wantlist > queue
+// - label affinity from the same sources
+// - plays-vs-likes per artist: lots of badged listens with zero likes
+//   means "explored, didn't love it" — a negative signal the exploration
+//   graph alone can't express (explored-out-of-curiosity looks identical
+//   to explored-and-loved until likes are held against plays).
+let tasteModelCache=null;
+function buildTasteModel(){
+  const styleW={},comboW={},labelW={},engagement={};
+  const norm=x=>(x||'').trim().toLowerCase();
+  const addStyles=(genreStr,w)=>{
+    const gs=[...new Set((genreStr||'').split(' · ').map(norm).filter(Boolean))];
+    gs.forEach(g=>{styleW[g]=(styleW[g]||0)+w;});
+    for(let i=0;i<gs.length;i++)for(let j=i+1;j<gs.length;j++){
+      const key=[gs[i],gs[j]].sort().join('+');
+      comboW[key]=(comboW[key]||0)+w*1.5;
+    }
+  };
+  const addLabel=(l,w)=>{const k=norm(l);if(k)labelW[k]=(labelW[k]||0)+w;};
+  st.discogsCollection.forEach(e=>{addStyles((e.genres||[]).join(' · '),3);addLabel(e.labelExploreName,2.5);});
+  Object.values(st.likedTracks).forEach(t=>{addStyles(t.genre,2.5);addLabel(t.label,2);});
+  st.discogsWantlist.forEach(e=>{addStyles((e.genres||[]).join(' · '),1.5);addLabel(e.labelExploreName,1);});
+  [...st.dasAscoltare,...st.playlists.flatMap(p=>p.tracks)].forEach(t=>{addStyles(t.genre,1.2);addLabel(t.label,0.8);});
+  const played={};
+  st.history.forEach(h=>{const k=norm(h.artistName);if(k)played[k]=(played[k]||0)+1;});
+  const likedBy={};
+  Object.values(st.likedTracks).forEach(t=>{const k=norm(t.artistName);if(k)likedBy[k]=(likedBy[k]||0)+1;});
+  Object.keys(played).forEach(k=>{engagement[k]={plays:played[k],likes:likedBy[k]||0};});
+  return{styleW,comboW,labelW,engagement};
+}
+// paint() runs on nearly every state change — rebuilding the model each
+// time would be wasteful, but it MUST rebuild the moment its inputs
+// change (that immediacy is the whole point). A cheap signature over the
+// input collection sizes covers both.
+function getTasteModel(){
+  const sig=[Object.keys(st.likedTracks).length,st.discogsCollection.length,st.discogsWantlist.length,st.history.length,st.dasAscoltare.length,st.playlists.reduce((n,p)=>n+p.tracks.length,0)].join(':');
+  if(tasteModelCache?.sig===sig)return tasteModelCache.model;
+  tasteModelCache={sig,model:buildTasteModel()};
+  return tasteModelCache.model;
+}
+function scoreRelatedCandidate(t,nowTrack,model){
+  const norm=x=>(x||'').trim().toLowerCase();
+  const gs=[...new Set((t.genre||'').split(' · ').map(norm).filter(Boolean))];
+  const nowSet=new Set((nowTrack.genre||'').split(' · ').map(norm).filter(Boolean));
+  let sc=0;
+  // 1. Direct style overlap with what's playing — a matched COMBINATION
+  //    (2+ shared tags) beats the sum of its parts.
+  const shared=gs.filter(g=>nowSet.has(g)).length;
+  sc+=shared*10;
+  if(shared>=2)sc+=8;
+  // 2. Learned taste affinity — combos weighted above single styles.
+  gs.forEach(g=>{sc+=(model.styleW[g]||0)*0.6;});
+  for(let i=0;i<gs.length;i++)for(let j=i+1;j<gs.length;j++){
+    sc+=(model.comboW[[gs[i],gs[j]].sort().join('+')]||0)*0.9;
   }
-  const broader=await dReq('/database/search',{style,type:'release',sort:'have',sort_order:'desc',per_page:'40'});
-  return broader.results||[];
+  // 3. Label affinity.
+  sc+=(model.labelW[norm(t.label)]||0)*0.7;
+  // 4. Year proximity — a soft preference now, capped so it can nudge
+  //    but never veto (a perfect style-combo match from another era
+  //    should still surface; similarity isn't bound to release year).
+  if(t.year&&nowTrack.year)sc-=Math.min(Math.abs(t.year-nowTrack.year)*0.3,6);
+  // 5. Plays-vs-likes: heard this artist plenty, never liked anything —
+  //    stop resurfacing them. A liked artist gets a mild boost instead
+  //    (candidates are meant to be NEW artists, but a stray like from a
+  //    previous suggestion round shouldn't count against them).
+  const eng=model.engagement[norm(t.artistName)];
+  if(eng){
+    // Scales with play count: 5 unliked plays is a much stronger "not my
+    // taste" signal than 3.
+    if(eng.plays>=3&&eng.likes===0)sc-=Math.min(eng.plays*4,20);
+    else if(eng.likes>0)sc+=Math.min(eng.likes*2,6);
+  }
+  return sc;
 }
 // Genre+year alone still surfaced artists the user already owns a pile of
 // (e.g. Basic Channel — a dub techno giant, so genre/year match easily,
@@ -1706,6 +1780,10 @@ function buildKnownFromLibrary(){
   st.ownedTracks.forEach(t=>{if(t.artistNorm)artists.add(t.artistNorm);});
   return{artists,labels};
 }
+// Gathers the candidate POOL only — no ranking here. The pool is cached
+// per now-playing track (so switching tracks always re-searches), while
+// ranking happens fresh at render time against the live taste model, so
+// a like landed a second ago already reorders the list.
 async function refreshRelatedTracks(nowTrack,seen,known){
   if(relatedLoading)return;
   relatedLoading=true;
@@ -1714,9 +1792,25 @@ async function refreshRelatedTracks(nowTrack,seen,known){
     const styles=nowTrack.genre?nowTrack.genre.split(' · ').filter(Boolean):[];
     const seedStyle=styles[styles.length-1]||styles[0];
     if(!seedStyle){relatedCache={trackKey,items:[]};return;}
-    const results=await searchByStyleYear(seedStyle,nowTrack.year);
-    const cand=[];
-    for(const rel of results.slice(0,30)){
+    // Three seeds, merged: same style + same year (tight era match when it
+    // exists), same style popularity-sorted with NO year lock (similarity
+    // isn't bound to release year), and — when the playing track carries a
+    // style combination — its broader style too, so both halves of the
+    // combo feed the pool and the ranking's combo scoring has real
+    // cross-style candidates to work with.
+    const seeds=[];
+    if(nowTrack.year)seeds.push({style:seedStyle,year:String(nowTrack.year)});
+    seeds.push({style:seedStyle,sort:'have',sort_order:'desc'});
+    if(styles.length>=2)seeds.push({style:styles[0],sort:'have',sort_order:'desc'});
+    const seenRel=new Set(),rels=[];
+    for(const p of seeds){
+      try{
+        const sd=await dReq('/database/search',{type:'release',per_page:'20',...p});
+        (sd.results||[]).forEach(rel=>{if(!seenRel.has(rel.id)){seenRel.add(rel.id);rels.push(rel);}});
+      }catch{/* one failed seed shouldn't sink the others */}
+    }
+    const pool=[];
+    for(const rel of rels.slice(0,30)){
       try{
         const rd=await dReq('/releases/'+rel.id);
         const releaseArtist=rd.artists?.[0]?{id:rd.artists[0].id,name:stripDiscogsSuffix(rd.artists[0].name)}:null;
@@ -1734,33 +1828,18 @@ async function refreshRelatedTracks(nowTrack,seen,known){
           if(t.labelId&&seen.has('label:'+t.labelId))return;
           if(known.artists.has(normalizeStr(artistName)))return; // already own/want plenty of this artist
           if(t.label&&known.labels.has(normalizeStr(t.label)))return;
-          const tStyles=t.genre?t.genre.split(' · '):[];
-          const overlap=styles.filter(s=>tStyles.includes(s)).length;
-          const yearDiff=(t.year&&nowTrack.year)?Math.abs(t.year-nowTrack.year):10;
-          const sc=overlap*10-yearDiff*0.5;
-          // Only what's actually used downstream (render, doPlay, Like/
-          // queue/Explore in the mini-player) — buildTrackEntries() returns
-          // several fields (duration, bpm, catno, discogsUrl, etc.) that
-          // nothing here reads, and this whole list gets persisted to
-          // localStorage per track played, so keeping it lean matters.
-          cand.push({id:t.id,title:t.title,artistName,year:t.year,label:t.label,labelId:t.labelId,trackArtistId:artistId,genre:t.genre,thumbUrl:t.thumbUrl,videoId:t.videoId,sc});
+          // Only what's actually used downstream (render, scoring, doPlay,
+          // Like/queue/Explore in the mini-player) — buildTrackEntries()
+          // returns several fields (duration, bpm, catno, discogsUrl...)
+          // nothing here reads, and this pool is persisted to localStorage
+          // per track played, so keeping it lean matters.
+          pool.push({id:t.id,title:t.title,artistName,year:t.year,label:t.label,labelId:t.labelId,trackArtistId:artistId,genre:t.genre,thumbUrl:t.thumbUrl,videoId:t.videoId});
         });
       }catch{/* one bad release shouldn't sink the whole batch */}
     }
-    // Cap two tracks per artist — otherwise a single EP with several
-    // equally-well-matched tracks (same style, same year) fills every slot
-    // and the panel stops being a spread of new artists to discover.
-    const artistCounts=new Map(),items=[];
-    for(const t of cand.sort((a,b)=>b.sc-a.sc)){
-      const ak=t.trackArtistId||t.artistName;
-      const n=artistCounts.get(ak)||0;
-      if(n>=2)continue;
-      artistCounts.set(ak,n+1);items.push(t);
-      if(items.length>=14)break;
-    }
-    items.forEach(t=>{discoveredTracks[t.id]=t;});
-    lsSet('related:'+trackKey,items);
-    relatedCache={trackKey,items};
+    pool.forEach(t=>{discoveredTracks[t.id]=t;});
+    lsSet('related:'+trackKey,pool);
+    relatedCache={trackKey,items:pool};
   }catch(e){
     console.warn('WaxTree: related-tracks refresh failed:',e?.message||e);
     // Mark this track as "done" for the session even on failure —
@@ -1794,14 +1873,26 @@ function renderRelatedTracks(){
   // Re-checked at render time too, in case one of these got explored (or
   // synced into the library) since the cache was built.
   const known=buildKnownFromLibrary();
-  const items=(relatedCache?.items||[]).filter(t=>{
+  const pool=(relatedCache?.items||[]).filter(t=>{
     const artistExplored=t.trackArtistId&&st.nodes.some(n=>n.type==='artist'&&n.discogsId===t.trackArtistId);
     const labelExplored=t.labelId&&st.nodes.some(n=>n.type==='label'&&n.discogsId===t.labelId);
     const artistKnown=known.artists.has(normalizeStr(t.artistName));
     const labelKnown=t.label&&known.labels.has(normalizeStr(t.label));
     return !artistExplored&&!labelExplored&&!artistKnown&&!labelKnown;
   });
-  if(!items.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
+  if(!pool.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
+  // Rank against the LIVE taste model, every render — this is where the
+  // "learns as you feed it" behavior lives. Cap two tracks per artist so
+  // one EP can't fill every slot, 14 total.
+  const model=getTasteModel();
+  const artistCounts=new Map(),items=[];
+  for(const t of pool.map(t=>({t,sc:scoreRelatedCandidate(t,nowTrack,model)})).sort((a,b)=>b.sc-a.sc).map(x=>x.t)){
+    const ak=t.trackArtistId||t.artistName;
+    const n=artistCounts.get(ak)||0;
+    if(n>=2)continue;
+    artistCounts.set(ak,n+1);items.push(t);
+    if(items.length>=14)break;
+  }
   items.forEach(t=>{
     const row=d('rp-rel-row',{onClick:()=>doPlay(t.id,t.videoId,t.title,t.artistName)});
     if(t.thumbUrl)row.appendChild(el('img',{cls:'daq-art',src:t.thumbUrl,alt:'',loading:'lazy'}));
