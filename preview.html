@@ -1460,13 +1460,14 @@ function saveSt(){
     if(e.name==='QuotaExceededError'&&purgeExpiredCache())
       try{localStorage.setItem('wt-discogs-wantlist',JSON.stringify(st.discogsWantlist));}catch{}
   }
-  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen});
+  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
   }catch(e){
     if(e.name==='QuotaExceededError'){
       const freed=purgeExpiredCache();
+      enforceCacheBudget(); // TTL purge alone can free nothing if everything's still fresh
       console.warn('WaxTree: localStorage quota hit on core save — purged',freed,'expired cache entries, retrying');
       try{
         localStorage.setItem(SK,corePayload);
@@ -1498,7 +1499,7 @@ async function pushStateToCloud(){
   // it's cheaply re-fetched on selectNode; only the tree structure itself
   // (which artist/label, which branch, pin/tag state) is irreplaceable.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
-  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,avatarDataUrl:getAvatarUrl()};
+  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,avatarDataUrl:getAvatarUrl()};
   try{
     const{error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});
     if(error)throw error;
@@ -1530,6 +1531,7 @@ async function hydrateFromCloud(){
     if(c.activeBranchId)st.activeBranchId=c.activeBranchId;
     if(c.chips)st.chips=c.chips;
     if(c.likes)st.likes=c.likes;
+    if(c.likedTracks)st.likedTracks=c.likedTracks;
     if(c.listens)st.listens=c.listens;
     if(c.dasAscoltare)st.dasAscoltare=c.dasAscoltare;
     if(c.playlists)st.playlists=c.playlists;
@@ -1563,6 +1565,12 @@ const st={
   activeBranchId:saved?.activeBranchId||'b1',
   chips:saved?.chips?.length?saved.chips:['Larry Heard','Trax Records'],
   likes:saved?.likes||{},listens:saved?.listens||{},
+  // A snapshot of each liked track (title/artist/genre/year/label/video),
+  // taken at the moment it's liked — not just the id. st.likes alone can't
+  // tell you what a track WAS if its node hasn't loaded yet (or never
+  // reloads), which is exactly why My Likes used to show only whatever
+  // happened to already be resolved in memory.
+  likedTracks:saved?.likedTracks||{},
   q:'',results:[],loading:false,err:'',
   bioOpen:{},renameId:null,renameVal:'',tagNodeId:null,tagVal:'',
   filterOpen:false,filterTitle:'',filterFormat:'all',filterSort:'default',filterGenres:[],
@@ -1722,7 +1730,12 @@ async function refreshRelatedTracks(nowTrack,seen,known){
           const overlap=styles.filter(s=>tStyles.includes(s)).length;
           const yearDiff=(t.year&&nowTrack.year)?Math.abs(t.year-nowTrack.year):10;
           const sc=overlap*10-yearDiff*0.5;
-          cand.push({...t,artistName,trackArtistId:artistId,sc});
+          // Only what's actually used downstream (render, doPlay, Like/
+          // queue/Explore in the mini-player) — buildTrackEntries() returns
+          // several fields (duration, bpm, catno, discogsUrl, etc.) that
+          // nothing here reads, and this whole list gets persisted to
+          // localStorage per track played, so keeping it lean matters.
+          cand.push({id:t.id,title:t.title,artistName,year:t.year,label:t.label,labelId:t.labelId,trackArtistId:artistId,genre:t.genre,thumbUrl:t.thumbUrl,videoId:t.videoId,sc});
         });
       }catch{/* one bad release shouldn't sink the whole batch */}
     }
@@ -2373,13 +2386,44 @@ function purgeExpiredCache(){
   }
   return freed;
 }
+// purgeExpiredCache() only helps once entries actually age past 24h — a
+// user who explores a lot inside a single day (or right after a
+// TRACK_DATA_VERSION bump forces every open node to re-cache at once) can
+// still sit on several MB of live, unexpired ct2: entries and tip
+// localStorage over quota before anything is old enough to purge. That's
+// the same failure mode already diagnosed above for Supabase's own
+// session-token write (a confirmed real report: spontaneous logout, then
+// stuck in a login loop until the user manually clears site data). Enforce
+// a hard byte budget too, evicting oldest-first, regardless of age.
+const CT2_BUDGET_BYTES=3*1024*1024;
+function enforceCacheBudget(){
+  const entries=[];
+  let total=0;
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(!k||!k.startsWith('ct2:'))continue;
+    const v=localStorage.getItem(k)||'';
+    const size=k.length+v.length;
+    total+=size;
+    let t=0;try{t=JSON.parse(v).t||0;}catch{}
+    entries.push({k,size,t});
+  }
+  if(total<=CT2_BUDGET_BYTES)return;
+  entries.sort((a,b)=>a.t-b.t); // oldest first
+  for(const e of entries){
+    if(total<=CT2_BUDGET_BYTES)break;
+    localStorage.removeItem(e.k);
+    total-=e.size;
+  }
+}
 function lsGet(k){try{const r=localStorage.getItem('ct2:'+k);if(!r)return null;const{d,t}=JSON.parse(r);if(Date.now()-t<86400000)return d;}catch{}return null;}
 function lsSet(k,d){
   try{localStorage.setItem('ct2:'+k,JSON.stringify({d,t:Date.now()}));}
   catch(e){
     if(e.name!=='QuotaExceededError')return;
     const freed=purgeExpiredCache();
-    if(freed)try{localStorage.setItem('ct2:'+k,JSON.stringify({d,t:Date.now()}));}catch{}
+    enforceCacheBudget(); // TTL purge alone can free nothing if everything's still fresh
+    try{localStorage.setItem('ct2:'+k,JSON.stringify({d,t:Date.now()}));}catch{}
   }
 }
 function stripBio(t){return t.replace(/\[a\d*=([^\]]+)\]/g,'$1').replace(/\[l=([^\]]+)\]/g,'$1').replace(/\[url=[^\]]*\]([^[]*)\[\/url\]/g,'$1').replace(/\[[^\]]*\]/g,'').trim();}
@@ -2880,9 +2924,15 @@ function toggleLike(id){
   st.likes[id]=!st.likes[id];
   if(st.likes[id]){
     const found=findTrackAndNode(id);
-    const tr=found?.track;
+    const tr=found?.track||discoveredTracks[id]; // discoveredTracks: liked straight from a Related Tracks pick, never opened as a node
     logEvent('like',{track_id:id,title:tr?.title||null,artist:tr?.trackArtistName||tr?.label||null,genre:tr?.genre||null,year:tr?.year||null,
       node_type:found?.node?.type||null,node_discogs_id:found?.node?.discogsId||null,node_name:found?.node?.name||null});
+    if(tr){
+      const artistName=tr.artistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.trackArtistName||tr.label||'';
+      st.likedTracks[id]={id,title:tr.title,artistName,year:tr.year,label:tr.label,labelId:tr.labelId,trackArtistId:tr.trackArtistId,genre:tr.genre,thumbUrl:tr.thumbUrl,videoId:tr.videoId};
+    }
+  }else{
+    delete st.likedTracks[id];
   }
   rr();
 }
@@ -3933,33 +3983,38 @@ function buildApp(){
       el('h2',{cls:'modal-title'},'♥ My Likes'),
       b('btn-sec',{onClick:()=>{st.likesModal=false;rr();}},'×')
     ));
-    const seen=new Set();
+    // st.likedTracks is the source of truth — a snapshot taken at like-time
+    // (see toggleLike), so it works even if the node that track came from
+    // hasn't loaded yet, or never will again after a fresh login (the tree
+    // itself is saved, but per-node track data is only ever cached locally,
+    // never synced — see saveSt()'s lightNodes comment). Likes from before
+    // this existed have no snapshot yet — resolve those from whatever's in
+    // memory right now and backfill so they're fixed for good next time.
     const likedTracks=[];
-    st.nodes.forEach(node=>{
-      (node.data?.tracks||[]).forEach(t=>{
-        if(st.likes[t.id]&&!seen.has(t.id)){
-          seen.add(t.id);
-          const isLabel=node.type==='label';
-          likedTracks.push({...t,artistName:isLabel?(t.exploreName||node.name):node.name});
-        }
-      });
-    });
-    // A track liked straight from the mini-player can be a Related Tracks
-    // pick that never belonged to any open node — without this it'd be
-    // liked (the heart shows filled) but silently missing from this list.
-    Object.values(discoveredTracks).forEach(t=>{
-      if(st.likes[t.id]&&!seen.has(t.id)){seen.add(t.id);likedTracks.push(t);}
+    Object.keys(st.likes).forEach(id=>{
+      if(!st.likes[id])return;
+      if(st.likedTracks[id]){likedTracks.push(st.likedTracks[id]);return;}
+      const found=findTrackAndNode(id);
+      const tr=found?.track||discoveredTracks[id];
+      if(!tr)return; // not resolvable yet — its node hasn't loaded in this session
+      const artistName=tr.artistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.trackArtistName||tr.label||'';
+      const snap={id,title:tr.title,artistName,year:tr.year,label:tr.label,labelId:tr.labelId,trackArtistId:tr.trackArtistId,genre:tr.genre,thumbUrl:tr.thumbUrl,videoId:tr.videoId};
+      st.likedTracks[id]=snap;
+      likedTracks.push(snap);
     });
     const list=d('daq-list',{});
     if(!likedTracks.length){list.appendChild(d('daq-empty',{},'No liked tracks — use ♡ on tracks to add them'));}
     else{
-      // Grouped by primary genre (the first of up to 4 style tags) instead
-      // of one long flat list — easier to scan once likes pile up.
+      // Grouped by EVERY style tag a track has (up to 4), not just the
+      // first — a "House · Techno · Minimal Techno" like shows up in all
+      // three sections, since it's genuinely all three, not just House.
       const groups=new Map();
       likedTracks.forEach(track=>{
-        const g=(track.genre||'').split(' · ')[0]||'Unknown';
-        if(!groups.has(g))groups.set(g,[]);
-        groups.get(g).push(track);
+        const gs=track.genre?track.genre.split(' · ').filter(Boolean):['Unknown'];
+        gs.forEach(g=>{
+          if(!groups.has(g))groups.set(g,[]);
+          groups.get(g).push(track);
+        });
       });
       const sortedGenres=[...groups.keys()].sort((a,b)=>groups.get(b).length-groups.get(a).length);
       sortedGenres.forEach(g=>{
@@ -3990,7 +4045,7 @@ function buildApp(){
             const pb=b('daq-play has-video',{title:'Play',onClick:()=>{doPlay(track.id,track.videoId,track.title,track.artistName);st.likesModal=false;rr();}});
             pb.textContent='▶';item.appendChild(pb);
           }
-          item.appendChild(b('daq-rm',{title:'Remove like',onClick:()=>{st.likes[track.id]=false;rr();}},'×'));
+          item.appendChild(b('daq-rm',{title:'Remove like',onClick:()=>{st.likes[track.id]=false;delete st.likedTracks[track.id];rr();}},'×'));
           list.appendChild(item);
         });
       });
@@ -4476,8 +4531,10 @@ window.addEventListener('resize',positionYtHost);
 // Runs immediately, before the session check below — if localStorage is
 // already near/at quota, this is what gives Supabase's own session-token
 // write room to succeed instead of silently failing and bouncing straight
-// back to login.html.
+// back to login.html. TTL purge alone isn't enough for unexpired-but-large
+// caches (see enforceCacheBudget's own comment), so both run here.
 purgeExpiredCache();
+enforceCacheBudget();
 
 sb.auth.getSession().then(({data:{session}})=>{
   if(!session){window.location.href='login.html';return;}
