@@ -2683,9 +2683,17 @@ function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
 // instead of always flashing the loading state for a frame first, even
 // when the data was sitting right there in localStorage.
 function getCachedNodeData(type,discogsId){
-  const c=lsGet((type==='label'?'l8:':'a7:')+discogsId);
-  if(!c||c._v!==TRACK_DATA_VERSION)return null;
-  if(type==='artist'&&!c.tracks?.length)return null;
+  const key=(type==='label'?'l8:':'a7:')+discogsId;
+  const c=lsGet(key);
+  // Temporary diagnostic (2026-07-17) — three rounds of fixes for the
+  // reload-after-login report haven't stuck; this pins down which of the
+  // possible causes (never cached, expired, version mismatch, evicted) is
+  // actually happening instead of guessing a fourth time. Remove once
+  // confirmed fixed — see memory/project_waxtree_localstorage_quota.
+  if(!c){console.info('[WaxTree Debug] cache MISS (no entry at all) for',key);return null;}
+  if(c._v!==TRACK_DATA_VERSION){console.info('[WaxTree Debug] cache MISS (version mismatch) for',key,'cached _v=',c._v,'current TRACK_DATA_VERSION=',TRACK_DATA_VERSION);return null;}
+  if(type==='artist'&&!c.tracks?.length){console.info('[WaxTree Debug] cache MISS (no tracks in cached entry) for',key);return null;}
+  console.info('[WaxTree Debug] cache HIT for',key);
   return c;
 }
 async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=false){
@@ -4590,7 +4598,14 @@ purgeExpiredCache();
   // is known before ensureNodeLoaded(st.selectedId) runs further down.
   const selNode=getNode(st.selectedId);
   const selKey=selNode?(selNode.type==='label'?'l8:':'a7:')+selNode.discogsId:null;
+  // Temporary diagnostic (2026-07-17) — see getCachedNodeData()'s comment.
+  let ct2Bytes=0,ct2Count=0;
+  for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('ct2:')){ct2Bytes+=k.length+(localStorage.getItem(k)||'').length;ct2Count++;}}
+  console.info('[WaxTree Debug] boot: selectedId=',st.selectedId,'selNode=',selNode?.name,selNode?.type,selNode?.discogsId,
+    '| selKey=',selKey,'| present in ct2: BEFORE budget enforcement =',selKey?!!localStorage.getItem('ct2:'+selKey):'n/a',
+    '| total ct2: cache =',(ct2Bytes/1024/1024).toFixed(2),'MB across',ct2Count,'entries');
   enforceCacheBudget(selKey);
+  console.info('[WaxTree Debug] boot: present in ct2: AFTER budget enforcement =',selKey?!!localStorage.getItem('ct2:'+selKey):'n/a');
 }
 
 sb.auth.getSession().then(({data:{session}})=>{
