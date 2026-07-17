@@ -411,9 +411,11 @@ input,select{font:inherit;color:inherit}
 /* ── YouTube mini-player ─────── */
 .yt-wrap{width:100%;background:var(--bg-s);border-bottom:1px solid var(--border);overflow:hidden}
 .yt-hdr{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);user-select:none}
-.yt-info{flex:1;min-width:0}
 .yt-title{display:block;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .yt-artist{display:block;font-size:11px;color:var(--text-m);margin-top:1px}
+.yt-np-info{padding:10px 12px 2px}
+.yt-np-info .yt-title{white-space:normal;font-size:14px}
+.yt-np-info .yt-artist{font-size:12px}
 .yt-close,.yt-nav{width:26px;height:26px;border-radius:50%;background:var(--bg-e);color:var(--text-m);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,color .15s}
 .yt-close{font-size:15px}
 .yt-close:hover,.yt-nav:hover:not(:disabled){background:var(--bg-h);color:var(--text)}
@@ -2188,7 +2190,7 @@ function syncYtPlayer(){
   const np=st.nowPlaying;
   const wrap=document.createElement('div');wrap.id='yt-wrap';wrap.className='yt-wrap';
   const hdr=document.createElement('div');hdr.className='yt-hdr';
-  const info=document.createElement('div');info.className='yt-info';
+  const info=document.createElement('div');info.className='yt-np-info';
   const te=document.createElement('span');te.className='yt-title';te.textContent=np.title;
   const ae=document.createElement('span');ae.className='yt-artist';ae.textContent=np.artistName;
   info.appendChild(te);info.appendChild(ae);
@@ -2257,7 +2259,7 @@ function syncYtPlayer(){
       setTimeout(()=>{const h=()=>{st.exploreDropKey=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
     }
   }
-  hdr.appendChild(info);hdr.appendChild(likeBtn);hdr.appendChild(plWrap);hdr.appendChild(expWrap);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
+  hdr.appendChild(likeBtn);hdr.appendChild(plWrap);hdr.appendChild(expWrap);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
   const q=encodeURIComponent(np.artistName+' '+np.title);
   if(np.videoId&&!noEmbedIds.has(np.videoId)&&!invalidYtIds.has(np.videoId)){
     const videoWrap=document.createElement('div');videoWrap.className='yt-video-wrap';
@@ -2297,6 +2299,10 @@ function syncYtPlayer(){
     fb.innerHTML=`<p>${msg}</p><a href="${url}" target="_blank" rel="noreferrer">${linkTxt}</a>`;
     wrap.appendChild(fb);ytHost.appendChild(wrap);
   }
+  // Below the video/seek bar, not squeezed into the header next to the
+  // action buttons — that's what was cutting the title off (see screenshot:
+  // Like/queue/Explore/nav/close alone already fill a 260px-wide header).
+  wrap.appendChild(info);
   positionYtHost();
 }
 
