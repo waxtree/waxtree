@@ -413,7 +413,7 @@ input,select{font:inherit;color:inherit}
 .yt-hdr{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);user-select:none}
 .yt-title{display:block;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .yt-artist{display:block;font-size:11px;color:var(--text-m);margin-top:1px}
-.yt-np-info{padding:10px 12px 2px}
+.yt-np-info{padding:10px 12px;border-bottom:1px solid var(--border)}
 .yt-np-info .yt-title{white-space:normal;font-size:14px}
 .yt-np-info .yt-artist{font-size:12px}
 .yt-close,.yt-nav{width:26px;height:26px;border-radius:50%;background:var(--bg-e);color:var(--text-m);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s,color .15s}
@@ -2259,7 +2259,8 @@ function syncYtPlayer(){
       setTimeout(()=>{const h=()=>{st.exploreDropKey=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
     }
   }
-  hdr.appendChild(likeBtn);hdr.appendChild(plWrap);hdr.appendChild(expWrap);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
+  hdr.appendChild(likeBtn);hdr.appendChild(plWrap);hdr.appendChild(expWrap);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);
+  wrap.appendChild(info); // title/artist above the video now, buttons row moves below it
   const q=encodeURIComponent(np.artistName+' '+np.title);
   if(np.videoId&&!noEmbedIds.has(np.videoId)&&!invalidYtIds.has(np.videoId)){
     const videoWrap=document.createElement('div');videoWrap.className='yt-video-wrap';
@@ -2299,10 +2300,7 @@ function syncYtPlayer(){
     fb.innerHTML=`<p>${msg}</p><a href="${url}" target="_blank" rel="noreferrer">${linkTxt}</a>`;
     wrap.appendChild(fb);ytHost.appendChild(wrap);
   }
-  // Below the video/seek bar, not squeezed into the header next to the
-  // action buttons — that's what was cutting the title off (see screenshot:
-  // Like/queue/Explore/nav/close alone already fill a 260px-wide header).
-  wrap.appendChild(info);
+  wrap.appendChild(hdr); // action buttons row below the video/seek bar now
   positionYtHost();
 }
 
