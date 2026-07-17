@@ -1785,6 +1785,16 @@ function buildKnownFromLibrary(){
   st.ownedTracks.forEach(t=>{if(t.artistNorm)artists.add(t.artistNorm);});
   return{artists,labels};
 }
+// Bump whenever the search/ranking logic changes meaningfully — the
+// related: cache has no other invalidation (it's not gated by
+// TRACK_DATA_VERSION, which is about track *data shape*, not this
+// algorithm). Without this, a fix like "stop sorting by have" doesn't
+// actually take effect for any track played before the fix shipped: the
+// old, stale pool (Madonna and friends) just keeps getting served back
+// out of localStorage. Confirmed this was exactly what happened after the
+// crossover-mainstream fix — replaying a track cached before it still
+// showed the old picks.
+const RELATED_CACHE_V=2;
 // Gathers the candidate POOL only — no ranking here. The pool is cached
 // per now-playing track (so switching tracks always re-searches), while
 // ranking happens fresh at render time against the live taste model, so
@@ -1850,7 +1860,7 @@ async function refreshRelatedTracks(nowTrack,seen,known){
       }catch{/* one bad release shouldn't sink the whole batch */}
     }
     pool.forEach(t=>{discoveredTracks[t.id]=t;});
-    lsSet('related:'+trackKey,pool);
+    lsSet('related:v'+RELATED_CACHE_V+':'+trackKey,pool);
     relatedCache={trackKey,items:pool};
   }catch(e){
     console.warn('WaxTree: related-tracks refresh failed:',e?.message||e);
@@ -1871,7 +1881,7 @@ function renderRelatedTracks(){
   const nowTrack=findTrack(np.trackId);
   if(!nowTrack?.genre){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
   if(relatedCache?.trackKey!==np.trackId){
-    const cached=lsGet('related:'+np.trackId);
+    const cached=lsGet('related:v'+RELATED_CACHE_V+':'+np.trackId);
     if(cached){cached.forEach(t=>{discoveredTracks[t.id]=t;});relatedCache={trackKey:np.trackId,items:cached};}
     else{
       if(!relatedLoading){
@@ -2326,6 +2336,33 @@ function makeDraggable(wrap,handle){
 // st.playlistDropId, st.exploreDropKey) updated correctly, but nothing on
 // screen ever reflected it, since the header markup was only ever built
 // once, on the very first render for that track.
+// Wantlist/Explore dropdowns render as a fixed-position portal on
+// document.body instead of a normal position:absolute child of the
+// button — the header that triggers them lives inside #right-panel
+// (position:fixed, flex-column, with Related Tracks as the next sibling
+// down). Making .yt-wrap's overflow visible fixed the outright clipping,
+// but the dropdown was still landing UNDER Related Tracks instead of
+// over it — ordinary absolute positioning inside a fixed-position flex
+// column didn't reliably win the stacking order against that sibling.
+// document.body positioning, computed from the trigger's real on-screen
+// rect, sidesteps all of that: nothing about #right-panel's layout can
+// affect where a document.body-level fixed element paints.
+function attachFloatingDropdown(triggerBtn,onClose,buildFn){
+  document.getElementById('wt-floating-drop')?.remove();
+  setTimeout(()=>{
+    if(!document.body.contains(triggerBtn))return; // state changed again before this ran
+    const rect=triggerBtn.getBoundingClientRect();
+    const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
+    drop.id='wt-floating-drop';
+    drop.style.position='fixed';
+    drop.style.top=(rect.bottom+4)+'px';
+    drop.style.right=(window.innerWidth-rect.right)+'px';
+    buildFn(drop);
+    document.body.appendChild(drop);
+    const h=e=>{onClose();drop.remove();document.removeEventListener('click',h);};
+    document.addEventListener('click',h);
+  },0);
+}
 function buildYtHdr(np){
   const hdr=document.createElement('div');hdr.className='yt-hdr';
   const tracks=getPlaylistTracks();
@@ -2357,47 +2394,47 @@ function buildYtHdr(np){
   const npDropKey='np-'+np.trackId;
   const isDropOpen=st.playlistDropId===npDropKey;
   const plWrap=d('pl-wrap',{});
-  plWrap.appendChild(b('t-daq'+(inDaq?' queued':''),{title:'Add to wantlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:npDropKey;rr();}},'🏷️'));
+  const plBtn=b('t-daq'+(inDaq?' queued':''),{title:'Add to wantlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:npDropKey;rr();}},'🏷️');
+  plWrap.appendChild(plBtn);
   if(isDropOpen){
-    const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
     const logQ=()=>logEvent('queue',{track_id:np.trackId,title:np.title,artist:np.artistName,genre:fullTrack?.genre||null,year:fullTrack?.year||null});
-    drop.appendChild(b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
-      if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==np.trackId);
-      else{st.dasAscoltare=[...st.dasAscoltare,trackForQueue];logQ();}
-      st.playlistDropId=null;rr();
-    }},inDaq?'✓ Listen Later':'Listen Later'));
-    st.playlists.forEach(pl=>{
-      const inPl=pl.tracks.some(t=>t.id===np.trackId);
-      drop.appendChild(b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
-        if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==np.trackId);
-        else{pl.tracks=[...pl.tracks,trackForQueue];logQ();}
+    attachFloatingDropdown(plBtn,()=>{st.playlistDropId=null;rr();},drop=>{
+      drop.appendChild(b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
+        if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==np.trackId);
+        else{st.dasAscoltare=[...st.dasAscoltare,trackForQueue];logQ();}
         st.playlistDropId=null;rr();
-      }},inPl?'✓ '+pl.name:pl.name));
+      }},inDaq?'✓ Listen Later':'Listen Later'));
+      st.playlists.forEach(pl=>{
+        const inPl=pl.tracks.some(t=>t.id===np.trackId);
+        drop.appendChild(b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
+          if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==np.trackId);
+          else{pl.tracks=[...pl.tracks,trackForQueue];logQ();}
+          st.playlistDropId=null;rr();
+        }},inPl?'✓ '+pl.name:pl.name));
+      });
+      drop.appendChild(d('pl-drop-sep',{}));
+      drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
+        const name=prompt('Wantlist name:','');
+        if(!name?.trim())return;
+        st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackForQueue]}];
+        logQ();
+        st.playlistDropId=null;rr();
+      }},'+ New wantlist'));
     });
-    drop.appendChild(d('pl-drop-sep',{}));
-    drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
-      const name=prompt('Wantlist name:','');
-      if(!name?.trim())return;
-      st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackForQueue]}];
-      logQ();
-      st.playlistDropId=null;rr();
-    }},'+ New wantlist'));
-    plWrap.appendChild(drop);
-    setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
   }
   const expWrap=d('explore-wrap',{});
   if(exploreArtist||exploreLabel){
     const exploreKey='np-'+np.trackId;
     const exploreOpen=st.exploreDropKey===exploreKey;
-    expWrap.appendChild(b('esplora-btn explore-toggle',{
+    const expBtn=b('esplora-btn explore-toggle',{
       onClick:e=>{e.stopPropagation();st.exploreDropKey=exploreOpen?null:exploreKey;rr();}
-    },exploreOpen?'Explore ▴':'Explore ▾'));
+    },exploreOpen?'Explore ▴':'Explore ▾');
+    expWrap.appendChild(expBtn);
     if(exploreOpen){
-      const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
-      if(exploreArtist)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('artist',exploreArtist.id,exploreArtist.name,null,st.activeBranchId);}},'Explore artist'));
-      if(exploreLabel)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('label',exploreLabel.id,exploreLabel.name,null,st.activeBranchId);}},'Explore label'));
-      expWrap.appendChild(drop);
-      setTimeout(()=>{const h=()=>{st.exploreDropKey=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
+      attachFloatingDropdown(expBtn,()=>{st.exploreDropKey=null;rr();},drop=>{
+        if(exploreArtist)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('artist',exploreArtist.id,exploreArtist.name,null,st.activeBranchId);}},'Explore artist'));
+        if(exploreLabel)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('label',exploreLabel.id,exploreLabel.name,null,st.activeBranchId);}},'Explore label'));
+      });
     }
   }
   hdr.appendChild(likeBtn);hdr.appendChild(plWrap);hdr.appendChild(expWrap);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);
