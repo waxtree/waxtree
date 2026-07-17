@@ -418,7 +418,11 @@ input,select{font:inherit;color:inherit}
 .btn-pri:hover{opacity:.88}
 
 /* ── YouTube mini-player ─────── */
-.yt-wrap{width:100%;background:var(--bg-s);border-bottom:1px solid var(--border);overflow:hidden}
+/* Not hidden: the Wantlist/Explore dropdowns in .yt-hdr are position:absolute
+   and extend below their trigger button — an overflow:hidden ancestor here
+   clips them to invisible. The video itself doesn't need this: .yt-video-wrap
+   already clips its own aspect-ratio box independently. */
+.yt-wrap{width:100%;background:var(--bg-s);border-bottom:1px solid var(--border);overflow:visible}
 .yt-hdr{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);user-select:none}
 .yt-title{display:block;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .yt-artist{display:block;font-size:11px;color:var(--text-m);margin-top:1px}
@@ -2337,9 +2341,16 @@ function buildYtHdr(np){
   const likeBtn=b('t-like'+(liked?' liked':''),{title:'Like',onClick:()=>toggleLike(np.trackId)},liked?'♥':'♡');
   const trackForQueue={id:np.trackId,title:np.title,artistName:np.artistName,videoId:np.videoId,year:fullTrack?.year,label:fullTrack?.label,genre:fullTrack?.genre,thumbUrl:fullTrack?.thumbUrl};
   const inDaq=st.dasAscoltare.some(q=>q.id===np.trackId);
-  const isDropOpen=st.playlistDropId===np.trackId;
+  // Prefixed, not the raw trackId — releaseCard's own wantlist button
+  // checks st.playlistDropId===track.id, and the track playing right now
+  // is very often ALSO visible as a row in whatever node is open. Sharing
+  // the raw id meant opening the mini-player's dropdown could simultaneously
+  // "open" that other row's dropdown too, wherever it happened to render —
+  // which is what made this look like it opened in the wrong place.
+  const npDropKey='np-'+np.trackId;
+  const isDropOpen=st.playlistDropId===npDropKey;
   const plWrap=d('pl-wrap',{});
-  plWrap.appendChild(b('t-daq'+(inDaq?' queued':''),{title:'Add to wantlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:np.trackId;rr();}},'🏷️'));
+  plWrap.appendChild(b('t-daq'+(inDaq?' queued':''),{title:'Add to wantlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:npDropKey;rr();}},'🏷️'));
   if(isDropOpen){
     const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
     const logQ=()=>logEvent('queue',{track_id:np.trackId,title:np.title,artist:np.artistName,genre:fullTrack?.genre||null,year:fullTrack?.year||null});
