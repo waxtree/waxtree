@@ -2381,6 +2381,20 @@ function extractRemixCandidate(title,hasSibling){
 // the dominant cause of localStorage quota exhaustion (which in turn broke
 // Supabase's own session-token persistence, causing spontaneous sign-outs
 // and a login that stayed broken even after clearing site data once).
+// Root cause found (2026-07-17), via real console diagnostics: the
+// reload-after-login report chased across three prior "fix" rounds
+// (budget size, protectKey, retryNode's cache-hit flash) turned out to be
+// none of those — the actual boot-time log showed "0.00 MB across 0
+// entries" in ct2:, i.e. nothing left to evict or hit in the first place.
+// The real cause is this TTL: it was 24h, and this conversation (and the
+// user's own testing) routinely spans more than a day, so anything
+// explored "yesterday" is legitimately expired by the time of a same-week
+// re-test — purgeExpiredCache() was doing exactly its job. Discogs
+// metadata for an established artist/label doesn't meaningfully change on
+// an hourly or even daily basis, so 24h was far too aggressive for what
+// this cache is actually for. Bumped to 30 days; TRACK_DATA_VERSION still
+// handles the "shape changed" case independent of age.
+const CT2_TTL_MS=30*24*60*60*1000;
 function purgeExpiredCache(){
   const now=Date.now();
   let freed=0;
@@ -2389,7 +2403,7 @@ function purgeExpiredCache(){
     if(!k||!k.startsWith('ct2:'))continue;
     try{
       const{t}=JSON.parse(localStorage.getItem(k));
-      if(now-t>=86400000){localStorage.removeItem(k);freed++;}
+      if(now-t>=CT2_TTL_MS){localStorage.removeItem(k);freed++;}
     }catch{localStorage.removeItem(k);freed++;} // corrupted entry — drop it too
   }
   return freed;
@@ -2436,7 +2450,7 @@ function enforceCacheBudget(protectKey){
     total-=e.size;
   }
 }
-function lsGet(k){try{const r=localStorage.getItem('ct2:'+k);if(!r)return null;const{d,t}=JSON.parse(r);if(Date.now()-t<86400000)return d;}catch{}return null;}
+function lsGet(k){try{const r=localStorage.getItem('ct2:'+k);if(!r)return null;const{d,t}=JSON.parse(r);if(Date.now()-t<CT2_TTL_MS)return d;}catch{}return null;}
 function lsSet(k,d){
   try{localStorage.setItem('ct2:'+k,JSON.stringify({d,t:Date.now()}));}
   catch(e){
