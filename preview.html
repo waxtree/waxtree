@@ -2679,8 +2679,17 @@ function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
   })();
 }
 
+// Shared with retryNode() below so it can apply a cache hit synchronously
+// instead of always flashing the loading state for a frame first, even
+// when the data was sitting right there in localStorage.
+function getCachedNodeData(type,discogsId){
+  const c=lsGet((type==='label'?'l8:':'a7:')+discogsId);
+  if(!c||c._v!==TRACK_DATA_VERSION)return null;
+  if(type==='artist'&&!c.tracks?.length)return null;
+  return c;
+}
 async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=false){
-  const c=lsGet('a7:'+discogsId);if(c&&c.tracks?.length&&c._v===TRACK_DATA_VERSION)return c;
+  const c=getCachedNodeData('artist',discogsId);if(c)return c;
   // Newest-first: fetchReleaseBatches below stops once it hits the 200-track
   // cap, so for a discography bigger than that, whichever end we start from
   // is the only end that ever gets fetched. Oldest-first meant a prolific
@@ -2767,7 +2776,7 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
 }
 
 async function fetchLabelData(discogsId,isCancelled=()=>false){
-  const c=lsGet('l8:'+discogsId);if(c&&c._v===TRACK_DATA_VERSION)return c;
+  const c=getCachedNodeData('label',discogsId);if(c)return c;
   // Newest-first — see fetchArtistData()'s comment above the same change.
   // A label with a big back catalog was showing releases up to ~2020 and
   // no newer, digital-only ones included, purely because the 200-track cap
@@ -2884,7 +2893,21 @@ function addNode(type,discogsId,name,parentId,branchId){
 }
 function retryNode(nodeId){
   const node=getNode(nodeId);if(!node)return;
-  node.error=null;node.loading=true;rr();
+  node.error=null;
+  // A cache hit applies instantly, no loading flash at all — previously
+  // this always set loading=true first and let fetchArtistData/
+  // fetchLabelData's own cache check resolve on the next microtask, which
+  // still painted a "Loading…" frame even when the data was sitting right
+  // there in localStorage. That one-frame flash was real, and repeatedly
+  // reported as "everything reloads again" after every sign-in.
+  const cached=getCachedNodeData(node.type,node.discogsId);
+  if(cached){
+    startNodeLoad(nodeId); // still bump the generation, cancels any stale in-flight load for this node
+    node.data=cached;node.loaded=true;node.loading=false;rr();
+    fetchBandcamp(nodeId,cached?.name||node.name);
+    return;
+  }
+  node.loading=true;rr();
   const cancelled=startNodeLoad(nodeId);
   const fn=node.type==='label'?fetchLabelData:fetchArtistData;
   fn(node.discogsId,cancelled).then(d=>{
@@ -4004,19 +4027,33 @@ function buildApp(){
     // this existed have no snapshot yet — resolve those from whatever's in
     // memory right now and backfill so they're fixed for good next time.
     const likedTracks=[];
+    let stillResolving=0;
     Object.keys(st.likes).forEach(id=>{
       if(!st.likes[id])return;
       if(st.likedTracks[id]){likedTracks.push(st.likedTracks[id]);return;}
       const found=findTrackAndNode(id);
       const tr=found?.track||discoveredTracks[id];
-      if(!tr)return; // not resolvable yet — its node hasn't loaded in this session
+      if(!tr){stillResolving++;return;} // not resolvable yet — its node hasn't loaded in this session
       const artistName=tr.artistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.trackArtistName||tr.label||'';
       const snap={id,title:tr.title,artistName,year:tr.year,label:tr.label,labelId:tr.labelId,trackArtistId:tr.trackArtistId,genre:tr.genre,thumbUrl:tr.thumbUrl,videoId:tr.videoId};
       st.likedTracks[id]=snap;
       likedTracks.push(snap);
     });
+    // Passively waiting for the user to click through to each node one by
+    // one could mean some pre-existing likes (from before st.likedTracks
+    // existed) never get backfilled at all, if their node never happens to
+    // get reopened. Actively load whatever's still unloaded instead — each
+    // one that resolves fills in more likes here and stops on its own once
+    // every like has a permanent snapshot (dReq()'s own rate limiter keeps
+    // this safe even if that's a lot of nodes at once).
+    if(stillResolving>0){
+      st.nodes.forEach(n=>{
+        if((n.type==='artist'||n.type==='label')&&!n.loaded&&!n.loading&&!n.error)retryNode(n.id);
+      });
+      modal.appendChild(s('modal-sub',`Still finding ${stillResolving} more liked track${stillResolving===1?'':'s'}…`));
+    }
     const list=d('daq-list',{});
-    if(!likedTracks.length){list.appendChild(d('daq-empty',{},'No liked tracks — use ♡ on tracks to add them'));}
+    if(!likedTracks.length&&!stillResolving){list.appendChild(d('daq-empty',{},'No liked tracks — use ♡ on tracks to add them'));}
     else{
       // Grouped by EVERY style tag a track has (up to 4), not just the
       // first — a "House · Techno · Minimal Techno" like shows up in all
