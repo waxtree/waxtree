@@ -305,7 +305,7 @@ input,select{font:inherit;color:inherit}
 .daq-rm:hover{color:#5EC47B}
 /* ── Explore dropdown (label/artist/remix-artist merged) ─── */
 .explore-wrap{position:relative;flex-shrink:0}
-/* ── Playlist dropdown ─────── */
+/* ── Wantlist dropdown ─────── */
 .pl-wrap{position:relative;flex-shrink:0}
 .pl-drop{position:absolute;top:calc(100% + 4px);right:0;background:var(--bg-s);border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.28);z-index:300;min-width:176px;overflow:hidden}
 .pl-drop-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--text);cursor:pointer;transition:background .1s;white-space:nowrap;border:none;background:none;width:100%;text-align:left;font-family:inherit}
@@ -323,7 +323,7 @@ input,select{font:inherit;color:inherit}
 .hero-name{display:block;font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hero-count{display:block;font-size:11.5px;color:var(--text-m);margin-top:1px}
 .hero-actions{display:flex;gap:6px;flex-shrink:0}
-/* ── Playlist modal ─────── */
+/* ── Wantlist modal ─────── */
 .pl-modal{max-width:520px}
 .pl-section-hd{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding:12px 0 6px;border-bottom:1px solid var(--border);margin-bottom:4px}
 .genre-section-hd{display:flex;align-items:center;justify-content:space-between;width:100%;padding:9px 12px;margin:10px 0 4px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg-e);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;transition:border-color .15s}
@@ -2229,7 +2229,7 @@ function syncYtPlayer(){
   const inDaq=st.dasAscoltare.some(q=>q.id===np.trackId);
   const isDropOpen=st.playlistDropId===np.trackId;
   const plWrap=d('pl-wrap',{});
-  plWrap.appendChild(b('t-daq'+(inDaq?' queued':''),{title:'Add to playlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:np.trackId;rr();}},'🏷️'));
+  plWrap.appendChild(b('t-daq'+(inDaq?' queued':''),{title:'Add to wantlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:np.trackId;rr();}},'🏷️'));
   if(isDropOpen){
     const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
     const logQ=()=>logEvent('queue',{track_id:np.trackId,title:np.title,artist:np.artistName,genre:fullTrack?.genre||null,year:fullTrack?.year||null});
@@ -2248,12 +2248,12 @@ function syncYtPlayer(){
     });
     drop.appendChild(d('pl-drop-sep',{}));
     drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
-      const name=prompt('Playlist name:','');
+      const name=prompt('Wantlist name:','');
       if(!name?.trim())return;
       st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackForQueue]}];
       logQ();
       st.playlistDropId=null;rr();
-    }},'+ New playlist'));
+    }},'+ New wantlist'));
     plWrap.appendChild(drop);
     setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
   }
@@ -3289,7 +3289,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     const trackWithArtist={...track,artistName:displayArtist};
     const plWrap=d('pl-wrap',{});
     const plBtn=b('t-daq'+(inDaq?' queued':''),{
-      title:'Add to playlist',
+      title:'Add to wantlist',
       onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:track.id;rr();}
     },'🏷️');
     plWrap.appendChild(plBtn);
@@ -3314,13 +3314,13 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
       });
       drop.appendChild(d('pl-drop-sep',{}));
       drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
-        const name=prompt('Playlist name:','');
+        const name=prompt('Wantlist name:','');
         if(!name?.trim())return;
         st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackWithArtist]}];
         logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null,
           node_type:relNode?.type||null,node_discogs_id:relNode?.discogsId||null,node_name:relNode?.name||null});
         st.playlistDropId=null;rr();
-      }},'+ New playlist'));
+      }},'+ New wantlist'));
       plWrap.appendChild(drop);
       setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
     }
@@ -3784,7 +3784,7 @@ function buildApp(){
   const activeBranch=getBranch(st.activeBranchId);
   root.appendChild(d('hdr',{},
     el('span',{cls:'logo'},el('img',{src:'./logo.svg',height:'40',alt:'',cls:'logo-img'}),el('span',{cls:'logo-brand'},el('em',{},'Wax'),'Tree'),el('span',{cls:'logo-sub'},'Beta v.1')),s('sp'),
-    (()=>{const cnt=st.dasAscoltare.length+st.playlists.reduce((s,p)=>s+p.tracks.length,0);const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Playlists',onClick:()=>{st.playlistsModal=true;rr();}},'🏷️ Playlists');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
+    (()=>{const cnt=st.dasAscoltare.length+st.playlists.reduce((s,p)=>s+p.tracks.length,0);const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Wantlists',onClick:()=>{st.playlistsModal=true;rr();}},'🏷️ Wantlists');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
     (()=>{
       if(!wtSession)return null;
       const wrap=d('profile-wrap',{});
@@ -3904,10 +3904,11 @@ function buildApp(){
     const close=()=>{st.playlistsModal=false;rr();};
     const overlay=d('overlay',{onClick:close});
     const modal=d('modal pl-modal',{onClick:e=>e.stopPropagation()});
-    modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'12px'}},
-      el('h2',{cls:'modal-title'},'🏷️ Playlists'),
+    modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'0'}},
+      el('h2',{cls:'modal-title'},'🏷️ Wantlists'),
       b('btn-sec',{onClick:close},'×')
     ));
+    modal.appendChild(s('modal-sub','Create as many wantlists as you like — split by genre, by a gig you\'re digging for, whatever makes sense to you. Rename or delete them anytime.'));
     const body=d('',{style:{overflowY:'auto',maxHeight:'68vh'}});
 
     // ── Listen Later
@@ -3938,13 +3939,13 @@ function buildApp(){
     });
     body.appendChild(llList);
 
-    // ── Custom playlists header + create
+    // ── Custom wantlists header + create
     const plHd=d('pl-section-hd',{});
-    plHd.appendChild(document.createTextNode('My Playlists'));
-    plHd.appendChild(s('pl-section-cnt',st.playlists.length+(st.playlists.length===1?' playlist':' playlists')));
+    plHd.appendChild(document.createTextNode('My Wantlists'));
+    plHd.appendChild(s('pl-section-cnt',st.playlists.length+(st.playlists.length===1?' wantlist':' wantlists')));
     body.appendChild(plHd);
     const newRow=d('pl-new-row',{});
-    const newInput=el('input',{type:'text',cls:'pl-new-input',placeholder:'New playlist name…'});
+    const newInput=el('input',{type:'text',cls:'pl-new-input',placeholder:'New wantlist name…'});
     newRow.appendChild(newInput);
     newRow.appendChild(b('btn-pri',{onClick:()=>{
       const name=newInput.value.trim();if(!name)return;
@@ -3952,7 +3953,7 @@ function buildApp(){
     }},'Create'));
     body.appendChild(newRow);
 
-    // ── Each playlist
+    // ── Each wantlist
     st.playlists.forEach(pl=>{
       const sec=d('',{style:{marginBottom:'14px'}});
       const phd=d('pl-section-hd',{});
