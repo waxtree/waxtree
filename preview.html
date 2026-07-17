@@ -448,11 +448,8 @@ input,select{font:inherit;color:inherit}
 #rp-np-empty{padding:18px 12px;font-size:12px;color:var(--text-f);text-align:center;line-height:1.5;display:none}
 .rp-corr-hd{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px;display:block}
 .rp-coming-soon{display:block;text-align:center;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-f);opacity:.45;margin-top:24px}
-.rp-rel-row{display:flex;flex-direction:column;gap:5px;padding:10px 6px;border-radius:8px;cursor:pointer;transition:background .1s;border-bottom:1px solid var(--border)}
-.rp-rel-row:last-child{border-bottom:none}
+.rp-rel-row{display:flex;align-items:center;gap:10px;padding:7px 4px;border-radius:8px;cursor:pointer;transition:background .1s}
 .rp-rel-row:hover{background:var(--bg-h)}
-.rp-rel-top{display:flex;align-items:center;gap:8px}
-.rp-rel-row .explore-wrap{align-self:flex-end}
 
 /* ── Plant grow loader ─────── */
 .plant-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:64px 20px 48px;gap:20px}
@@ -1784,31 +1781,12 @@ function renderRelatedTracks(){
   if(!items.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
   items.forEach(t=>{
     const row=d('rp-rel-row',{onClick:()=>doPlay(t.id,t.videoId,t.title,t.artistName)});
-    const top=d('rp-rel-top',{});
-    if(t.thumbUrl)top.appendChild(el('img',{cls:'daq-art',src:t.thumbUrl,alt:'',loading:'lazy'}));
-    else top.appendChild(d('daq-art-ph',{},'♫'));
+    if(t.thumbUrl)row.appendChild(el('img',{cls:'daq-art',src:t.thumbUrl,alt:'',loading:'lazy'}));
+    else row.appendChild(d('daq-art-ph',{},'♫'));
     const info=d('daq-info',{});
     info.appendChild(s('daq-title',t.title));
     info.appendChild(s('daq-meta',[t.artistName,t.year].filter(Boolean).join(' · ')));
-    top.appendChild(info);
-    row.appendChild(top);
-    // Same explore-dropdown pattern used for Various Artists/remix credits
-    // elsewhere (st.exploreDropKey) — lets a suggestion be grown into a
-    // real tree node without first having to play it.
-    const dropKey='rel-'+t.id;
-    const exploreOpen=st.exploreDropKey===dropKey;
-    const wrap=d('explore-wrap',{});
-    wrap.appendChild(b('esplora-btn explore-toggle',{
-      onClick:e=>{e.stopPropagation();st.exploreDropKey=exploreOpen?null:dropKey;rr();}
-    },exploreOpen?'Explore ▴':'Explore ▾'));
-    if(exploreOpen){
-      const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
-      if(t.trackArtistId)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('artist',t.trackArtistId,t.artistName,null,st.activeBranchId);}},'Explore artist'));
-      if(t.labelId)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('label',t.labelId,t.label,null,st.activeBranchId);}},'Explore label'));
-      wrap.appendChild(drop);
-      setTimeout(()=>{const h=()=>{st.exploreDropKey=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
-    }
-    row.appendChild(wrap);
+    row.appendChild(info);
     host.appendChild(row);
   });
 }
@@ -2219,10 +2197,17 @@ function syncYtPlayer(){
   const prevBtn=document.createElement('button');prevBtn.className='yt-nav';prevBtn.title='Previous track';prevBtn.textContent='⏮';prevBtn.disabled=curIdx<=0;prevBtn.addEventListener('click',()=>playAdjacentTrack(-1));
   const nextBtn=document.createElement('button');nextBtn.className='yt-nav';nextBtn.title='Next track';nextBtn.textContent='⏭';nextBtn.disabled=curIdx<0||curIdx>=tracks.length-1;nextBtn.addEventListener('click',()=>playAdjacentTrack(1));
   const cb=document.createElement('button');cb.className='yt-close';cb.textContent='×';cb.addEventListener('click',stopPlay);
-  // Like/queue for whatever's actually playing, not just for suggestions —
-  // findTrack() resolves both tree tracks and Related Tracks picks (see
-  // discoveredTracks) so genre/year/label are available here too.
+  // Like/queue/explore for whatever's actually playing, not just for
+  // suggestions — findTrack() resolves both tree tracks and Related Tracks
+  // picks (see discoveredTracks) so genre/year/label are available here too.
   const fullTrack=findTrack(np.trackId);
+  // Explore prefers the node the track was actually opened from (matches
+  // what selecting that node from the sidebar would show) and only falls
+  // back to the track's own artist/label id — the only thing available at
+  // all for a Related Tracks pick, which never belonged to an open node.
+  const foundNode=findTrackAndNode(np.trackId)?.node;
+  const exploreArtist=foundNode?.type==='artist'?{id:foundNode.discogsId,name:foundNode.name}:(fullTrack?.trackArtistId?{id:fullTrack.trackArtistId,name:np.artistName}:null);
+  const exploreLabel=foundNode?.type==='label'?{id:foundNode.discogsId,name:foundNode.name}:(fullTrack?.labelId?{id:fullTrack.labelId,name:fullTrack.label}:null);
   const liked=!!st.likes[np.trackId];
   const likeBtn=b('t-like'+(liked?' liked':''),{title:'Like',onClick:()=>toggleLike(np.trackId)},liked?'♥':'♡');
   const trackForQueue={id:np.trackId,title:np.title,artistName:np.artistName,videoId:np.videoId,year:fullTrack?.year,label:fullTrack?.label,genre:fullTrack?.genre,thumbUrl:fullTrack?.thumbUrl};
@@ -2257,7 +2242,22 @@ function syncYtPlayer(){
     plWrap.appendChild(drop);
     setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
   }
-  hdr.appendChild(info);hdr.appendChild(likeBtn);hdr.appendChild(plWrap);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
+  const expWrap=d('explore-wrap',{});
+  if(exploreArtist||exploreLabel){
+    const exploreKey='np-'+np.trackId;
+    const exploreOpen=st.exploreDropKey===exploreKey;
+    expWrap.appendChild(b('esplora-btn explore-toggle',{
+      onClick:e=>{e.stopPropagation();st.exploreDropKey=exploreOpen?null:exploreKey;rr();}
+    },exploreOpen?'Explore ▴':'Explore ▾'));
+    if(exploreOpen){
+      const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
+      if(exploreArtist)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('artist',exploreArtist.id,exploreArtist.name,null,st.activeBranchId);}},'Explore artist'));
+      if(exploreLabel)drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;addNode('label',exploreLabel.id,exploreLabel.name,null,st.activeBranchId);}},'Explore label'));
+      expWrap.appendChild(drop);
+      setTimeout(()=>{const h=()=>{st.exploreDropKey=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
+    }
+  }
+  hdr.appendChild(info);hdr.appendChild(likeBtn);hdr.appendChild(plWrap);hdr.appendChild(expWrap);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);wrap.appendChild(hdr);
   const q=encodeURIComponent(np.artistName+' '+np.title);
   if(np.videoId&&!noEmbedIds.has(np.videoId)&&!invalidYtIds.has(np.videoId)){
     const videoWrap=document.createElement('div');videoWrap.className='yt-video-wrap';
