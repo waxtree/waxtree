@@ -60,6 +60,14 @@ input,select{font:inherit;color:inherit}
 .dis-spin{padding:12px 14px;color:var(--text-m);font-size:13px;font-style:italic}
 
 /* ── Chips ───────────────────── */
+/* Hidden by default — only revealed on hover/focus of the search bar
+   above it (see .search-chips-wrap), sliding down instead of just
+   appearing. Real height (not just opacity) has to animate for the
+   slide, so this needs a wrapper: overflow-x:auto internally still needs
+   its own scroll container, can't also be the thing collapsing to 0. */
+.search-chips-wrap{flex-shrink:0}
+.chips-collapse{max-height:0;opacity:0;overflow:hidden;transition:max-height .22s ease,opacity .15s ease}
+.search-chips-wrap:hover .chips-collapse,.search-chips-wrap:focus-within .chips-collapse{max-height:60px;opacity:1}
 .chips{display:flex;align-items:center;gap:6px;padding:8px 18px;overflow-x:auto;flex-shrink:0;scrollbar-width:none;background:var(--bg);border-bottom:1px solid var(--border)}
 .chips::-webkit-scrollbar{display:none}
 .chips-hd{flex-shrink:0;position:sticky;left:0;background:var(--bg);padding-right:10px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-f);white-space:nowrap;display:flex;align-items:center;gap:4px}
@@ -3888,9 +3896,14 @@ function buildApp(){
     });
     swrap.appendChild(dd);
   }
-  root.appendChild(swrap);
-
+  // Recent Searches only reveals on hover/focus of the search bar (see
+  // .search-chips-wrap/:focus-within in CSS) instead of always sitting
+  // there — hidden the rest of the time, including right after a search,
+  // since that's just "not currently hovering or focused" too.
+  const searchChipsWrap=d('search-chips-wrap',{});
+  searchChipsWrap.appendChild(swrap);
   if(st.chips.length){
+    const collapse=d('chips-collapse',{});
     const row=d('chips',{});
     row.appendChild(s('chips-hd','Recent Searches'));
     st.chips.forEach(name=>{
@@ -3901,8 +3914,10 @@ function buildApp(){
       const rm=b('chip-rm',{title:'Remove',onClick:e=>{e.stopPropagation();removeChip(name);}});rm.textContent='×';chip.appendChild(rm);
       row.appendChild(chip);
     });
-    root.appendChild(row);
+    collapse.appendChild(row);
+    searchChipsWrap.appendChild(collapse);
   }
+  root.appendChild(searchChipsWrap);
 
   const main=d('main',{});
   main.appendChild(buildSidebar());
