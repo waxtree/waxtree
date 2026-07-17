@@ -262,6 +262,7 @@ input,select{font:inherit;color:inherit}
 .t-like.liked{color:var(--accent)}
 .t-like:hover{transform:scale(1.3)}
 .t-dur{font-size:11px;color:var(--text-f);min-width:26px;text-align:right;flex-shrink:0}
+.t-feat{font-size:11px;font-style:italic;color:var(--text-f);flex-shrink:0}
 .t-badge{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;padding:2px 6px;border-radius:4px;border:1px solid rgba(94,196,123,.35);background:rgba(94,196,123,.12);color:var(--accent);flex-shrink:0}
 .esplora-btn,.buy-btn{padding:5px 11px;border-radius:20px;border:1.5px solid var(--border);font-size:11px;color:var(--text-m);white-space:nowrap;transition:border-color .15s,color .15s;flex-shrink:0;text-decoration:none;display:inline-flex;align-items:center}
 .esplora-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -1416,7 +1417,7 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=8; // bumped: styles now keep up to 4 tags instead of 2
+const TRACK_DATA_VERSION=9; // bumped: fixes various-artists releases splitting into one card per credited artist
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
@@ -2773,11 +2774,16 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
     const perTrack=(t.artists&&t.artists.length)?t.artists:null;
     const trackArtistName=perTrack?perTrack.map(a=>stripDiscogsSuffix(a.name)).join(', '):null;
     const trackArtistId=perTrack?perTrack[0].id:null;
+    // Full per-credit id+name list, not just the first artist — a track
+    // like "Encontro" on an otherwise-solo album can credit two people
+    // (["Sciahri","Temudo"]); trackArtistId alone can only ever point an
+    // Explore click at the first of them.
+    const trackArtists=perTrack?perTrack.map(a=>({id:a.id,name:stripDiscogsSuffix(a.name)})):null;
     return{
     id:`${fetchId}-${t.position||i}`,title:t.title,duration:t.duration||'',
     year,label:labelName,labelId,genre,thumbUrl,bpm,album:rd.title||'',
     digital:isDigital,hasVinyl,discogsUrl:releaseUrl,videoId:matchVideo(i),catno:'',
-    fromLabel:false,trackArtistName,trackArtistId,
+    fromLabel:false,trackArtistName,trackArtistId,trackArtists,
     exploreId:null,exploreName:null,exploreType:null,exploreLabel:null
   };});
 }
@@ -2958,6 +2964,15 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
       // artist name and the "Explore artist" button's target.
       const realName=e.trackArtistName||artistName;
       const realId=e.trackArtistId||artistId;
+      // trueLabelId preserves buildTrackEntries()'s original (constant
+      // per release) labelId before it's overwritten below for display —
+      // groupTracksByRelease() needs a stable identifier for "same
+      // release" that doesn't vary per track the way the artist credit
+      // legitimately does on a various-artists release. Without this, a
+      // various-artists release split into one card per credited artist
+      // (Cirkle, Red Rooms, Border One... each its own "release") instead
+      // of one release with per-track credits, exactly like it should be.
+      e.trueLabelId=e.labelId;
       e.label=realName;e.labelId=null;e.fromLabel=true;
       e.exploreId=realId;e.exploreName=realId?realName:null;e.exploreType='artist';e.exploreLabel='Explore artist';
       e.catno=rd.labels?.[0]?.catno||rel.catno||'';
@@ -3409,14 +3424,19 @@ function groupTracksByRelease(tracks){
   const groups=[];
   const byKey=new Map();
   for(const t of tracks){
-    // Group by the release's conceptual identity (title, plus the credited
-    // artist when browsing a label, where different artists can release
-    // same-titled EPs) rather than by Discogs release id — a vinyl
+    // Group by the release's conceptual identity — title plus the TRUE
+    // record label id — rather than by Discogs release id itself: a vinyl
     // pressing, a coloured variant, and a separate digital-only listing of
     // the exact same EP are still, to a digger, "the same release" and
     // shouldn't turn into two or three near-identical cards each missing
-    // some of the ownership tags the others have.
-    const key=normalizeStr(t.album||t.title)+'|'+normalizeStr(t.label||'');
+    // some of the ownership tags the others have. Must be trueLabelId (or
+    // labelId, for artist-node tracks where it's never touched), NOT the
+    // display-purpose t.label string — on a label node t.label holds the
+    // per-track ARTIST credit (see fetchLabelData), which legitimately
+    // differs per track on a various-artists release; keying on it split
+    // one release into one card per credited artist.
+    const labelKey=t.trueLabelId!=null?'id:'+t.trueLabelId:(t.labelId!=null?'id:'+t.labelId:normalizeStr(t.label||''));
+    const key=normalizeStr(t.album||t.title)+'|'+labelKey;
     let g=byKey.get(key);
     if(!g){g={key,tracks:[]};byKey.set(key,g);groups.push(g);}
     g.tracks.push(t);
@@ -3434,6 +3454,25 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   const art=first.thumbUrl
     ?el('img',{cls:'t-art',src:first.thumbUrl,alt:'',loading:'lazy'})
     :d('t-art-ph',{},'♫');
+
+  // "Featuring" vs genuine various-artists: on a label node, track.label
+  // holds the per-track ARTIST credit (see fetchLabelData). If one artist
+  // clearly dominates the group (a strict majority of tracks), that's a
+  // solo release with an occasional guest credit — it should keep showing
+  // that artist as the subtitle, with just the differing track(s)
+  // annotated, not flip the whole card to "Various Artists". Only when no
+  // single artist has a majority is it a genuine various-artists release.
+  let primaryArtistLabel=null,isVariousArtists=false;
+  if(isLabel){
+    const counts=new Map();
+    tracks.forEach(t=>{if(t.label)counts.set(t.label,(counts.get(t.label)||0)+1);});
+    const distinct=[...counts.entries()];
+    if(distinct.length>1){
+      const top=distinct.sort((a,b)=>b[1]-a[1])[0]; // [name, count]
+      if(top[1]/tracks.length>0.5)primaryArtistLabel=top[0];
+      else isVariousArtists=true;
+    }
+  }
 
   // ── LEFT: one compact row per track, each with its own small play button
   const trackRows=tracks.map(track=>{
@@ -3501,9 +3540,18 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
       setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
     }
 
+    // Only on a solo release with an occasional guest (primaryArtistLabel
+    // set) — the other case (genuine various-artists) already shows every
+    // track's own artist via the card-level "Various Artists" subtitle
+    // plus the Explore dropdown below, so repeating it per row there would
+    // be redundant.
+    const featuring=(primaryArtistLabel&&track.label&&track.label!==primaryArtistLabel)
+      ?track.label.split(',').map(s=>s.trim()).filter(a=>a&&normalizeStr(a)!==normalizeStr(primaryArtistLabel))
+      :[];
     return d('rel-track-row',{},
       playBtn,
       s('rel-track-title',track.title),
+      featuring.length?s('t-feat','with '+featuring.join(', ')):null,
       track.duration?s('t-dur',track.duration):null,
       b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'),
       plWrap,
@@ -3516,12 +3564,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   });
 
   // ── MIDDLE: release/EP/Album title + year·label + genres (release-level, shown once)
-  // In a label's own catalog, track.label actually holds the per-track
-  // ARTIST credit (see fetchLabelData) — when a release has more than one
-  // distinct one, it's a Various Artists release and showing just
-  // tracks[0]'s artist there is misleading.
-  const isVariousArtists=isLabel&&new Set(tracks.map(t=>t.label).filter(Boolean)).size>1;
-  const yearLabel=[first.year,isVariousArtists?'Various Artists':first.label].filter(Boolean).join(' · ');
+  const yearLabel=[first.year,isVariousArtists?'Various Artists':(primaryArtistLabel||first.label)].filter(Boolean).join(' · ');
   const genres=first.genre?first.genre.split(' · '):[];
   const mid=d('rel-mid',{},
     s('rel-title',first.album||first.title),
@@ -3546,14 +3589,22 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   }
   const seenArtists=new Set();
   tracks.forEach(track=>{
-    if(!track.exploreName)return;
-    const key=track.exploreId||track.exploreName;
-    if(seenArtists.has(key))return;
-    seenArtists.add(key);
-    exploreEntries.push({
-      cls:track.fromLabel?'esplora-label':'',
-      text:`${track.exploreLabel||'Explore'}: ${track.exploreName}`,
-      onClick:()=>addNode(track.exploreType||'artist',track.exploreId,track.exploreName,parentNodeId,getNode(parentNodeId)?.branchId)
+    // trackArtists carries every credited artist on this track (e.g. a
+    // collab: ["Sciahri","Temudo"]) — exploreId/exploreName alone can only
+    // ever point at the first one. Fall back to the single explore* fields
+    // for tracks with just one credit (or artist-node context, where
+    // trackArtists is never set).
+    const credits=track.trackArtists?.length?track.trackArtists:(track.exploreName?[{id:track.exploreId,name:track.exploreName}]:[]);
+    credits.forEach(c=>{
+      if(!c.name)return;
+      const key=c.id||c.name;
+      if(seenArtists.has(key))return;
+      seenArtists.add(key);
+      exploreEntries.push({
+        cls:track.fromLabel?'esplora-label':'',
+        text:`${track.exploreLabel||'Explore'}: ${c.name}`,
+        onClick:()=>addNode('artist',c.id,c.name,parentNodeId,getNode(parentNodeId)?.branchId)
+      });
     });
   });
 
