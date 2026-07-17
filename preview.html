@@ -2303,26 +2303,19 @@ function makeDraggable(wrap,handle){
   });
 }
 
-function syncYtPlayer(){
-  if(!st.nowPlaying){const w=document.getElementById('yt-wrap');if(w)w.remove();killYt();positionYtHost();return;}
-  if(document.getElementById('yt-wrap')){
-    // Already present in yt-host — just sync nav buttons and reposition
-    const tracks=getPlaylistTracks();
-    const curIdx=tracks.findIndex(t=>t.id===st.nowPlaying.trackId);
-    const navBtns=document.querySelectorAll('#yt-wrap .yt-nav');
-    if(navBtns[0])navBtns[0].disabled=curIdx<=0;
-    if(navBtns[1])navBtns[1].disabled=curIdx<0||curIdx>=tracks.length-1;
-    positionYtHost();
-    return;
-  }
-  const ytHost=document.getElementById('yt-host');
-  const np=st.nowPlaying;
-  const wrap=document.createElement('div');wrap.id='yt-wrap';wrap.className='yt-wrap';
+// Stateful (like/wantlist-dropdown/explore-dropdown/nav) — has to be
+// rebuilt on every syncYtPlayer() call, including while the SAME track
+// keeps playing, or clicking any of these does nothing visible: syncYtPlayer()
+// skips rebuilding the DOM entirely once #yt-wrap already exists (that
+// early-return exists specifically so the YouTube iframe/player isn't torn
+// down and reinitialized — i.e. playback restarted — on every unrelated
+// rr()). Before this was split out, that same early-return silently ate
+// every click on Like/Wantlist/Explore: the state (st.likes,
+// st.playlistDropId, st.exploreDropKey) updated correctly, but nothing on
+// screen ever reflected it, since the header markup was only ever built
+// once, on the very first render for that track.
+function buildYtHdr(np){
   const hdr=document.createElement('div');hdr.className='yt-hdr';
-  const info=document.createElement('div');info.className='yt-np-info';
-  const te=document.createElement('span');te.className='yt-title';te.textContent=np.title;
-  const ae=document.createElement('span');ae.className='yt-artist';ae.textContent=np.artistName;
-  info.appendChild(te);info.appendChild(ae);
   const tracks=getPlaylistTracks();
   const curIdx=tracks.findIndex(t=>t.id===np.trackId);
   const prevBtn=document.createElement('button');prevBtn.className='yt-nav';prevBtn.title='Previous track';prevBtn.textContent='⏮';prevBtn.disabled=curIdx<=0;prevBtn.addEventListener('click',()=>playAdjacentTrack(-1));
@@ -2389,6 +2382,28 @@ function syncYtPlayer(){
     }
   }
   hdr.appendChild(likeBtn);hdr.appendChild(plWrap);hdr.appendChild(expWrap);hdr.appendChild(prevBtn);hdr.appendChild(nextBtn);hdr.appendChild(cb);
+  return hdr;
+}
+function syncYtPlayer(){
+  if(!st.nowPlaying){const w=document.getElementById('yt-wrap');if(w)w.remove();killYt();positionYtHost();return;}
+  const np=st.nowPlaying;
+  const existingWrap=document.getElementById('yt-wrap');
+  if(existingWrap){
+    // Video/iframe untouched here — only the stateful header is rebuilt,
+    // so Like/Wantlist/Explore actually respond while the same track
+    // keeps playing, without restarting playback.
+    const oldHdr=existingWrap.querySelector('.yt-hdr');
+    const newHdr=buildYtHdr(np);
+    if(oldHdr)oldHdr.replaceWith(newHdr);else existingWrap.appendChild(newHdr);
+    positionYtHost();
+    return;
+  }
+  const ytHost=document.getElementById('yt-host');
+  const wrap=document.createElement('div');wrap.id='yt-wrap';wrap.className='yt-wrap';
+  const info=document.createElement('div');info.className='yt-np-info';
+  const te=document.createElement('span');te.className='yt-title';te.textContent=np.title;
+  const ae=document.createElement('span');ae.className='yt-artist';ae.textContent=np.artistName;
+  info.appendChild(te);info.appendChild(ae);
   wrap.appendChild(info); // title/artist above the video now, buttons row moves below it
   const q=encodeURIComponent(np.artistName+' '+np.title);
   if(np.videoId&&!noEmbedIds.has(np.videoId)&&!invalidYtIds.has(np.videoId)){
@@ -2429,7 +2444,7 @@ function syncYtPlayer(){
     fb.innerHTML=`<p>${msg}</p><a href="${url}" target="_blank" rel="noreferrer">${linkTxt}</a>`;
     wrap.appendChild(fb);ytHost.appendChild(wrap);
   }
-  wrap.appendChild(hdr); // action buttons row below the video/seek bar now
+  wrap.appendChild(buildYtHdr(np)); // action buttons row below the video/seek bar now
   positionYtHost();
 }
 
