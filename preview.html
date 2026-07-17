@@ -1827,6 +1827,23 @@ function positionYtHost(){
   const np=document.getElementById('rp-np-empty');
   if(np) np.style.display=playing?'none':'block';
 }
+// #right-panel is position:fixed with its top computed from .main's live
+// bounding rect — fine on paint() (a real re-render), but the Recent
+// Searches reveal is a pure CSS :hover/:focus-within transition with no
+// state change, so nothing ever re-triggers positionYtHost() for it and
+// the panel doesn't follow. Ride the transition instead: sample the real
+// (already-animating) layout every frame for its duration so the panel
+// slides in step, rather than snapping once at the end.
+let chipsFollowId=null;
+function followChipsShift(){
+  if(chipsFollowId)cancelAnimationFrame(chipsFollowId);
+  let frames=0;
+  const tick=()=>{
+    positionYtHost();
+    if(++frames<20){chipsFollowId=requestAnimationFrame(tick);}else{chipsFollowId=null;}
+  };
+  chipsFollowId=requestAnimationFrame(tick);
+}
 
 // ── YouTube ────────────────────────────────────────────────
 let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=null,ytPollId=null,ytBadgeTimerId=null,ytTitle='',ytArtist='';
@@ -3915,6 +3932,10 @@ function buildApp(){
   // there — hidden the rest of the time, including right after a search,
   // since that's just "not currently hovering or focused" too.
   const searchChipsWrap=d('search-chips-wrap',{});
+  searchChipsWrap.addEventListener('mouseenter',followChipsShift);
+  searchChipsWrap.addEventListener('mouseleave',followChipsShift);
+  searchChipsWrap.addEventListener('focusin',followChipsShift);
+  searchChipsWrap.addEventListener('focusout',followChipsShift);
   searchChipsWrap.appendChild(swrap);
   if(st.chips.length){
     const collapse=d('chips-collapse',{});
