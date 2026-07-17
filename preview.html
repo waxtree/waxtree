@@ -1798,15 +1798,22 @@ async function refreshRelatedTracks(nowTrack,seen,known){
     const seedStyle=styles[styles.length-1]||styles[0];
     if(!seedStyle){relatedCache={trackKey,items:[]};return;}
     // Three seeds, merged: same style + same year (tight era match when it
-    // exists), same style popularity-sorted with NO year lock (similarity
-    // isn't bound to release year), and — when the playing track carries a
-    // style combination — its broader style too, so both halves of the
-    // combo feed the pool and the ranking's combo scoring has real
-    // cross-style candidates to work with.
+    // exists), same style with no year lock (similarity isn't bound to
+    // release year), and — when the playing track carries a style
+    // combination — its broader style too, so both halves of the combo
+    // feed the pool and the ranking's combo scoring has real cross-style
+    // candidates to work with. Deliberately NOT sort:have (popularity) on
+    // any of these — verified against live data that for a broad single
+    // style (e.g. "Techno" alone, no combo to narrow it), popularity-
+    // sorted search is dominated by crossover-mainstream releases that
+    // only loosely carry the tag (Madonna, Daft Punk, Aphex Twin all
+    // outrank genuinely genre-focused techno on "have" for the style
+    // "Techno"), while Discogs' own default relevance ranking for the
+    // exact same query stays genre-authentic with zero extra filtering.
     const seeds=[];
     if(nowTrack.year)seeds.push({style:seedStyle,year:String(nowTrack.year)});
-    seeds.push({style:seedStyle,sort:'have',sort_order:'desc'});
-    if(styles.length>=2)seeds.push({style:styles[0],sort:'have',sort_order:'desc'});
+    seeds.push({style:seedStyle});
+    if(styles.length>=2)seeds.push({style:styles[0]});
     const seenRel=new Set(),rels=[];
     for(const p of seeds){
       try{
