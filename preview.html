@@ -2395,8 +2395,16 @@ function purgeExpiredCache(){
 // session-token write (a confirmed real report: spontaneous logout, then
 // stuck in a login loop until the user manually clears site data). Enforce
 // a hard byte budget too, evicting oldest-first, regardless of age.
-const CT2_BUDGET_BYTES=3*1024*1024;
-function enforceCacheBudget(){
+// First shipped at 3MB — confirmed via screen recording (2026-07-17) that
+// was too conservative for an active user's real tree (one single artist
+// with 111 Discogs releases already approaches that on its own): it was
+// evicting entries that didn't need to go, just to be safe, which produced
+// the exact "reload right after login" symptom this exists to prevent, for
+// a different reason than the original bug. Chrome's real per-origin quota
+// is commonly 10MB+; 6MB leaves solid headroom for Supabase's session
+// token and everything else while giving a real tree far more room.
+const CT2_BUDGET_BYTES=6*1024*1024;
+function enforceCacheBudget(protectKey){
   const entries=[];
   let total=0;
   for(let i=0;i<localStorage.length;i++){
@@ -2412,6 +2420,10 @@ function enforceCacheBudget(){
   entries.sort((a,b)=>a.t-b.t); // oldest first
   for(const e of entries){
     if(total<=CT2_BUDGET_BYTES)break;
+    // Evicting the node the user is about to land on defeats the point —
+    // they'd hit the exact "reload right after login" churn this exists
+    // to prevent, just for a different reason (budget instead of quota).
+    if(protectKey&&e.k==='ct2:'+protectKey)continue;
     localStorage.removeItem(e.k);
     total-=e.size;
   }
@@ -4534,7 +4546,14 @@ window.addEventListener('resize',positionYtHost);
 // back to login.html. TTL purge alone isn't enough for unexpired-but-large
 // caches (see enforceCacheBudget's own comment), so both run here.
 purgeExpiredCache();
-enforceCacheBudget();
+{
+  // Protect whatever node the user is about to land on — st.nodes/
+  // selectedId are already populated from loadSt() by this point, so this
+  // is known before ensureNodeLoaded(st.selectedId) runs further down.
+  const selNode=getNode(st.selectedId);
+  const selKey=selNode?(selNode.type==='label'?'l8:':'a7:')+selNode.discogsId:null;
+  enforceCacheBudget(selKey);
+}
 
 sb.auth.getSession().then(({data:{session}})=>{
   if(!session){window.location.href='login.html';return;}
