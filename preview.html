@@ -1752,6 +1752,13 @@ function scoreRelatedCandidate(t,nowTrack,model){
   }
   // 3. Label affinity.
   sc+=(model.labelW[norm(t.label)]||0)*0.7;
+  // 3b. Literally the same label as what's playing right now — labels
+  // curate a consistent sound, so this is a strong direct correlation
+  // signal that doesn't depend on how coarse the style tagging is (a
+  // release tagged with only one broad style, e.g. plain "Techno", can
+  // still be reliably close in sound to another release on the same
+  // imprint even when style-tag overlap alone can't tell them apart).
+  if(t.label&&nowTrack.label&&norm(t.label)===norm(nowTrack.label))sc+=12;
   // 4. Year proximity — a soft preference now, capped so it can nudge
   //    but never veto (a perfect style-combo match from another era
   //    should still surface; similarity isn't bound to release year).
@@ -1793,8 +1800,11 @@ function buildKnownFromLibrary(){
 // old, stale pool (Madonna and friends) just keeps getting served back
 // out of localStorage. Confirmed this was exactly what happened after the
 // crossover-mainstream fix — replaying a track cached before it still
-// showed the old picks.
-const RELATED_CACHE_V=3;
+// showed the old picks. Bumped to 4 for the releaseId field added below —
+// older cached pools don't carry it, which would silently defeat the
+// per-release diversity cap in renderRelatedTracks() for anything cached
+// before this change.
+const RELATED_CACHE_V=4;
 // Gathers the candidate POOL only — no ranking here. The pool is cached
 // per now-playing track (so switching tracks always re-searches), while
 // ranking happens fresh at render time against the live taste model, so
@@ -1893,7 +1903,7 @@ async function refreshRelatedTracks(nowTrack,seen,known){
               // returns several fields (duration, bpm, catno, discogsUrl...)
               // nothing here reads, and this pool is persisted to localStorage
               // per track played, so keeping it lean matters.
-              pool.push({id:t.id,title:t.title,artistName,year:t.year,label:t.label,labelId:t.labelId,trackArtistId:artistId,genre:t.genre,thumbUrl:t.thumbUrl,videoId:t.videoId});
+              pool.push({id:t.id,title:t.title,artistName,year:t.year,label:t.label,labelId:t.labelId,trackArtistId:artistId,genre:t.genre,thumbUrl:t.thumbUrl,videoId:t.videoId,releaseId:rel.id});
             });
           });
         }
@@ -1946,17 +1956,31 @@ function renderRelatedTracks(){
   });
   if(!pool.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
   // Rank against the LIVE taste model, every render — this is where the
-  // "learns as you feed it" behavior lives. Cap two tracks per artist so
-  // one EP can't fill every slot, 14 total.
+  // "learns as you feed it" behavior lives. Two passes over the same
+  // score-sorted order: pass 1 only takes one track per release, so a
+  // single EP can't crowd out everything else even when several of its
+  // tracks score well — and since candidates are already sorted by score,
+  // the one track pass 1 takes from each release is naturally its
+  // highest-scoring (closest-to-taste) track, a reasonable stand-in for
+  // "the best one" without needing a separate popularity signal Discogs
+  // doesn't expose per-track anyway. Pass 2 only runs if pass 1 couldn't
+  // fill the list, allowing a second (never a third) track from a release
+  // already used. Artist cap (2) still applies throughout.
   const model=getTasteModel();
-  const artistCounts=new Map(),items=[];
-  for(const t of pool.map(t=>({t,sc:scoreRelatedCandidate(t,nowTrack,model)})).sort((a,b)=>b.sc-a.sc).map(x=>x.t)){
+  const ranked=pool.map(t=>({t,sc:scoreRelatedCandidate(t,nowTrack,model)})).sort((a,b)=>b.sc-a.sc).map(x=>x.t);
+  const artistCounts=new Map(),releaseCounts=new Map(),items=[],used=new Set();
+  const take=(t,releaseCap)=>{
     const ak=t.trackArtistId||t.artistName;
-    const n=artistCounts.get(ak)||0;
-    if(n>=2)continue;
-    artistCounts.set(ak,n+1);items.push(t);
-    if(items.length>=14)break;
-  }
+    const rk=t.releaseId||t.id;
+    if((artistCounts.get(ak)||0)>=2)return false;
+    if((releaseCounts.get(rk)||0)>=releaseCap)return false;
+    artistCounts.set(ak,(artistCounts.get(ak)||0)+1);
+    releaseCounts.set(rk,(releaseCounts.get(rk)||0)+1);
+    items.push(t);used.add(t.id);
+    return true;
+  };
+  for(const t of ranked){if(items.length>=14)break;take(t,1);}
+  if(items.length<14)for(const t of ranked){if(items.length>=14)break;if(used.has(t.id))continue;take(t,2);}
   items.forEach(t=>{
     const row=d('rp-rel-row',{onClick:()=>doPlay(t.id,t.videoId,t.title,t.artistName)});
     if(t.thumbUrl)row.appendChild(el('img',{cls:'daq-art',src:t.thumbUrl,alt:'',loading:'lazy'}));
