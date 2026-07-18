@@ -1794,7 +1794,7 @@ function buildKnownFromLibrary(){
 // out of localStorage. Confirmed this was exactly what happened after the
 // crossover-mainstream fix — replaying a track cached before it still
 // showed the old picks.
-const RELATED_CACHE_V=2;
+const RELATED_CACHE_V=3;
 // Gathers the candidate POOL only — no ranking here. The pool is cached
 // per now-playing track (so switching tracks always re-searches), while
 // ranking happens fresh at render time against the live taste model, so
@@ -1823,38 +1823,56 @@ async function refreshRelatedTracks(nowTrack,seen,known){
     await Promise.race([
       (async()=>{
         const styles=nowTrack.genre?nowTrack.genre.split(' · ').filter(Boolean):[];
-        const seedStyle=styles[styles.length-1]||styles[0];
-        console.info('[WaxTree Debug] refreshRelatedTracks: fresh search — trackKey=',trackKey,'seedStyle=',seedStyle,'year=',nowTrack.year,'title=',nowTrack.title);
-        if(!seedStyle){relatedCache={trackKey,items:[]};return;}
-        // Three seeds, merged: same style + same year (tight era match when
-        // it exists), same style with no year lock (similarity isn't bound
-        // to release year), and — when the playing track carries a style
-        // combination — its broader style too, so both halves of the combo
-        // feed the pool and the ranking's combo scoring has real
-        // cross-style candidates to work with. Deliberately NOT sort:have
-        // (popularity) on any of these — verified against live data that
-        // for a broad single style (e.g. "Techno" alone, no combo to
-        // narrow it), popularity-sorted search is dominated by crossover-
-        // mainstream releases that only loosely carry the tag (Madonna,
-        // Daft Punk, Aphex Twin all outrank genuinely genre-focused techno
-        // on "have" for the style "Techno"), while Discogs' own default
-        // relevance ranking for the exact same query stays genre-authentic
-        // with zero extra filtering.
+        if(!styles.length){relatedCache={trackKey,items:[]};return;}
+        // The FULL style signature, comma-joined — confirmed against live
+        // Discogs search (2026-07-18) that style="Techno,Dub Techno" is a
+        // genuine AND-filter server-side (every result actually carries
+        // BOTH tags, still tens of thousands of matches even 3 tags deep),
+        // not something that needs simulating client-side by merging
+        // separate broad/narrow searches. That old approach — a separate
+        // seed for just the broader tag alone, meant to "feed both halves
+        // of the combo" — was actually diluting quality: searching a broad
+        // tag alone reopens the exact crossover-mainstream problem already
+        // fixed by dropping sort:have, just via a different door. This is
+        // strictly tighter: everything the search itself returns already
+        // matches the track's full style fingerprint, not just one tag
+        // from it. Two seeds: locked to this release's year (tight era
+        // match when a year exists) and without (similarity isn't bound to
+        // release year) — no third seed needed anymore.
+        const comboStyle=styles.join(',');
+        console.info('[WaxTree Debug] refreshRelatedTracks: fresh search — trackKey=',trackKey,'comboStyle=',comboStyle,'year=',nowTrack.year,'title=',nowTrack.title);
         const seeds=[];
-        if(nowTrack.year)seeds.push({style:seedStyle,year:String(nowTrack.year)});
-        seeds.push({style:seedStyle});
-        if(styles.length>=2)seeds.push({style:styles[0]});
+        if(nowTrack.year)seeds.push({style:comboStyle,year:String(nowTrack.year)});
+        seeds.push({style:comboStyle});
         const seenRel=new Set(),rels=[];
         for(const p of seeds){
           try{
-            const sd=await dReq('/database/search',{type:'release',per_page:'20',...p});
+            const sd=await dReq('/database/search',{type:'release',per_page:'25',...p});
             (sd.results||[]).forEach(rel=>{if(!seenRel.has(rel.id)){seenRel.add(rel.id);rels.push(rel);}});
           }catch{/* one failed seed shouldn't sink the others */}
         }
+        // Release-detail fetches used to run one at a time (a plain
+        // for-await loop) — with up to 30 sequential awaits, that's the
+        // main reason this took visibly long after pressing play. Batched
+        // in parallel instead (same idea as FETCH_BATCH=6 elsewhere, wider
+        // here) — dReq()'s own 45 req/60s throttle still applies per-
+        // request regardless of how they're dispatched, so this doesn't
+        // spend any more quota, just stops waiting for each one to finish
+        // before starting the next. Also cut from 30 releases down to 18:
+        // measured live (2026-07-18) at ~2.8 playable candidates per
+        // release on average, so 18 already yields well over 40 —
+        // comfortably more than the 14 ever shown — while roughly halving
+        // total wait time (~13s sequential-batched at 30 down to ~7-8s).
         const pool=[];
-        for(const rel of rels.slice(0,30)){
-          try{
-            const rd=await dReq('/releases/'+rel.id);
+        const relBatch=rels.slice(0,18);
+        for(let i=0;i<relBatch.length;i+=9){
+          const batch=relBatch.slice(i,i+9);
+          const results=await Promise.all(batch.map(async rel=>{
+            try{return{rel,rd:await dReq('/releases/'+rel.id)};}catch{return null;}
+          }));
+          results.forEach(r=>{
+            if(!r)return;
+            const{rel,rd}=r;
             const releaseArtist=rd.artists?.[0]?{id:rd.artists[0].id,name:stripDiscogsSuffix(rd.artists[0].name)}:null;
             const entries=buildTrackEntries(rd,'disc-'+rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,null,rel.thumb);
             entries.forEach(t=>{
@@ -1877,7 +1895,7 @@ async function refreshRelatedTracks(nowTrack,seen,known){
               // per track played, so keeping it lean matters.
               pool.push({id:t.id,title:t.title,artistName,year:t.year,label:t.label,labelId:t.labelId,trackArtistId:artistId,genre:t.genre,thumbUrl:t.thumbUrl,videoId:t.videoId});
             });
-          }catch{/* one bad release shouldn't sink the whole batch */}
+          });
         }
         pool.forEach(t=>{discoveredTracks[t.id]=t;});
         lsSet('related:v'+RELATED_CACHE_V+':'+trackKey,pool);
