@@ -1806,6 +1806,15 @@ async function refreshRelatedTracks(nowTrack,seen,known){
   try{
     const styles=nowTrack.genre?nowTrack.genre.split(' · ').filter(Boolean):[];
     const seedStyle=styles[styles.length-1]||styles[0];
+    // Temporary diagnostic (2026-07-17) — user reported Related Tracks no
+    // longer changing per track. If two different tracks log the same
+    // seedStyle+year here, that's the search legitimately being identical
+    // (both tracks share the same style+year signature, e.g. several
+    // tracks off the same "Techno"-only various-artists release), not a
+    // caching bug. If the SAME trackKey logs twice in a row without a
+    // track change in between, that points at the cache/comparison logic
+    // instead. Remove once the actual cause is confirmed.
+    console.info('[WaxTree Debug] refreshRelatedTracks: fresh search — trackKey=',trackKey,'seedStyle=',seedStyle,'year=',nowTrack.year,'title=',nowTrack.title);
     if(!seedStyle){relatedCache={trackKey,items:[]};return;}
     // Three seeds, merged: same style + same year (tight era match when it
     // exists), same style with no year lock (similarity isn't bound to
@@ -1882,6 +1891,7 @@ function renderRelatedTracks(){
   if(!nowTrack?.genre){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
   if(relatedCache?.trackKey!==np.trackId){
     const cached=lsGet('related:v'+RELATED_CACHE_V+':'+np.trackId);
+    console.info('[WaxTree Debug] renderRelatedTracks: track changed — trackId=',np.trackId,'title=',nowTrack.title,cached?'(localStorage HIT, reusing saved pool)':'(no saved pool, triggering fresh search)');
     if(cached){cached.forEach(t=>{discoveredTracks[t.id]=t;});relatedCache={trackKey:np.trackId,items:cached};}
     else{
       if(!relatedLoading){
@@ -2348,8 +2358,16 @@ function makeDraggable(wrap,handle){
 // rect, sidesteps all of that: nothing about #right-panel's layout can
 // affect where a document.body-level fixed element paints.
 function attachFloatingDropdown(triggerBtn,onClose,buildFn){
-  document.getElementById('wt-floating-drop')?.remove();
   setTimeout(()=>{
+    // Removal happens here too, not just at call time — adding an item
+    // closes and reopens the dropdown (two attachFloatingDropdown calls in
+    // quick succession), and removing synchronously at call time while
+    // creation waited for this same setTimeout meant the earlier call's
+    // still-pending creation could run AFTER the later call's removal,
+    // leaving a stale copy on screen with outdated checkmarks. Doing both
+    // in the same deferred step makes the last call to actually fire
+    // always win, with fresh data.
+    document.getElementById('wt-floating-drop')?.remove();
     if(!document.body.contains(triggerBtn))return; // state changed again before this ran
     const rect=triggerBtn.getBoundingClientRect();
     const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
