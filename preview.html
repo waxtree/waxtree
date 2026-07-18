@@ -1803,74 +1803,88 @@ async function refreshRelatedTracks(nowTrack,seen,known){
   if(relatedLoading)return;
   relatedLoading=true;
   const trackKey=nowTrack.id;
+  // Confirmed via live console output (2026-07-17): the "doesn't change
+  // per track" report was a real, unstable network connection — a storm
+  // of ERR_CONNECTION_CLOSED/ERR_HTTP2_PROTOCOL_ERROR hit several
+  // unrelated Supabase endpoints (auth, edge functions, REST) at the same
+  // time, and the same instability was very likely stalling dReq()'s own
+  // internal retry backoff here too — each of up to ~30 release-detail
+  // fetches can individually retry for many seconds, which adds up. The
+  // per-seed/per-release try/catch blocks below already stop ONE bad
+  // request from sinking the whole batch, but nothing capped the OVERALL
+  // attempt, so relatedLoading could stay stuck true (blocking any retry)
+  // for minutes on a bad connection, well past what looks "stuck" to a
+  // user watching in real time. Race the whole thing against a hard
+  // ceiling so a bad connection degrades gracefully instead of wedging
+  // this open — the retry (on rr() from a subsequent render, or a real
+  // track change) already handles picking back up once the network does.
+  const TIMEOUT_MS=25000;
   try{
-    const styles=nowTrack.genre?nowTrack.genre.split(' · ').filter(Boolean):[];
-    const seedStyle=styles[styles.length-1]||styles[0];
-    // Temporary diagnostic (2026-07-17) — user reported Related Tracks no
-    // longer changing per track. If two different tracks log the same
-    // seedStyle+year here, that's the search legitimately being identical
-    // (both tracks share the same style+year signature, e.g. several
-    // tracks off the same "Techno"-only various-artists release), not a
-    // caching bug. If the SAME trackKey logs twice in a row without a
-    // track change in between, that points at the cache/comparison logic
-    // instead. Remove once the actual cause is confirmed.
-    console.info('[WaxTree Debug] refreshRelatedTracks: fresh search — trackKey=',trackKey,'seedStyle=',seedStyle,'year=',nowTrack.year,'title=',nowTrack.title);
-    if(!seedStyle){relatedCache={trackKey,items:[]};return;}
-    // Three seeds, merged: same style + same year (tight era match when it
-    // exists), same style with no year lock (similarity isn't bound to
-    // release year), and — when the playing track carries a style
-    // combination — its broader style too, so both halves of the combo
-    // feed the pool and the ranking's combo scoring has real cross-style
-    // candidates to work with. Deliberately NOT sort:have (popularity) on
-    // any of these — verified against live data that for a broad single
-    // style (e.g. "Techno" alone, no combo to narrow it), popularity-
-    // sorted search is dominated by crossover-mainstream releases that
-    // only loosely carry the tag (Madonna, Daft Punk, Aphex Twin all
-    // outrank genuinely genre-focused techno on "have" for the style
-    // "Techno"), while Discogs' own default relevance ranking for the
-    // exact same query stays genre-authentic with zero extra filtering.
-    const seeds=[];
-    if(nowTrack.year)seeds.push({style:seedStyle,year:String(nowTrack.year)});
-    seeds.push({style:seedStyle});
-    if(styles.length>=2)seeds.push({style:styles[0]});
-    const seenRel=new Set(),rels=[];
-    for(const p of seeds){
-      try{
-        const sd=await dReq('/database/search',{type:'release',per_page:'20',...p});
-        (sd.results||[]).forEach(rel=>{if(!seenRel.has(rel.id)){seenRel.add(rel.id);rels.push(rel);}});
-      }catch{/* one failed seed shouldn't sink the others */}
-    }
-    const pool=[];
-    for(const rel of rels.slice(0,30)){
-      try{
-        const rd=await dReq('/releases/'+rel.id);
-        const releaseArtist=rd.artists?.[0]?{id:rd.artists[0].id,name:stripDiscogsSuffix(rd.artists[0].name)}:null;
-        const entries=buildTrackEntries(rd,'disc-'+rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,null,rel.thumb);
-        entries.forEach(t=>{
-          if(!t.videoId)return; // must actually be playable, same rule as before
-          // A normal (non-various-artist) release has no per-track artist
-          // credit — trackArtistId is only set for compilations — so fall
-          // back to the release's own artist and store it back on the
-          // candidate itself, not just in these local variables, or every
-          // single-artist release would silently lose its artist identity.
-          const artistId=t.trackArtistId||releaseArtist?.id||null;
-          const artistName=t.trackArtistName||releaseArtist?.name||'';
-          if(artistId&&seen.has('artist:'+artistId))return;
-          if(t.labelId&&seen.has('label:'+t.labelId))return;
-          if(known.artists.has(normalizeStr(artistName)))return; // already own/want plenty of this artist
-          if(t.label&&known.labels.has(normalizeStr(t.label)))return;
-          // Only what's actually used downstream (render, scoring, doPlay,
-          // Like/queue/Explore in the mini-player) — buildTrackEntries()
-          // returns several fields (duration, bpm, catno, discogsUrl...)
-          // nothing here reads, and this pool is persisted to localStorage
-          // per track played, so keeping it lean matters.
-          pool.push({id:t.id,title:t.title,artistName,year:t.year,label:t.label,labelId:t.labelId,trackArtistId:artistId,genre:t.genre,thumbUrl:t.thumbUrl,videoId:t.videoId});
-        });
-      }catch{/* one bad release shouldn't sink the whole batch */}
-    }
-    pool.forEach(t=>{discoveredTracks[t.id]=t;});
-    lsSet('related:v'+RELATED_CACHE_V+':'+trackKey,pool);
-    relatedCache={trackKey,items:pool};
+    await Promise.race([
+      (async()=>{
+        const styles=nowTrack.genre?nowTrack.genre.split(' · ').filter(Boolean):[];
+        const seedStyle=styles[styles.length-1]||styles[0];
+        console.info('[WaxTree Debug] refreshRelatedTracks: fresh search — trackKey=',trackKey,'seedStyle=',seedStyle,'year=',nowTrack.year,'title=',nowTrack.title);
+        if(!seedStyle){relatedCache={trackKey,items:[]};return;}
+        // Three seeds, merged: same style + same year (tight era match when
+        // it exists), same style with no year lock (similarity isn't bound
+        // to release year), and — when the playing track carries a style
+        // combination — its broader style too, so both halves of the combo
+        // feed the pool and the ranking's combo scoring has real
+        // cross-style candidates to work with. Deliberately NOT sort:have
+        // (popularity) on any of these — verified against live data that
+        // for a broad single style (e.g. "Techno" alone, no combo to
+        // narrow it), popularity-sorted search is dominated by crossover-
+        // mainstream releases that only loosely carry the tag (Madonna,
+        // Daft Punk, Aphex Twin all outrank genuinely genre-focused techno
+        // on "have" for the style "Techno"), while Discogs' own default
+        // relevance ranking for the exact same query stays genre-authentic
+        // with zero extra filtering.
+        const seeds=[];
+        if(nowTrack.year)seeds.push({style:seedStyle,year:String(nowTrack.year)});
+        seeds.push({style:seedStyle});
+        if(styles.length>=2)seeds.push({style:styles[0]});
+        const seenRel=new Set(),rels=[];
+        for(const p of seeds){
+          try{
+            const sd=await dReq('/database/search',{type:'release',per_page:'20',...p});
+            (sd.results||[]).forEach(rel=>{if(!seenRel.has(rel.id)){seenRel.add(rel.id);rels.push(rel);}});
+          }catch{/* one failed seed shouldn't sink the others */}
+        }
+        const pool=[];
+        for(const rel of rels.slice(0,30)){
+          try{
+            const rd=await dReq('/releases/'+rel.id);
+            const releaseArtist=rd.artists?.[0]?{id:rd.artists[0].id,name:stripDiscogsSuffix(rd.artists[0].name)}:null;
+            const entries=buildTrackEntries(rd,'disc-'+rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,null,rel.thumb);
+            entries.forEach(t=>{
+              if(!t.videoId)return; // must actually be playable, same rule as before
+              // A normal (non-various-artist) release has no per-track artist
+              // credit — trackArtistId is only set for compilations — so fall
+              // back to the release's own artist and store it back on the
+              // candidate itself, not just in these local variables, or every
+              // single-artist release would silently lose its artist identity.
+              const artistId=t.trackArtistId||releaseArtist?.id||null;
+              const artistName=t.trackArtistName||releaseArtist?.name||'';
+              if(artistId&&seen.has('artist:'+artistId))return;
+              if(t.labelId&&seen.has('label:'+t.labelId))return;
+              if(known.artists.has(normalizeStr(artistName)))return; // already own/want plenty of this artist
+              if(t.label&&known.labels.has(normalizeStr(t.label)))return;
+              // Only what's actually used downstream (render, scoring, doPlay,
+              // Like/queue/Explore in the mini-player) — buildTrackEntries()
+              // returns several fields (duration, bpm, catno, discogsUrl...)
+              // nothing here reads, and this pool is persisted to localStorage
+              // per track played, so keeping it lean matters.
+              pool.push({id:t.id,title:t.title,artistName,year:t.year,label:t.label,labelId:t.labelId,trackArtistId:artistId,genre:t.genre,thumbUrl:t.thumbUrl,videoId:t.videoId});
+            });
+          }catch{/* one bad release shouldn't sink the whole batch */}
+        }
+        pool.forEach(t=>{discoveredTracks[t.id]=t;});
+        lsSet('related:v'+RELATED_CACHE_V+':'+trackKey,pool);
+        relatedCache={trackKey,items:pool};
+      })(),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('related-tracks search timed out after '+(TIMEOUT_MS/1000)+'s')),TIMEOUT_MS)),
+    ]);
   }catch(e){
     console.warn('WaxTree: related-tracks refresh failed:',e?.message||e);
     // Mark this track as "done" for the session even on failure —
