@@ -1806,8 +1806,10 @@ function buildKnownFromLibrary(){
 // before this change. Bumped again to 5 for the seed rework (dropped the
 // year lock, added a same-label seed, fixed a seed-order bug that could
 // silently crowd every result into one release year) — old pools reflect
-// the buggy search, not this one.
-const RELATED_CACHE_V=5;
+// the buggy search, not this one. Bumped to 6 for the taste-model-driven
+// third seed and the wider 24-release budget — old pools are thinner and
+// missing that seed's candidates entirely.
+const RELATED_CACHE_V=6;
 // Gathers the candidate POOL only — no ranking here. The pool is cached
 // per now-playing track (so switching tracks always re-searches), while
 // ranking happens fresh at render time against the live taste model, so
@@ -1853,34 +1855,55 @@ async function refreshRelatedTracks(nowTrack,seen,known){
         // than the broad style search alone returns.
         const comboStyle=styles.join(',');
         console.info('[WaxTree Debug] refreshRelatedTracks: fresh search — trackKey=',trackKey,'comboStyle=',comboStyle,'labelId=',nowTrack.labelId,'title=',nowTrack.title);
-        // Each seed is its own group so releases can be interleaved fairly
-        // below — a year-locked seed used to run alongside the year-free
-        // one and both got dumped into one list before truncating to 18;
-        // since Array.push order put the year-locked seed first, it could
-        // (and did — confirmed live, 2026-07-18) fill the ENTIRE budget by
-        // itself, silently crowding out every other seed and making every
-        // suggestion the same release year even though year was never meant
-        // to be a hard filter. Dropped the year lock entirely per explicit
-        // request — similarity isn't bound to release year at all now, not
-        // even as a separate seed.
-        const seedGroups=[];
-        try{
-          const sd=await dReq('/database/search',{type:'release',per_page:'25',style:comboStyle});
-          seedGroups.push(sd.results||[]);
-        }catch{seedGroups.push([]);}
-        if(nowTrack.labelId){
-          try{
-            const ld=await dReq('/labels/'+nowTrack.labelId+'/releases',{per_page:'25',sort:'year',sort_order:'desc'});
-            seedGroups.push(ld.releases||[]);
-          }catch{seedGroups.push([]);}
-        }
+        // A year-locked seed used to run alongside the year-free one, and
+        // Array.push order put it first — since it alone could return up to
+        // 25 results, it could (and did — confirmed live, 2026-07-18) fill
+        // the ENTIRE release budget by itself once both lists got dumped
+        // into one and truncated, silently crowding out every other seed
+        // and making every suggestion the same release year even though
+        // year was never meant to be a hard filter. Dropped the year lock
+        // entirely per explicit request (similarity isn't bound to release
+        // year at all now) and — see the round-robin merge below — no
+        // single seed can crowd out the others like that again regardless.
+        // Third seed (alongside style-combo and same-label below): driven
+        // by the user's OWN learned taste (collection,
+        // likes, wantlist — see buildTasteModel()), not just this one
+        // release's own tagging. Pick the strongest style-COMBO the model
+        // has learned that still shares at least one tag with what's
+        // playing now, so it stays contextually anchored rather than
+        // wandering off into the user's taste at large. This is what
+        // actually puts the local library to work for *finding* new
+        // candidates — beforehand it only ever reranked whatever the
+        // release-level searches happened to turn up.
+        const model0=getTasteModel();
+        const nowSetL=new Set(styles.map(x=>x.trim().toLowerCase()));
+        let bestCombo=null,bestW=0;
+        Object.entries(model0.comboW).forEach(([key,w])=>{
+          const parts=key.split('+');
+          if(w>bestW&&parts.some(p=>nowSetL.has(p)))
+          {bestW=w;bestCombo=parts;}
+        });
+        // All three independent of each other — run concurrently rather
+        // than one after another, same reasoning as the release-detail
+        // batching below.
+        const seedGroups=(await Promise.all([
+          dReq('/database/search',{type:'release',per_page:'25',style:comboStyle}).then(sd=>sd.results||[]).catch(()=>[]),
+          nowTrack.labelId?dReq('/labels/'+nowTrack.labelId+'/releases',{per_page:'25',sort:'year',sort_order:'desc'}).then(ld=>ld.releases||[]).catch(()=>[]):Promise.resolve([]),
+          bestCombo?dReq('/database/search',{type:'release',per_page:'25',style:bestCombo.join(',')}).then(sd=>sd.results||[]).catch(()=>[]):Promise.resolve([]),
+        ]));
         // Round-robin across seed groups instead of concat-then-slice, so
         // no single seed can starve the others just by returning more (or
         // returning first) — each gets a fair turn until the budget fills.
+        // Raised from 18 to 24 releases: a user who's already dug deep into
+        // one label/scene (confirmed live, 2026-07-18 — a real report where
+        // most of a niche label's own catalog was already explored/known)
+        // needs a wider raw pool for enough NEW candidates to survive the
+        // already-explored/already-known filtering below.
+        const RELEASE_CAP=24;
         const seenRel=new Set(),rels=[];
-        for(let i=0;rels.length<18&&seedGroups.some(g=>i<g.length);i++){
+        for(let i=0;rels.length<RELEASE_CAP&&seedGroups.some(g=>i<g.length);i++){
           for(const g of seedGroups){
-            if(rels.length>=18)break;
+            if(rels.length>=RELEASE_CAP)break;
             const rel=g[i];
             if(rel&&!seenRel.has(rel.id)){seenRel.add(rel.id);rels.push(rel);}
           }
@@ -1892,13 +1915,15 @@ async function refreshRelatedTracks(nowTrack,seen,known){
         // here) — dReq()'s own 45 req/60s throttle still applies per-
         // request regardless of how they're dispatched, so this doesn't
         // spend any more quota, just stops waiting for each one to finish
-        // before starting the next. Also cut from 30 releases down to 18:
+        // before starting the next. Capped at RELEASE_CAP releases (see
+        // above — raised 18→24 to survive heavier filtering) rather than
+        // fetching everything the seeds return, to keep wait time bounded;
         // measured live (2026-07-18) at ~2.8 playable candidates per
-        // release on average, so 18 already yields well over 40 —
-        // comfortably more than the 14 ever shown — while roughly halving
-        // total wait time (~13s sequential-batched at 30 down to ~7-8s).
+        // release on average, so even after already-known/already-explored
+        // filtering this still comfortably clears the 14 ever shown for a
+        // typical user, with the 3-seed/24-release version taking ~10-11s.
         const pool=[];
-        const relBatch=rels.slice(0,18);
+        const relBatch=rels.slice(0,RELEASE_CAP);
         for(let i=0;i<relBatch.length;i+=9){
           const batch=relBatch.slice(i,i+9);
           const results=await Promise.all(batch.map(async rel=>{
@@ -1946,6 +1971,7 @@ async function refreshRelatedTracks(nowTrack,seen,known){
   }
   finally{relatedLoading=false;rr();}
 }
+function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))|0;}return Math.abs(h);}
 function renderRelatedTracks(){
   const host=document.getElementById('related-tracks');
   if(!host)return;
@@ -1991,7 +2017,20 @@ function renderRelatedTracks(){
   // fill the list, allowing a second (never a third) track from a release
   // already used. Artist cap (2) still applies throughout.
   const model=getTasteModel();
-  const ranked=pool.map(t=>({t,sc:scoreRelatedCandidate(t,nowTrack,model)})).sort((a,b)=>b.sc-a.sc).map(x=>x.t);
+  const scored=pool.map(t=>({t,sc:scoreRelatedCandidate(t,nowTrack,model)})).sort((a,b)=>b.sc-a.sc).map(x=>x.t);
+  // Style and label are both release-wide in Discogs, not per-track — two
+  // tracks on the same EP can genuinely score identically against every
+  // signal available, which is exactly what made switching tracks within
+  // one release look "stuck" (confirmed live, 2026-07-18: same 4 picks for
+  // both "Heritage" and "Southside", both on Stojche's "Cause & Effect").
+  // Rotate deterministically by track id within a quality-bounded top
+  // slice — never reaching past candidates that wouldn't have made a
+  // generous top-30 cut anyway — so different tracks on the same release
+  // surface a different, still fully vetted, slice of the same pool
+  // instead of the identical top-14 every time.
+  const topPool=scored.slice(0,30);
+  const rotateBy=topPool.length?hashStr(String(np.trackId))%topPool.length:0;
+  const ranked=topPool.slice(rotateBy).concat(topPool.slice(0,rotateBy),scored.slice(30));
   const artistCounts=new Map(),releaseCounts=new Map(),items=[],used=new Set();
   const take=(t,releaseCap)=>{
     const ak=t.trackArtistId||t.artistName;
