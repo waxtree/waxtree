@@ -652,11 +652,22 @@ function normalizeStr(str){
     .trim();
 }
 
+// Keep the raw tag string ONLY when it carries information normalizeStr()
+// destroys and matching later needs back: separators in multi-artist
+// credits ("A & B", "A feat. C" — normalization strips "&" and "feat"
+// leaving the names fused with no way to split them apart again), and
+// parenthesized mix descriptors in titles. Selective on purpose — storing
+// raw strings for every one of ~7000 tracks would add real weight to the
+// wt-owned localStorage blob for no benefit in the common case where
+// raw ≈ normalized anyway.
+const keepRawArtist=a=>/[,&\/]|\b(?:feat|ft|featuring|vs|presents|pres|b2b|meets|versus)\b/i.test(a||'')?a.trim():undefined;
+const keepRawTitle=t=>/[()\[\]]/.test(t||'')?t.trim():undefined;
+
 function parseFilename(filename){
   let name=filename.replace(/\.[^/.]+$/,'');
   name=name.replace(/^[\dA-Da-d]{1,2}[.\-\s]+/,'');
   const parts=name.split(/\s[-–]\s/);
-  if(parts.length>=2)return{titleNorm:normalizeStr(parts[parts.length-1]),artistNorm:normalizeStr(parts[0]),filename,dur:null};
+  if(parts.length>=2)return{titleNorm:normalizeStr(parts[parts.length-1]),artistNorm:normalizeStr(parts[0]),filename,dur:null,titleRaw:keepRawTitle(parts[parts.length-1]),artistRaw:keepRawArtist(parts[0])};
   const trimmed=name.trim();
   if(trimmed)return{titleNorm:normalizeStr(trimmed),artistNorm:'',filename,dur:null};
   return null;
@@ -669,7 +680,7 @@ async function extractMetadata(file,mm){
       const title=meta.common.title?.trim();
       const artist=meta.common.artist?.trim();
       const dur=meta.format.duration?Math.round(meta.format.duration):null;
-      if(title)return{titleNorm:normalizeStr(title),artistNorm:normalizeStr(artist||''),filename:file.name,dur};
+      if(title)return{titleNorm:normalizeStr(title),artistNorm:normalizeStr(artist||''),filename:file.name,dur,titleRaw:keepRawTitle(title),artistRaw:keepRawArtist(artist)};
     }catch{}
   }
   return parseFilename(file.name);
@@ -1122,6 +1133,94 @@ async function searchDiscogsArtist(q){
   const r=(data.results||[]).map(x=>({id:x.id,title:x.title,thumb:x.thumb,uri:x.uri}));
   lsSet(ck,r);return r;
 }
+// ── Matching helpers ────────────────────────────────────────
+// Fallback title key: normalizeStr() already strips "original mix/remix/
+// edit/remaster", but Beatport/Bandcamp-style files carry many more mix
+// descriptors ("Extended Mix", "Club Mix", "Instrumental"...) that Discogs
+// tracklists usually omit — exact equality fails on essentially every such
+// purchase. Deliberately NOT stripping genre-ish words that appear in real
+// track names ("dub", "deep", "dark"): a fallback key that merges
+// "Damascus Dub" with "Damascus" would trade a real title for a guess.
+// Exact-normalized comparison is always tried first; this key is only the
+// second tier.
+function mixTitleKey(normTitle){
+  const k=normTitle.replace(/\b(?:extended|club|radio|vocal|instrumental|inst|version|rework|remake|bootleg|vip|rmx|remixed|mix|mixes)\b/g,'').replace(/\s+/g,' ').trim();
+  return k||normTitle;
+}
+// Tiered track match against a Discogs tracklist:
+//   tier 0 — exact normalized-title equality
+//   tier 1 — mixTitleKey equality (mix-descriptor differences only)
+//   tier 2 — one key is a word-prefix of the other, ONLY when both sides
+//            have durations to confirm (title evidence alone is too weak)
+// Duration is a disqualifier only when BOTH sides actually have one
+// (±20s — printed vinyl durations are approximate; the old rule rejected
+// any match where Discogs simply didn't list durations, which silently
+// killed matching against most vinyl-era tracklists). Among candidates in
+// the same tier, closest duration wins — that's what keeps "Track" and
+// "Track (Extended Mix)" from being confused once mix words are stripped.
+function pickTrackMatch(t,discogsTracks){
+  const tKey=mixTitleKey(t.titleNorm);
+  let best=null,bestTier=9,bestDiff=Infinity;
+  for(const dt of discogsTracks||[]){
+    const dNorm=normalizeStr(dt.title);
+    if(!dNorm)continue;
+    let tier;
+    if(dNorm===t.titleNorm)tier=0;
+    else{
+      const dKey=mixTitleKey(dNorm);
+      if(dKey===tKey)tier=1;
+      else if(dKey.startsWith(tKey+' ')||tKey.startsWith(dKey+' '))tier=2;
+      else continue;
+    }
+    const dd=parseDur(dt.duration||'');
+    const bothDur=!!(t.dur&&dd);
+    if(bothDur&&Math.abs(dd-t.dur)>20)continue;
+    if(tier===2&&!bothDur)continue;
+    const diff=bothDur?Math.abs(dd-t.dur):Infinity;
+    if(tier<bestTier||(tier===bestTier&&diff<bestDiff)){best=dt;bestTier=tier;bestDiff=diff;}
+  }
+  return best;
+}
+// Artist-profile candidate: strict equality was the only rule before, so
+// "The Prodigy" vs "Prodigy" or a local "Above and Beyond" tag vs Discogs
+// "Above & Beyond" (normalizeStr drops "&" but keeps the word "and", so
+// the two sides normalize DIFFERENTLY) never matched. Folding a leading
+// "the" and the word "and" out of both sides keeps the comparison exact
+// in spirit — no fuzzy scoring — while surviving those two spelling
+// families.
+function pickArtistCandidate(results,artistNorm){
+  const cmp=x=>x.replace(/^the\s+/,'').replace(/\band\b/g,' ').replace(/\s+/g,' ').trim();
+  const want=cmp(artistNorm);
+  if(!want)return null;
+  return (results||[]).find(r=>cmp(normalizeStr(stripDiscogsSuffix(r.title)))===want)||null;
+}
+// Multi-artist tags ("A & B", "A feat. C") can never equal a single
+// Discogs artist profile. With the raw tag available (new scans keep it —
+// see keepRawArtist), split on the real separators; for older scans only
+// the normalized string exists, where "&"/"feat" are already gone and only
+// word separators survive. Components get tried as artist searches of
+// their own — the release is usually filed under one of the credited
+// artists individually.
+function splitArtistComponents(artistNorm,artistRaw){
+  const out=[];
+  if(artistRaw){
+    artistRaw.split(/\s*(?:,|&|\/|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bpres(?:ents)?\.?\b|\bb2b\b|\bmeets\b|\bwith\b|\bx\b|\bversus\b|\band\b)\s*/i).forEach(p=>{const n=normalizeStr(p);if(n)out.push(n);});
+  }else{
+    artistNorm.split(/\s+(?:and|x|vs|b2b|with|pres|presents|meets|versus)\s+/).forEach(n=>{if(n.trim())out.push(n.trim());});
+  }
+  return [...new Set(out)].filter(n=>n.length>=3&&n!==artistNorm).slice(0,3);
+}
+// Confirmation guard for the per-track release search below: the found
+// release must actually credit someone recognizably named in the local
+// artist tag, or a title-coincidence on a same-named track by a stranger
+// would slip through. Token-based so "Stojche feat. X" still overlaps the
+// release artist "Stojche".
+function artistTokensOverlap(localArtistNorm,candidateNames){
+  const lt=new Set(localArtistNorm.split(' ').filter(w=>w.length>=3));
+  const names=(candidateNames||[]).map(n=>normalizeStr(n||'')).filter(Boolean);
+  if(!lt.size)return names.some(n=>n.includes(localArtistNorm)||localArtistNorm.includes(n));
+  return names.some(n=>n.split(' ').some(w=>w.length>=3&&lt.has(w)));
+}
 // The cheap step (searchDiscogsArtist) is what dominates throughput on a
 // library this size — most local artist names won't have a Discogs match
 // at all, so most batches never even reach the heavier fetchArtistData()
@@ -1166,29 +1265,38 @@ async function matchLibraryWithDiscogs(){
     // don't spike beyond what the shared Discogs rate limiter expects.
     const searchResults=await Promise.all(batch.map(async artistNorm=>{
       try{
-        const results=await searchDiscogsArtist(artistNorm);
-        const cand=results.find(r=>normalizeStr(stripDiscogsSuffix(r.title))===artistNorm);
-        return{artistNorm,cand};
-      }catch(e){console.warn('WaxTree: artist search failed for',artistNorm,e);return{artistNorm,cand:null};}
+        // The raw tag (when a scan kept it) makes a better search query
+        // than the normalized string — punctuation intact, and it's what
+        // component splitting needs.
+        const raw=byArtist.get(artistNorm).find(t=>t.artistRaw)?.artistRaw;
+        const results=await searchDiscogsArtist(raw||artistNorm);
+        const cand=pickArtistCandidate(results,artistNorm);
+        if(cand)return{artistNorm,cands:[cand]};
+        // No profile under the full tag — try each credited artist alone.
+        const cands=[];
+        for(const comp of splitArtistComponents(artistNorm,raw)){
+          try{
+            const cc=pickArtistCandidate(await searchDiscogsArtist(comp),comp);
+            if(cc)cands.push(cc);
+          }catch{}
+        }
+        return{artistNorm,cands};
+      }catch(e){console.warn('WaxTree: artist search failed for',artistNorm,e);return{artistNorm,cands:[]};}
     }));
-    for(const{artistNorm,cand}of searchResults){
+    for(const{artistNorm,cands}of searchResults){
       if(!st.libraryMatchRunning)break;
-      if(cand){
+      const groupTracks=byArtist.get(artistNorm);
+      const unmatched=()=>groupTracks.filter(t=>!matches[t.titleNorm+'|'+t.artistNorm]);
+      let canonicalName=null;
+      for(const cand of cands){
+        if(!unmatched().length)break;
         try{
           const data=await fetchArtistData(cand.id,undefined,true);
-          byArtist.get(artistNorm).forEach(t=>{
-            const key=t.titleNorm+'|'+t.artistNorm;
-            if(matches[key])return; // already matched in a previous run
-            const found=(data.tracks||[]).find(dt=>{
-              if(normalizeStr(dt.title)!==t.titleNorm)return false;
-              if(t.dur){
-                const dd=parseDur(dt.duration||'');
-                if(!dd||Math.abs(dd-t.dur)>8)return false; // no confident duration match — reject
-              }
-              return true;
-            });
+          if(!canonicalName)canonicalName=data.name;
+          unmatched().forEach(t=>{
+            const found=pickTrackMatch(t,data.tracks);
             if(found){
-              matches[key]={
+              matches[t.titleNorm+'|'+t.artistNorm]={
                 title:found.album||found.title,artist:data.name,year:found.year,thumb:found.thumbUrl,
                 discogsUrl:found.discogsUrl,
                 artistExploreId:data.id,artistExploreName:data.name,
@@ -1199,6 +1307,48 @@ async function matchLibraryWithDiscogs(){
             }
           });
         }catch(e){console.warn('WaxTree: fetching artist data failed for',artistNorm,e);}
+      }
+      // Second pass: whatever the artist-catalog window missed — deep
+      // catalog beyond fetchArtistData()'s 200-track/newest-first cap, or
+      // no artist profile matched at all — gets one targeted release
+      // search per track (verified live 2026-07-18: /database/search with
+      // artist+track params pinpoints the right release in one request).
+      // The hit-or-miss verdict is cached per track so a re-run never
+      // repeats the network work; a confirmed match still has to clear the
+      // exact same pickTrackMatch gates PLUS credit someone actually named
+      // in the local artist tag.
+      for(const t of unmatched()){
+        if(!st.libraryMatchRunning)break;
+        const key=t.titleNorm+'|'+t.artistNorm;
+        const vKey='tv1:'+key;
+        const cached=lsGet(vKey);
+        if(cached){
+          if(cached.match&&!matches[key]){matches[key]=cached.match;st.libraryMatchProgress.found++;}
+          continue;
+        }
+        try{
+          const sd=await dReq('/database/search',{artist:canonicalName||t.artistRaw||t.artistNorm,track:t.titleRaw||t.titleNorm,type:'release',per_page:'3'});
+          let verdict={none:true};
+          for(const rel of(sd.results||[]).slice(0,2)){
+            const rd=await dReq('/releases/'+rel.id);
+            const entries=buildTrackEntries(rd,'disc-'+rel.id,`https://www.discogs.com/release/${rel.id}`,rel.year,null,rel.thumb||'');
+            const relArtists=(rd.artists||[]).map(a=>stripDiscogsSuffix(a.name));
+            const found=pickTrackMatch(t,entries);
+            if(found&&artistTokensOverlap(t.artistNorm,[...relArtists,found.trackArtistName||''])){
+              verdict={match:{
+                title:found.album||found.title,artist:found.trackArtistName||relArtists.join(', '),
+                year:found.year,thumb:found.thumbUrl,discogsUrl:found.discogsUrl,
+                artistExploreId:found.trackArtistId||rd.artists?.[0]?.id||null,
+                artistExploreName:found.trackArtistName||relArtists[0]||'',
+                labelExploreId:found.labelId,labelExploreName:found.label,
+                genre:found.genre||null,
+              }};
+              break;
+            }
+          }
+          lsSet(vKey,verdict);
+          if(verdict.match){matches[key]=verdict.match;st.libraryMatchProgress.found++;}
+        }catch(e){console.warn('WaxTree: track search failed for',t.titleNorm,e);}
       }
       checked.add(artistNorm);
     }
