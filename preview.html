@@ -1803,8 +1803,11 @@ function buildKnownFromLibrary(){
 // showed the old picks. Bumped to 4 for the releaseId field added below —
 // older cached pools don't carry it, which would silently defeat the
 // per-release diversity cap in renderRelatedTracks() for anything cached
-// before this change.
-const RELATED_CACHE_V=4;
+// before this change. Bumped again to 5 for the seed rework (dropped the
+// year lock, added a same-label seed, fixed a seed-order bug that could
+// silently crowd every result into one release year) — old pools reflect
+// the buggy search, not this one.
+const RELATED_CACHE_V=5;
 // Gathers the candidate POOL only — no ranking here. The pool is cached
 // per now-playing track (so switching tracks always re-searches), while
 // ranking happens fresh at render time against the live taste model, so
@@ -1837,29 +1840,50 @@ async function refreshRelatedTracks(nowTrack,seen,known){
         // The FULL style signature, comma-joined — confirmed against live
         // Discogs search (2026-07-18) that style="Techno,Dub Techno" is a
         // genuine AND-filter server-side (every result actually carries
-        // BOTH tags, still tens of thousands of matches even 3 tags deep),
-        // not something that needs simulating client-side by merging
-        // separate broad/narrow searches. That old approach — a separate
-        // seed for just the broader tag alone, meant to "feed both halves
-        // of the combo" — was actually diluting quality: searching a broad
-        // tag alone reopens the exact crossover-mainstream problem already
-        // fixed by dropping sort:have, just via a different door. This is
-        // strictly tighter: everything the search itself returns already
-        // matches the track's full style fingerprint, not just one tag
-        // from it. Two seeds: locked to this release's year (tight era
-        // match when a year exists) and without (similarity isn't bound to
-        // release year) — no third seed needed anymore.
+        // BOTH tags, still tens of thousands of matches even 3 tags deep).
+        // But plenty of real releases (confirmed live, 2026-07-18: Stojche
+        // "Heritage" on Dolly) carry only ONE broad style tag on Discogs —
+        // for those the combo buys nothing, it's just a generic search, and
+        // Discogs' own tag alone can't tell genuinely close material apart
+        // from merely-same-broad-genre material. A shared LABEL is a
+        // second, tag-independent correlation signal for exactly that case
+        // (labels curate a consistent sound) — confirmed live against
+        // Dolly's own catalog (Steffi, Doc Sleep, Juri Heidemann...), a
+        // noticeably tighter match to a Detroit/dub-inflected techno track
+        // than the broad style search alone returns.
         const comboStyle=styles.join(',');
-        console.info('[WaxTree Debug] refreshRelatedTracks: fresh search — trackKey=',trackKey,'comboStyle=',comboStyle,'year=',nowTrack.year,'title=',nowTrack.title);
-        const seeds=[];
-        if(nowTrack.year)seeds.push({style:comboStyle,year:String(nowTrack.year)});
-        seeds.push({style:comboStyle});
-        const seenRel=new Set(),rels=[];
-        for(const p of seeds){
+        console.info('[WaxTree Debug] refreshRelatedTracks: fresh search — trackKey=',trackKey,'comboStyle=',comboStyle,'labelId=',nowTrack.labelId,'title=',nowTrack.title);
+        // Each seed is its own group so releases can be interleaved fairly
+        // below — a year-locked seed used to run alongside the year-free
+        // one and both got dumped into one list before truncating to 18;
+        // since Array.push order put the year-locked seed first, it could
+        // (and did — confirmed live, 2026-07-18) fill the ENTIRE budget by
+        // itself, silently crowding out every other seed and making every
+        // suggestion the same release year even though year was never meant
+        // to be a hard filter. Dropped the year lock entirely per explicit
+        // request — similarity isn't bound to release year at all now, not
+        // even as a separate seed.
+        const seedGroups=[];
+        try{
+          const sd=await dReq('/database/search',{type:'release',per_page:'25',style:comboStyle});
+          seedGroups.push(sd.results||[]);
+        }catch{seedGroups.push([]);}
+        if(nowTrack.labelId){
           try{
-            const sd=await dReq('/database/search',{type:'release',per_page:'25',...p});
-            (sd.results||[]).forEach(rel=>{if(!seenRel.has(rel.id)){seenRel.add(rel.id);rels.push(rel);}});
-          }catch{/* one failed seed shouldn't sink the others */}
+            const ld=await dReq('/labels/'+nowTrack.labelId+'/releases',{per_page:'25',sort:'year',sort_order:'desc'});
+            seedGroups.push(ld.releases||[]);
+          }catch{seedGroups.push([]);}
+        }
+        // Round-robin across seed groups instead of concat-then-slice, so
+        // no single seed can starve the others just by returning more (or
+        // returning first) — each gets a fair turn until the budget fills.
+        const seenRel=new Set(),rels=[];
+        for(let i=0;rels.length<18&&seedGroups.some(g=>i<g.length);i++){
+          for(const g of seedGroups){
+            if(rels.length>=18)break;
+            const rel=g[i];
+            if(rel&&!seenRel.has(rel.id)){seenRel.add(rel.id);rels.push(rel);}
+          }
         }
         // Release-detail fetches used to run one at a time (a plain
         // for-await loop) — with up to 30 sequential awaits, that's the
