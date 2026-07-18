@@ -114,8 +114,6 @@ input,select{font:inherit;color:inherit}
 .sb-tag{font-size:10px;padding:1px 6px;border-radius:20px;background:rgba(94,196,123,.12);color:var(--accent);display:flex;align-items:center;gap:3px}
 .sb-tag-rm{font-size:9px;opacity:.6;cursor:pointer;line-height:1}
 .sb-tag-rm:hover{opacity:1}
-.sb-pct{font-size:10px;color:var(--text-f);flex-shrink:0;margin-left:auto;padding-left:6px}
-.sb-pct.full{color:var(--accent-light);font-weight:700}
 .sb-btns{display:flex;align-items:center;gap:1px;flex-shrink:0;opacity:0;transition:opacity .15s}
 .sb-item:hover .sb-btns,.sb-item.pinned .sb-btns{opacity:1}
 .sb-btn{color:var(--text-f);padding:2px 3px;border-radius:3px;transition:color .15s,background .15s;line-height:1;display:flex;align-items:center}
@@ -3967,22 +3965,7 @@ function buildSidebar(){
     const iw=d('sb-iw',{});iw.appendChild(node.type==='label'?svgLabel():svgArtist());item.appendChild(iw);
     const main=d('sb-main',{});const top=d('sb-top',{});
     if(isPinned)top.appendChild(s('sb-pin-dot',''));
-    top.appendChild(s('sb-name',node.name));
-    // Exploration/listen progress, next to the name — how many of this
-    // node's loaded tracks have been played long enough to earn their
-    // existing "✓ played" badge (st.listens[id].badged, the same signal
-    // the track rows themselves use). Against tracks.length (everything
-    // loaded), not the filtered view — the filter bar's transient state
-    // shouldn't make a node look more or less explored depending on what
-    // happens to be typed into it.
-    const heardTracks=node.data?.tracks;
-    if(heardTracks?.length){
-      const heardCount=heardTracks.filter(t=>st.listens[t.id]?.badged).length;
-      const heardFull=heardCount>=heardTracks.length;
-      const pct=Math.round(heardCount/heardTracks.length*100);
-      top.appendChild(el('span',{cls:'sb-pct'+(heardFull?' full':''),title:heardCount+' / '+heardTracks.length+' tracks heard'},pct+'%'));
-    }
-    main.appendChild(top);
+    top.appendChild(s('sb-name',node.name));main.appendChild(top);
     if(node.tags?.length){const tr=d('sb-tags',{});node.tags.forEach(tag=>tr.appendChild(d('sb-tag',{},'#'+tag,b('sb-tag-rm',{title:'Remove',onClick:e=>{e.stopPropagation();removeTag(node.id,tag);}},'×'))));main.appendChild(tr);}
     item.appendChild(main);
     const btns=d('sb-btns',{});
