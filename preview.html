@@ -2348,44 +2348,50 @@ function findTrackAndNode(trackId){
   return null;
 }
 const ytAutoMatchInFlight=new Set();
-// The free-tier YouTube Data API quota is 10,000 units/day, shared across
-// every session hitting this one server-side key. A fresh search.list
-// call costs ~101 units (100 for the search + ~1 for videos.list details)
-// — only ~99/day possible, TOTAL. But the channel-shortcut path
-// (fetchChannelUploads, once an artist's/label's channel is confirmed)
-// costs only ~3 units — over 30x cheaper. A flat "N attempts/day" counter
-// (what this used to be) charged both the same, which meant a handful of
-// brand-new-artist searches could exhaust the SAME daily allowance that
-// would otherwise cover hundreds of cheap follow-up tracks once that
-// artist's channel is known — exactly the reported "shows 6-7 then finds
-// no more" pattern partway through exploring a single artist. Budgeting
-// in real units instead means the cheap path keeps working long after
-// the expensive path is tapped out for the day.
-const YT_UNIT_COST_SEARCH=101;
-const YT_UNIT_COST_CHANNEL=3;
-const YT_DAILY_UNIT_BUDGET=9000; // stays comfortably under the real 10,000/day ceiling
+// Corrected against the actual Google Cloud Console quota page
+// (2026-07-19 — the "cost unit" model below turned out to be wrong).
+// There are TWO independent daily quotas, not one shared unit pool:
+//   - "Search Queries per day": 100 — a hard cap on the NUMBER of
+//     search.list CALLS specifically, regardless of anything else.
+//   - "Queries per day": 10,000 — a general cap on total API calls of
+//     ANY kind (search.list, channels.list, playlistItems.list,
+//     videos.list all draw from this one, one call = one unit here, not
+//     the old 100-units-per-search cost model YouTube's docs used to
+//     describe). In real usage this is barely touched (48/10,000 on a
+//     day where the search-specific quota was already 26/100) — it's a
+//     backstop, not the actual constraint.
+// The channel-shortcut path (fetchChannelUploads: channels.list +
+// playlistItems.list + videos.list) never calls search.list at all, so
+// it ONLY draws against the generous 10,000/day pool — effectively
+// unconstrained in practice. Budgeting search.list separately, tightly,
+// is what actually matters; the general pool just needs a sane backstop.
+const YT_SEARCH_CALLS_DAILY_LIMIT=80; // real cap is 100 — leaves headroom for manual testing/other margin
+const YT_GENERAL_CALLS_DAILY_LIMIT=9000; // real cap is 10,000 — rarely the binding constraint
 const YT_DAILY_BUDGET_KEY='wt-yt-daily-budget';
 function pacificDayKey(){
   return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 }
-// Cost is only known once the caller has decided which path (channel vs
-// search) it's about to take, so this is checked at the point of actual
-// spend inside resolveTrackVideoId, not as an admission gate before any
-// path is chosen.
-function trySpendYtUnits(cost){
+// kind: 'search' (1 search.list + 1 videos.list = 2 general calls, 1 of
+// which counts against the tight search-specific quota) or 'channel' (3
+// general calls: channels.list + playlistItems.list + videos.list, none
+// of which touch the search-specific quota at all).
+function trySpendYtCalls(kind){
   const now=Date.now();
   if(now-ytKickoffWindow.start>10000){ytKickoffWindow={count:0,start:now};}
   if(ytKickoffWindow.count>=2)return false; // still avoid firing a burst in one instant
   let daily;
   try{daily=JSON.parse(localStorage.getItem(YT_DAILY_BUDGET_KEY)||'null');}catch{daily=null;}
   const today=pacificDayKey();
-  // typeof guard catches the old {day,count} shape from before this was
-  // unit-weighted — without it, daily.units is undefined on the first read
-  // post-upgrade and undefined+cost>BUDGET is always false, silently
-  // disabling the whole budget check until the next real day rollover.
-  if(!daily||daily.day!==today||typeof daily.units!=='number')daily={day:today,units:0};
-  if(daily.units+cost>YT_DAILY_UNIT_BUDGET)return false;
-  daily.units+=cost;
+  // typeof guard catches older shapes from before this was split into two
+  // counters — without it, a stale field reads as undefined and
+  // undefined+cost>LIMIT is always false, silently disabling the check.
+  if(!daily||daily.day!==today||typeof daily.searchCalls!=='number'||typeof daily.generalCalls!=='number')
+    daily={day:today,searchCalls:0,generalCalls:0};
+  const searchCost=kind==='search'?1:0;
+  const generalCost=kind==='search'?2:3;
+  if(daily.searchCalls+searchCost>YT_SEARCH_CALLS_DAILY_LIMIT)return false;
+  if(daily.generalCalls+generalCost>YT_GENERAL_CALLS_DAILY_LIMIT)return false;
+  daily.searchCalls+=searchCost;daily.generalCalls+=generalCost;
   try{localStorage.setItem(YT_DAILY_BUDGET_KEY,JSON.stringify(daily));}catch{}
   ytKickoffWindow.count++;
   return true;
@@ -2501,7 +2507,7 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
           if(knownChannelId)saveYtChannelMap(ytChannelMap);
         }
         let hit=null;
-        if(knownChannelId&&trySpendYtUnits(YT_UNIT_COST_CHANNEL)){
+        if(knownChannelId&&trySpendYtCalls('channel')){
           try{
             const uploads=await fetchChannelUploads(knownChannelId);
             hit=uploads.find(r=>normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
@@ -2510,7 +2516,7 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
           }
         }
 
-        if(!hit&&trySpendYtUnits(YT_UNIT_COST_SEARCH)){
+        if(!hit&&trySpendYtCalls('search')){
           // Quoted phrases, not a loose bag of words: YouTube's search API
           // (unlike the consumer website) ranks loose queries by loose semantic
           // relevance, not exact terms — an artist whose name doubles as a
