@@ -2348,29 +2348,44 @@ function findTrackAndNode(trackId){
   return null;
 }
 const ytAutoMatchInFlight=new Set();
-// The free-tier YouTube Data API quota is 10,000 units/day, and each
-// resolution costs ~101 (100 for search.list + ~1 for videos.list) — that's
-// only about 99 resolutions/day, TOTAL, shared across every session hitting
-// this one server-side API key. A short burst-rate window alone (what this
-// used to be — 6 per 10s) allows tens of thousands per day if sustained,
-// nowhere close to what the quota can actually absorb. The real constraint
-// has to be a running daily count, checked against Google's own reset
-// schedule (midnight Pacific Time, not the browser's local midnight).
-const YT_DAILY_LIMIT=60; // stays comfortably under the ~99/day ceiling
+// The free-tier YouTube Data API quota is 10,000 units/day, shared across
+// every session hitting this one server-side key. A fresh search.list
+// call costs ~101 units (100 for the search + ~1 for videos.list details)
+// — only ~99/day possible, TOTAL. But the channel-shortcut path
+// (fetchChannelUploads, once an artist's/label's channel is confirmed)
+// costs only ~3 units — over 30x cheaper. A flat "N attempts/day" counter
+// (what this used to be) charged both the same, which meant a handful of
+// brand-new-artist searches could exhaust the SAME daily allowance that
+// would otherwise cover hundreds of cheap follow-up tracks once that
+// artist's channel is known — exactly the reported "shows 6-7 then finds
+// no more" pattern partway through exploring a single artist. Budgeting
+// in real units instead means the cheap path keeps working long after
+// the expensive path is tapped out for the day.
+const YT_UNIT_COST_SEARCH=101;
+const YT_UNIT_COST_CHANNEL=3;
+const YT_DAILY_UNIT_BUDGET=9000; // stays comfortably under the real 10,000/day ceiling
 const YT_DAILY_BUDGET_KEY='wt-yt-daily-budget';
 function pacificDayKey(){
   return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 }
-function tryYtKickoffBudget(){
+// Cost is only known once the caller has decided which path (channel vs
+// search) it's about to take, so this is checked at the point of actual
+// spend inside resolveTrackVideoId, not as an admission gate before any
+// path is chosen.
+function trySpendYtUnits(cost){
   const now=Date.now();
   if(now-ytKickoffWindow.start>10000){ytKickoffWindow={count:0,start:now};}
   if(ytKickoffWindow.count>=2)return false; // still avoid firing a burst in one instant
   let daily;
   try{daily=JSON.parse(localStorage.getItem(YT_DAILY_BUDGET_KEY)||'null');}catch{daily=null;}
   const today=pacificDayKey();
-  if(!daily||daily.day!==today)daily={day:today,count:0};
-  if(daily.count>=YT_DAILY_LIMIT)return false;
-  daily.count++;
+  // typeof guard catches the old {day,count} shape from before this was
+  // unit-weighted — without it, daily.units is undefined on the first read
+  // post-upgrade and undefined+cost>BUDGET is always false, silently
+  // disabling the whole budget check until the next real day rollover.
+  if(!daily||daily.day!==today||typeof daily.units!=='number')daily={day:today,units:0};
+  if(daily.units+cost>YT_DAILY_UNIT_BUDGET)return false;
+  daily.units+=cost;
   try{localStorage.setItem(YT_DAILY_BUDGET_KEY,JSON.stringify(daily));}catch{}
   ytKickoffWindow.count++;
   return true;
@@ -2387,73 +2402,153 @@ function isYtQuotaPaused(){
 function pauseYtQuota(hours){
   try{localStorage.setItem(YT_QUOTA_PAUSE_KEY,String(Date.now()+hours*3600000));}catch{}
 }
+// ── Shared cross-user YouTube match cache (Supabase) ─────────
+// track_id (Discogs release id + tracklist position) and normalized
+// artist/label names are globally stable, not per-user — see
+// supabase/yt_video_cache.sql. A video resolved by ANY WaxTree user is
+// exactly as valid for the next person who reaches the same track, and
+// costs them zero YouTube quota to reuse. Read-through before ever
+// spending real quota; write-through the moment a local resolution
+// confirms a result, so it's there for the next person too.
+// Two separate sets, deliberately not one: ytSharedBatchDispatched marks a
+// track the instant its batch fetch is DISPATCHED (dedupes re-triggering
+// the same batch on every render tick while it's still in flight).
+// ytSharedChecked only marks a track once its shared-cache verdict is
+// actually SETTLED (batch response back, or the per-track fallback below
+// resolved) — that's the one resolveTrackVideoId consults to decide
+// whether it's safe to skip its own redundant check. Collapsing these into
+// one flag set-at-dispatch-time would have a real race: the batch trigger
+// and the per-track render loop both run synchronously in the same tick
+// (see buildContent()), so every track in a freshly dispatched batch would
+// already read as "checked" before the batch's actual network response
+// exists — meaning resolveTrackVideoId would skip its own check and race
+// straight into spending real YouTube quota on a track the batch was about
+// to resolve for free moments later.
+const ytSharedBatchDispatched=new Set();
+const ytSharedChecked=new Set();
+async function fetchSharedYtMatches(trackIds){
+  if(!trackIds.length)return;
+  try{
+    const{data,error}=await sb.from('yt_video_matches').select('track_id,video_id').in('track_id',trackIds);
+    trackIds.forEach(id=>ytSharedChecked.add(id)); // verdict settled for the whole batch now, hit or miss
+    if(error||!data)return;
+    let changed=false;
+    data.forEach(row=>{
+      if(!(row.track_id in ytMatches)){ytMatches[row.track_id]=row.video_id||false;changed=true;}
+    });
+    if(changed){saveYtMatches(ytMatches);rr();}
+  }catch(e){console.warn('WaxTree: shared YouTube cache lookup failed:',e);}
+}
+function pushSharedYtMatch(trackId,videoId){
+  sb.from('yt_video_matches').upsert({track_id:trackId,video_id:videoId||null},{onConflict:'track_id',ignoreDuplicates:true})
+    .then(({error})=>{if(error)console.warn('WaxTree: could not publish shared YouTube match:',error);});
+}
+async function fetchSharedYtChannel(nameNorm){
+  if(!nameNorm)return null;
+  try{
+    const{data,error}=await sb.from('yt_channel_matches').select('channel_id').eq('name_norm',nameNorm).maybeSingle();
+    if(error||!data)return null;
+    return data.channel_id;
+  }catch{return null;}
+}
+function pushSharedYtChannel(nameNorm,channelId){
+  if(!nameNorm)return;
+  sb.from('yt_channel_matches').upsert({name_norm:nameNorm,channel_id:channelId},{onConflict:'name_norm',ignoreDuplicates:true})
+    .then(({error})=>{if(error)console.warn('WaxTree: could not publish shared YouTube channel:',error);});
+}
 function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
   if(trackId in ytMatches)return ytMatches[trackId]; // false (confirmed no match) or a videoId string — permanent
-  if(isYtQuotaPaused())return undefined; // known exhausted — don't even try
   if(ytAutoMatchInFlight.has(trackId))return undefined;
   ytAutoMatchInFlight.add(trackId);
   (async()=>{
     let result;
+    let publishToShared=true; // suppressed once a shared-cache hit already covers it below
     try{
-      const titleN=normalizeStr(title);
-      const artistN=normalizeStr(artistName||'');
-      const labelN=normalizeStr(labelName||'');
-      const expectedSec=duration?parseDur(duration):0;
-
-      // Cheap path first: if a previous track already confirmed this
-      // artist's or label's channel, check their own uploads (~3 units,
-      // no search.list quota spent) before ever paying for a search.
-      // Already saved in ytChannelMap when it was first confirmed, so
-      // nothing more to persist here on a hit.
-      const knownChannelId=ytChannelMap[artistN]||ytChannelMap[labelN];
-      let hit=null;
-      if(knownChannelId){
+      // Shared cache first — the batched page-level check (see buildContent())
+      // covers most tracks before this even runs, but this single-row lookup
+      // is the safety net for whatever reaches resolveTrackVideoId some other
+      // way (e.g. a mini-player Explore pick). Costs zero YouTube quota and
+      // isn't affected by isYtQuotaPaused() below — someone else's confirmed
+      // result is exactly as usable during a local pause as any other time.
+      if(!ytSharedChecked.has(trackId)){
+        ytSharedChecked.add(trackId);
         try{
-          const uploads=await fetchChannelUploads(knownChannelId);
-          hit=uploads.find(r=>normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
-        }catch(e){
-          console.warn('WaxTree: channel-uploads lookup failed, falling back to search for',title,e);
-        }
+          const{data}=await sb.from('yt_video_matches').select('video_id').eq('track_id',trackId).maybeSingle();
+          if(data){result=data.video_id||null;publishToShared=false;}
+        }catch{}
       }
 
-      if(!hit){
-        // Quoted phrases, not a loose bag of words: YouTube's search API
-        // (unlike the consumer website) ranks loose queries by loose semantic
-        // relevance, not exact terms — an artist whose name doubles as a
-        // common word (e.g. "Vedik" vs. "Vedic") gets swamped by unrelated
-        // results otherwise, even though the right video is on YouTube.
-        const q=`"${artistName||''}" "${title}"`;
-        const results=await searchYouTubeApi(q);
-        hit=results.find(r=>{
-          if(!normalizeStr(r.title||'').includes(titleN))return false;
-          const channelN=normalizeStr(r.channelTitle||'');
-          const channelMatches=(artistN&&channelN.includes(artistN))||(labelN&&channelN.includes(labelN));
-          if(channelMatches){
-            // Uploader confirmed as the artist/label (or their YouTube-generated
-            // "Topic" channel) — a looser duration tolerance is fine here.
-            if(expectedSec&&r.durationSec&&Math.abs(r.durationSec-expectedSec)>8)return false;
-            return true;
+      if(result===undefined){
+        if(isYtQuotaPaused())return; // known exhausted — don't even try real quota-costing paths
+
+        const titleN=normalizeStr(title);
+        const artistN=normalizeStr(artistName||'');
+        const labelN=normalizeStr(labelName||'');
+        const expectedSec=duration?parseDur(duration):0;
+
+        // Cheap path first: if a previous track (locally, or by ANY WaxTree
+        // user via the shared cache) already confirmed this artist's or
+        // label's channel, check their own uploads (~3 units, no
+        // search.list quota spent) before ever paying for a search.
+        let knownChannelId=ytChannelMap[artistN]||ytChannelMap[labelN];
+        if(!knownChannelId){
+          const sc=await fetchSharedYtChannel(artistN);
+          if(sc){knownChannelId=sc;ytChannelMap[artistN]=sc;}
+          else if(labelN){
+            const sc2=await fetchSharedYtChannel(labelN);
+            if(sc2){knownChannelId=sc2;ytChannelMap[labelN]=sc2;}
           }
-          // Third-party upload (fan channel, blog, etc.) — the channel gives no
-          // signal either way, so only trust a tight duration agreement: a
-          // matching title AND a near-exact duration match is too specific a
-          // coincidence for unrelated content, but a loose title match alone
-          // is not enough (that's exactly what got the earlier attempt reverted).
-          if(!expectedSec||!r.durationSec)return false;
-          return Math.abs(r.durationSec-expectedSec)<=3;
-        })||null;
-        if(hit?.channelId){
-          const channelN=normalizeStr(hit.channelTitle||'');
-          // Only remember the channel for the identity it actually matched —
-          // a third-party upload's channel isn't the artist's, so nothing to
-          // shortcut next time.
-          let learned=false;
-          if(artistN&&channelN.includes(artistN)){ytChannelMap[artistN]=hit.channelId;learned=true;}
-          if(labelN&&channelN.includes(labelN)){ytChannelMap[labelN]=hit.channelId;learned=true;}
-          if(learned)saveYtChannelMap(ytChannelMap);
+          if(knownChannelId)saveYtChannelMap(ytChannelMap);
         }
+        let hit=null;
+        if(knownChannelId&&trySpendYtUnits(YT_UNIT_COST_CHANNEL)){
+          try{
+            const uploads=await fetchChannelUploads(knownChannelId);
+            hit=uploads.find(r=>normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
+          }catch(e){
+            console.warn('WaxTree: channel-uploads lookup failed, falling back to search for',title,e);
+          }
+        }
+
+        if(!hit&&trySpendYtUnits(YT_UNIT_COST_SEARCH)){
+          // Quoted phrases, not a loose bag of words: YouTube's search API
+          // (unlike the consumer website) ranks loose queries by loose semantic
+          // relevance, not exact terms — an artist whose name doubles as a
+          // common word (e.g. "Vedik" vs. "Vedic") gets swamped by unrelated
+          // results otherwise, even though the right video is on YouTube.
+          const q=`"${artistName||''}" "${title}"`;
+          const results=await searchYouTubeApi(q);
+          hit=results.find(r=>{
+            if(!normalizeStr(r.title||'').includes(titleN))return false;
+            const channelN=normalizeStr(r.channelTitle||'');
+            const channelMatches=(artistN&&channelN.includes(artistN))||(labelN&&channelN.includes(labelN));
+            if(channelMatches){
+              // Uploader confirmed as the artist/label (or their YouTube-generated
+              // "Topic" channel) — a looser duration tolerance is fine here.
+              if(expectedSec&&r.durationSec&&Math.abs(r.durationSec-expectedSec)>8)return false;
+              return true;
+            }
+            // Third-party upload (fan channel, blog, etc.) — the channel gives no
+            // signal either way, so only trust a tight duration agreement: a
+            // matching title AND a near-exact duration match is too specific a
+            // coincidence for unrelated content, but a loose title match alone
+            // is not enough (that's exactly what got the earlier attempt reverted).
+            if(!expectedSec||!r.durationSec)return false;
+            return Math.abs(r.durationSec-expectedSec)<=3;
+          })||null;
+          if(hit?.channelId){
+            const channelN=normalizeStr(hit.channelTitle||'');
+            // Only remember the channel for the identity it actually matched —
+            // a third-party upload's channel isn't the artist's, so nothing to
+            // shortcut next time.
+            let learned=null;
+            if(artistN&&channelN.includes(artistN)){ytChannelMap[artistN]=hit.channelId;learned=artistN;}
+            else if(labelN&&channelN.includes(labelN)){ytChannelMap[labelN]=hit.channelId;learned=labelN;}
+            if(learned){saveYtChannelMap(ytChannelMap);pushSharedYtChannel(learned,hit.channelId);}
+          }
+        }
+        result=hit?hit.id:null;
       }
-      result=hit?hit.id:null;
     }catch(e){
       console.warn('WaxTree: YouTube auto-match failed for',title,e);
       result=undefined; // network/config issue — don't cache, retry on a later attempt
@@ -2462,6 +2557,7 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
     if(result===undefined)return;
     ytMatches[trackId]=result===null?false:result;
     saveYtMatches(ytMatches);
+    if(publishToShared)pushSharedYtMatch(trackId,result); // share with every other WaxTree user
     if(result){
       // Persist onto the actual track object (same pattern resolveCoversInBackground
       // uses) so it survives being re-rendered elsewhere — play button state,
@@ -3822,16 +3918,17 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     const liked=!!st.likes[track.id],badged=!!st.listens[track.id]?.badged;
     const owned=isOwned(track.title,displayArtist);
     // Every track without a Discogs video is a candidate here, not just
-    // the one the user happens to click play on — bounded by
-    // tryYtKickoffBudget()'s rolling time window so a big tracklist
-    // resolves gradually instead of one API-quota-draining burst. A cache
-    // hit from an earlier attempt (this render or a previous one) applies
-    // immediately, no budget spent.
+    // the one the user happens to click play on. A cache hit (local or,
+    // via resolveTrackVideoId's own shared-cache check, anyone else's)
+    // applies immediately, no quota spent; safe to call unconditionally
+    // otherwise — resolveTrackVideoId short-circuits on its own in-flight
+    // guard, and the real per-unit budget is checked internally once it
+    // knows which path (cheap channel-shortcut vs a fresh search) it needs.
     let resolvedVideoId=track.videoId;
     if(!resolvedVideoId){
       if(track.id in ytMatches){
         resolvedVideoId=ytMatches[track.id]||null;
-      }else if(ytAutoMatchInFlight.has(track.id)||tryYtKickoffBudget()){
+      }else{
         resolveTrackVideoId(track.id,track.title,displayArtist,track.duration,isLabel?nodeName:track.label);
       }
     }
@@ -4256,6 +4353,19 @@ function buildContent(){
     if(page>=totalPages)page=Math.max(0,totalPages-1);
     tracksPageMap[node.id]=page;
     const pageSlice=filtered.slice(page*PAGE,(page+1)*PAGE);
+    // One batched shared-cache lookup for everything visible on this page,
+    // instead of resolveTrackVideoId's own per-track fallback query firing
+    // once per unresolved track (up to PAGE=50 individual round trips on a
+    // big tracklist). ytSharedBatchDispatched marks each id immediately so
+    // a re-render before this resolves can't refire the same batch — it
+    // does NOT mean the verdict is known yet (see the comment above that
+    // set's declaration), so resolveTrackVideoId's own per-track fallback
+    // still runs normally for these ids until the batch actually returns.
+    const needShared=pageSlice.filter(t=>!t.videoId&&!(t.id in ytMatches)&&!ytSharedBatchDispatched.has(t.id));
+    if(needShared.length){
+      needShared.forEach(t=>ytSharedBatchDispatched.add(t.id));
+      fetchSharedYtMatches(needShared.map(t=>t.id));
+    }
 
     const hdrRow=d('tracks-hdr',{});
     hdrRow.appendChild(el('p',{cls:'sec-lbl'},(isLabel?'RELEASES':'TRACKS')+' ('+dt.trackCount+' Discogs, '+filtered.length+' loaded)'));
