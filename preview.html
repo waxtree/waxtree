@@ -2391,10 +2391,27 @@ function pacificDayKey(){
 // which counts against the tight search-specific quota) or 'channel' (3
 // general calls: channels.list + playlistItems.list + videos.list, none
 // of which touch the search-specific quota at all).
+// Separate burst windows per kind, calibrated against the real per-minute
+// quotas (also visible on the Cloud Console Quotas page): "Search Queries
+// per minute" is 100 — 12 per 10s (72/min) stays safely under that with
+// margin. Confirmed live (2026-07-20): the OLD flat "2 per 10s regardless
+// of kind" throttle was the actual bottleneck on a freshly reset day —
+// daily usage was only 7/100 search calls, nowhere near exhausted, but a
+// 50-track page could still take 4+ minutes to finish resolving at 2
+// attempts/10s. The channel-shortcut path's own per-minute ceiling
+// (general "Queries per minute": 1,800,000) isn't a real external
+// constraint at all — its burst cap just avoids a self-inflicted stampede
+// against the Vercel function, not an actual YouTube limit.
+const YT_SEARCH_BURST_MAX=12;
+const YT_CHANNEL_BURST_MAX=20;
+let ytSearchBurst={count:0,start:0};
+let ytChannelBurst={count:0,start:0};
 function trySpendYtCalls(kind){
   const now=Date.now();
-  if(now-ytKickoffWindow.start>10000){ytKickoffWindow={count:0,start:now};}
-  if(ytKickoffWindow.count>=2)return false; // still avoid firing a burst in one instant
+  const burst=kind==='search'?ytSearchBurst:ytChannelBurst;
+  const burstMax=kind==='search'?YT_SEARCH_BURST_MAX:YT_CHANNEL_BURST_MAX;
+  if(now-burst.start>10000){burst.count=0;burst.start=now;}
+  if(burst.count>=burstMax)return false; // still avoid firing an actual instant stampede
   let daily;
   try{daily=JSON.parse(localStorage.getItem(YT_DAILY_BUDGET_KEY)||'null');}catch{daily=null;}
   const today=pacificDayKey();
@@ -2409,10 +2426,9 @@ function trySpendYtCalls(kind){
   if(daily.generalCalls+generalCost>YT_GENERAL_CALLS_DAILY_LIMIT)return false;
   daily.searchCalls+=searchCost;daily.generalCalls+=generalCost;
   try{localStorage.setItem(YT_DAILY_BUDGET_KEY,JSON.stringify(daily));}catch{}
-  ytKickoffWindow.count++;
+  burst.count++;
   return true;
 }
-let ytKickoffWindow={count:0,start:0};
 // Circuit breaker: once the API confirms the daily quota is out, stop
 // attempting anything further for a while instead of hitting 429 on every
 // track — both wasteful and noisy, and won't succeed again until Google's
