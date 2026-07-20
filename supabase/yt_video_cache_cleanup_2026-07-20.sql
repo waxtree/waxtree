@@ -1,0 +1,23 @@
+-- ============================================================
+-- WaxTree — One-time cleanup: stale "no match" rows
+-- ============================================================
+-- Run this ONCE in the Supabase Dashboard → SQL Editor, then discard —
+-- unlike the other supabase/*.sql files, this is not idempotent schema
+-- setup, it's a one-time data fix.
+--
+-- A bug live 2026-07-19→20 in resolveTrackVideoId() could cache a
+-- "confirmed no match" (video_id = null) for a track that was never
+-- actually searched — the daily search-quota check ran too late, after
+-- a result had already been computed unconditionally. Because
+-- yt_video_matches upserts with ignoreDuplicates (first writer wins,
+-- matches never expire by design — see supabase/yt_video_cache.sql),
+-- any row poisoned by the bug can never self-correct.
+--
+-- The bug and a genuine "we searched, found nothing" are indistinguishable
+-- in the data itself, so this clears every null-video_id row rather than
+-- guessing which ones are real. Rows with a real video_id are untouched —
+-- a positive match was never affected by this bug. Cleared tracks simply
+-- get a genuine first attempt next time someone reaches them.
+-- ============================================================
+
+delete from public.yt_video_matches where video_id is null;

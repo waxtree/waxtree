@@ -2335,6 +2335,22 @@ async function fetchChannelUploads(channelId){
 function loadYtMatches(){try{const r=localStorage.getItem('wt-yt-matches');return r?JSON.parse(r):{};}catch{return{};}}
 function saveYtMatches(m){try{localStorage.setItem('wt-yt-matches',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist YouTube matches:',e);}}
 let ytMatches=loadYtMatches();
+// One-time remediation for the budget-exhaustion bug above (confirmed live
+// 2026-07-20): any track whose "no match" verdict was cached while this
+// bug was live may be wrong — false here no longer reliably means "we
+// searched and found nothing," it might mean "we never got the chance to
+// try." Since the two cases are indistinguishable in the data itself,
+// strip every false entry once so those tracks get a genuine first
+// attempt; real videoId matches are untouched — a positive match was
+// never affected by this bug regardless of when it was found.
+(function purgeStaleYtNoMatches(){
+  const PURGE_KEY='wt-yt-false-purge-v1';
+  if(localStorage.getItem(PURGE_KEY))return;
+  let purged=0;
+  Object.keys(ytMatches).forEach(k=>{if(ytMatches[k]===false){delete ytMatches[k];purged++;}});
+  if(purged)saveYtMatches(ytMatches);
+  try{localStorage.setItem(PURGE_KEY,'1');}catch{}
+})();
 // artistNorm/labelNorm -> their confirmed YouTube channel id, so the next
 // track by the same artist/label can skip straight to fetchChannelUploads().
 function loadYtChannelMap(){try{const r=localStorage.getItem('wt-yt-channels');return r?JSON.parse(r):{};}catch{return{};}}
@@ -2506,8 +2522,9 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
           }
           if(knownChannelId)saveYtChannelMap(ytChannelMap);
         }
-        let hit=null;
+        let hit=null,attempted=false;
         if(knownChannelId&&trySpendYtCalls('channel')){
+          attempted=true;
           try{
             const uploads=await fetchChannelUploads(knownChannelId);
             hit=uploads.find(r=>normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
@@ -2517,6 +2534,7 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
         }
 
         if(!hit&&trySpendYtCalls('search')){
+          attempted=true;
           // Quoted phrases, not a loose bag of words: YouTube's search API
           // (unlike the consumer website) ranks loose queries by loose semantic
           // relevance, not exact terms — an artist whose name doubles as a
@@ -2553,7 +2571,22 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
             if(learned){saveYtChannelMap(ytChannelMap);pushSharedYtChannel(learned,hit.channelId);}
           }
         }
-        result=hit?hit.id:null;
+        // Real bug, shipped for about a day (2026-07-19→20): this used to
+        // run unconditionally, so a track where NEITHER path above could
+        // even be attempted (both blocked by trySpendYtCalls — budget
+        // exhausted) still fell through to hit?hit.id:null, i.e. null,
+        // which then got PERMANENTLY cached as "confirmed no match" below
+        // even though no search was ever actually performed. Confirmed
+        // live (2026-07-20): tracks left over from a budget-exhausted
+        // session stayed stuck on "no video" the next day even with the
+        // daily quota fully reset, because the very first line of this
+        // function (`if(trackId in ytMatches)`) short-circuited on the
+        // wrongly-cached false before ever reaching a budget check again.
+        // Only cache a verdict when a real attempt actually happened —
+        // otherwise leave result undefined, same as the isYtQuotaPaused()
+        // and network-error paths already do, so it's retried later
+        // instead of poisoned forever.
+        result=attempted?(hit?hit.id:null):undefined;
       }
     }catch(e){
       console.warn('WaxTree: YouTube auto-match failed for',title,e);
