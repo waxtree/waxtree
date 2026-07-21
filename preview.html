@@ -2408,12 +2408,16 @@ const YT_SEARCH_BURST_MAX=12;
 const YT_CHANNEL_BURST_MAX=20;
 let ytSearchBurst={count:0,start:0};
 let ytChannelBurst={count:0,start:0};
+// Returns 'ok' (spent), 'burst' (blocked only by the ~10s rolling window —
+// worth a scheduled retry once it resets, see resolveTrackVideoId), or
+// 'daily' (the real daily cap is hit — retrying before Google's own reset,
+// midnight Pacific, can't possibly succeed).
 function trySpendYtCalls(kind){
   const now=Date.now();
   const burst=kind==='search'?ytSearchBurst:ytChannelBurst;
   const burstMax=kind==='search'?YT_SEARCH_BURST_MAX:YT_CHANNEL_BURST_MAX;
   if(now-burst.start>10000){burst.count=0;burst.start=now;}
-  if(burst.count>=burstMax)return false; // still avoid firing an actual instant stampede
+  if(burst.count>=burstMax)return 'burst'; // still avoid firing an actual instant stampede
   let daily;
   try{daily=JSON.parse(localStorage.getItem(YT_DAILY_BUDGET_KEY)||'null');}catch{daily=null;}
   const today=pacificDayKey();
@@ -2424,12 +2428,12 @@ function trySpendYtCalls(kind){
     daily={day:today,searchCalls:0,generalCalls:0};
   const searchCost=kind==='search'?1:0;
   const generalCost=kind==='search'?2:3;
-  if(daily.searchCalls+searchCost>YT_SEARCH_CALLS_DAILY_LIMIT)return false;
-  if(daily.generalCalls+generalCost>YT_GENERAL_CALLS_DAILY_LIMIT)return false;
+  if(daily.searchCalls+searchCost>YT_SEARCH_CALLS_DAILY_LIMIT)return 'daily';
+  if(daily.generalCalls+generalCost>YT_GENERAL_CALLS_DAILY_LIMIT)return 'daily';
   daily.searchCalls+=searchCost;daily.generalCalls+=generalCost;
   try{localStorage.setItem(YT_DAILY_BUDGET_KEY,JSON.stringify(daily));}catch{}
   burst.count++;
-  return true;
+  return 'ok';
 }
 // Circuit breaker: once the API confirms the daily quota is out, stop
 // attempting anything further for a while instead of hitting 429 on every
@@ -2503,6 +2507,7 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
   (async()=>{
     let result;
     let publishToShared=true; // suppressed once a shared-cache hit already covers it below
+    let retryBurst=false; // set true if the ONLY thing blocking a real attempt was the ~10s rolling window, not the daily cap or a missing channel — worth a scheduled retry
     try{
       // Shared cache first — the batched page-level check (see buildContent())
       // covers most tracks before this even runs, but this single-row lookup
@@ -2541,17 +2546,22 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
           if(knownChannelId)saveYtChannelMap(ytChannelMap);
         }
         let hit=null,attempted=false;
-        if(knownChannelId&&trySpendYtCalls('channel')){
-          attempted=true;
-          try{
-            const uploads=await fetchChannelUploads(knownChannelId);
-            hit=uploads.find(r=>normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
-          }catch(e){
-            console.warn('WaxTree: channel-uploads lookup failed, falling back to search for',title,e);
-          }
+        if(knownChannelId){
+          const spend=trySpendYtCalls('channel');
+          if(spend==='ok'){
+            attempted=true;
+            try{
+              const uploads=await fetchChannelUploads(knownChannelId);
+              hit=uploads.find(r=>normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
+            }catch(e){
+              console.warn('WaxTree: channel-uploads lookup failed, falling back to search for',title,e);
+            }
+          }else if(spend==='burst')retryBurst=true;
         }
 
-        if(!hit&&trySpendYtCalls('search')){
+        let searchSpend='ok';
+        if(!hit)searchSpend=trySpendYtCalls('search');
+        if(!hit&&searchSpend==='ok'){
           attempted=true;
           // Quoted phrases, not a loose bag of words: YouTube's search API
           // (unlike the consumer website) ranks loose queries by loose semantic
@@ -2607,7 +2617,7 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
             else if(labelN&&channelN.includes(labelN)){ytChannelMap[labelN]=hit.channelId;learned=labelN;}
             if(learned){saveYtChannelMap(ytChannelMap);pushSharedYtChannel(learned,hit.channelId);}
           }
-        }
+        }else if(!hit&&searchSpend==='burst')retryBurst=true;
         // Real bug, shipped for about a day (2026-07-19→20): this used to
         // run unconditionally, so a track where NEITHER path above could
         // even be attempted (both blocked by trySpendYtCalls — budget
@@ -2630,7 +2640,22 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
       result=undefined; // network/config issue — don't cache, retry on a later attempt
     }
     ytAutoMatchInFlight.delete(trackId);
-    if(result===undefined)return;
+    if(result===undefined){
+      // Confirmed live (2026-07-20): a track blocked only by the ~10s
+      // burst window (not the daily cap, not a genuine "no channel yet")
+      // used to just give up silently — nothing ever re-triggered
+      // resolveTrackVideoId for it again until some UNRELATED state
+      // change happened to cause a re-render. On a page with more
+      // unresolved tracks than one burst window allows (very normal —
+      // e.g. an 11-track release with no artist channel confirmed yet,
+      // sharing the same page-wide budget as everything else on screen),
+      // most of them could sit stuck indefinitely even with the daily
+      // quota barely touched. Schedule one retry shortly after the burst
+      // window resets so a whole page's backlog keeps draining on its
+      // own in waves, instead of needing incidental renders to progress.
+      if(retryBurst)setTimeout(()=>resolveTrackVideoId(trackId,title,artistName,duration,labelName),10500);
+      return;
+    }
     ytMatches[trackId]=result===null?false:result;
     saveYtMatches(ytMatches);
     if(publishToShared)pushSharedYtMatch(trackId,result); // share with every other WaxTree user
