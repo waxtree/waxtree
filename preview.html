@@ -286,6 +286,7 @@ input,select{font:inherit;color:inherit}
 .rel-play:hover{background:var(--accent);color:#fff}
 .rel-play.has-video{color:var(--accent)}
 .rel-track-title{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0}
+.t-meta-cluster{display:flex;align-items:center;gap:6px;margin-left:auto;flex-shrink:0}
 .rel-mid{flex:1 1 22%;min-width:0;padding-top:2px}
 .rel-title{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Artisti correlati */
@@ -2122,88 +2123,22 @@ async function refreshRelatedTracks(nowTrack,seen,known){
   finally{relatedLoading=false;rr();}
 }
 function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))|0;}return Math.abs(h);}
+// Paused at the user's explicit request (2026-07-21) — correlation quality
+// still wasn't good enough after several rounds of real, verified fixes
+// (see [[project_waxtree_related_tracks_stalemate]] in memory). Reverted
+// the visible panel back to a plain "Coming soon" placeholder rather than
+// showing picks. Deliberately NOT deleted: refreshRelatedTracks(),
+// scoreRelatedCandidate(), buildTasteModel() and the rest of the pipeline
+// below are untouched and simply never called from here anymore — nothing
+// is fetched, no quota spent, no cache written. If this gets revisited,
+// get concrete evidence (a console screenshot, a specific bad example)
+// before changing the algorithm again rather than another blind pass.
 function renderRelatedTracks(){
   const host=document.getElementById('related-tracks');
   if(!host)return;
   host.innerHTML='';
   host.appendChild(s('rp-corr-hd','Related Tracks'));
-  const np=st.nowPlaying;
-  if(!np){host.appendChild(s('rp-coming-soon','Play something to see picks'));return;}
-  const nowTrack=findTrack(np.trackId);
-  if(!nowTrack?.genre){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
-  if(relatedCache?.trackKey!==np.trackId){
-    const cached=lsGet('related:v'+RELATED_CACHE_V+':'+np.trackId);
-    console.info('[WaxTree Debug] renderRelatedTracks: track changed — trackId=',np.trackId,'title=',nowTrack.title,cached?'(localStorage HIT, reusing saved pool)':'(no saved pool, triggering fresh search)');
-    if(cached){cached.forEach(t=>{discoveredTracks[t.id]=t;});relatedCache={trackKey:np.trackId,items:cached};}
-    else{
-      if(!relatedLoading){
-        const seen=new Set(st.nodes.map(n=>n.type+':'+n.discogsId));
-        refreshRelatedTracks(nowTrack,seen,buildKnownFromLibrary());
-      }
-      host.appendChild(s('rp-coming-soon',relatedLoading?'Finding picks…':'Explore more to see picks'));
-      return;
-    }
-  }
-  // Re-checked at render time too, in case one of these got explored (or
-  // synced into the library) since the cache was built.
-  const known=buildKnownFromLibrary();
-  const pool=(relatedCache?.items||[]).filter(t=>{
-    const artistExplored=t.trackArtistId&&st.nodes.some(n=>n.type==='artist'&&n.discogsId===t.trackArtistId);
-    const labelExplored=t.labelId&&st.nodes.some(n=>n.type==='label'&&n.discogsId===t.labelId);
-    const artistKnown=known.artists.has(normalizeStr(t.artistName));
-    const labelKnown=t.label&&known.labels.has(normalizeStr(t.label));
-    return !artistExplored&&!labelExplored&&!artistKnown&&!labelKnown;
-  });
-  if(!pool.length){host.appendChild(s('rp-coming-soon','Explore more to see picks'));return;}
-  // Rank against the LIVE taste model, every render — this is where the
-  // "learns as you feed it" behavior lives. Two passes over the same
-  // score-sorted order: pass 1 only takes one track per release, so a
-  // single EP can't crowd out everything else even when several of its
-  // tracks score well — and since candidates are already sorted by score,
-  // the one track pass 1 takes from each release is naturally its
-  // highest-scoring (closest-to-taste) track, a reasonable stand-in for
-  // "the best one" without needing a separate popularity signal Discogs
-  // doesn't expose per-track anyway. Pass 2 only runs if pass 1 couldn't
-  // fill the list, allowing a second (never a third) track from a release
-  // already used. Artist cap (2) still applies throughout.
-  const model=getTasteModel();
-  const scored=pool.map(t=>({t,sc:scoreRelatedCandidate(t,nowTrack,model)})).sort((a,b)=>b.sc-a.sc).map(x=>x.t);
-  // Style and label are both release-wide in Discogs, not per-track — two
-  // tracks on the same EP can genuinely score identically against every
-  // signal available, which is exactly what made switching tracks within
-  // one release look "stuck" (confirmed live, 2026-07-18: same 4 picks for
-  // both "Heritage" and "Southside", both on Stojche's "Cause & Effect").
-  // Rotate deterministically by track id within a quality-bounded top
-  // slice — never reaching past candidates that wouldn't have made a
-  // generous top-30 cut anyway — so different tracks on the same release
-  // surface a different, still fully vetted, slice of the same pool
-  // instead of the identical top-14 every time.
-  const topPool=scored.slice(0,30);
-  const rotateBy=topPool.length?hashStr(String(np.trackId))%topPool.length:0;
-  const ranked=topPool.slice(rotateBy).concat(topPool.slice(0,rotateBy),scored.slice(30));
-  const artistCounts=new Map(),releaseCounts=new Map(),items=[],used=new Set();
-  const take=(t,releaseCap)=>{
-    const ak=t.trackArtistId||t.artistName;
-    const rk=t.releaseId||t.id;
-    if((artistCounts.get(ak)||0)>=2)return false;
-    if((releaseCounts.get(rk)||0)>=releaseCap)return false;
-    artistCounts.set(ak,(artistCounts.get(ak)||0)+1);
-    releaseCounts.set(rk,(releaseCounts.get(rk)||0)+1);
-    items.push(t);used.add(t.id);
-    return true;
-  };
-  for(const t of ranked){if(items.length>=14)break;take(t,1);}
-  if(items.length<14)for(const t of ranked){if(items.length>=14)break;if(used.has(t.id))continue;take(t,2);}
-  items.forEach(t=>{
-    const row=d('rp-rel-row',{onClick:()=>doPlay(t.id,t.videoId,t.title,t.artistName)});
-    if(t.thumbUrl)row.appendChild(el('img',{cls:'daq-art',src:t.thumbUrl,alt:'',loading:'lazy'}));
-    else row.appendChild(d('daq-art-ph',{},'♫'));
-    const info=d('daq-info',{});
-    info.appendChild(s('daq-title',t.title));
-    info.appendChild(s('daq-meta',[t.artistName,t.year].filter(Boolean).join(' · ')));
-    row.appendChild(info);
-    host.appendChild(row);
-  });
+  host.appendChild(s('rp-coming-soon','Coming soon'));
 }
 
 function positionYtHost(){
@@ -4088,18 +4023,29 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     const featuring=(primaryArtistLabel&&track.label&&track.label!==primaryArtistLabel)
       ?track.label.split(',').map(s=>s.trim()).filter(a=>a&&normalizeStr(a)!==normalizeStr(primaryArtistLabel))
       :[];
+    // Everything after the title used to sit directly in the row, so a
+    // track missing an optional field (duration, "featuring" note) had one
+    // fewer flex item than its neighbors — the like/wantlist/badge cluster
+    // landed at a different X per row depending on which optional fields
+    // happened to apply, making rows within and across cards look
+    // inconsistently aligned. Wrapping them in one cluster pinned to the
+    // row's right edge (margin-left:auto) means the cluster always starts
+    // from the same edge regardless of which optional pieces are present
+    // or how long the title is.
     return d('rel-track-row',{},
       playBtn,
       s('rel-track-title',track.title),
-      featuring.length?s('t-feat','with '+featuring.join(', ')):null,
-      track.duration?s('t-dur',track.duration):null,
-      b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'),
-      plWrap,
-      owned?s('own-badge','In your digital library'):null,
-      inDiscogsCollection(track)?s('coll-badge','In collection'):null,
-      inDiscogsWantlist(track)?s('want-badge','On Discogs\' Wantlist'):null,
-      badged?s('t-badge','✓ played'):null,
-      track.bpm?s('t-bpm',track.bpm+' BPM'):null,
+      d('t-meta-cluster',{},
+        featuring.length?s('t-feat','with '+featuring.join(', ')):null,
+        track.duration?s('t-dur',track.duration):null,
+        b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'),
+        plWrap,
+        owned?s('own-badge','In your digital library'):null,
+        inDiscogsCollection(track)?s('coll-badge','In collection'):null,
+        inDiscogsWantlist(track)?s('want-badge','On Discogs\' Wantlist'):null,
+        badged?s('t-badge','✓ played'):null,
+        track.bpm?s('t-bpm',track.bpm+' BPM'):null,
+      ),
     );
   });
 
