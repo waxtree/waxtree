@@ -1623,7 +1623,7 @@ function saveSt(){
     if(e.name==='QuotaExceededError'&&purgeExpiredCache())
       try{localStorage.setItem('wt-discogs-wantlist',JSON.stringify(st.discogsWantlist));}catch{}
   }
-  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen});
+  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -1662,7 +1662,7 @@ async function pushStateToCloud(){
   // it's cheaply re-fetched on selectNode; only the tree structure itself
   // (which artist/label, which branch, pin/tag state) is irreplaceable.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
-  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,avatarDataUrl:getAvatarUrl()};
+  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,avatarDataUrl:getAvatarUrl()};
   try{
     const{error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});
     if(error)throw error;
@@ -1700,6 +1700,7 @@ async function hydrateFromCloud(){
     if(c.playlists)st.playlists=c.playlists;
     if(c.history)st.history=c.history;
     if(c.follows)st.follows=c.follows;
+    if(c.followScanKnownIds)st.followScanKnownIds=c.followScanKnownIds;
     if(c.discogsUser)st.discogsUser=c.discogsUser;
     if(c.discogsOAuthToken)st.discogsOAuthToken=c.discogsOAuthToken;
     if(c.discogsOAuthSecret)st.discogsOAuthSecret=c.discogsOAuthSecret;
@@ -1747,6 +1748,11 @@ const st={
   likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,discogsModal:false,discogsSyncing:false,
   likesGenreOpen:new Set(), // which genre sections are expanded in My Likes — transient, not persisted
   follows:saved?.follows||[],
+  // type+':'+discogs_id -> array of release ids already seen for that
+  // followed artist/label, so scanFollowsForNewReleases() only ever
+  // flags a release the FIRST time it's ever seen, on any device.
+  followScanKnownIds:saved?.followScanKnownIds||{},
+  newReleasesModal:false,newReleasesFound:[],
   discogsUser:saved?.discogsUser||'',
   discogsOAuthToken:saved?.discogsOAuthToken||'',
   discogsOAuthSecret:saved?.discogsOAuthSecret||'',
@@ -3825,6 +3831,95 @@ function toggleFollow(node){
   saveSt();rr();
 }
 
+// ── Follow scan (new releases) ───────────────────────────────
+// Light version, deliberately: checks run at login and every 20 minutes
+// while the tab stays open, nothing happens while the app is closed. A
+// true always-on background scan would need a real server-side scheduled
+// job plus its own Discogs-quota budgeting shared across every user's
+// session — same shape of problem as the YouTube quota work, not taken on
+// here without a concrete need for it yet.
+let followScanRunning=false;
+const FOLLOW_SCAN_BATCH=6;
+function isOwnedRelease(rel){
+  return rel.type==='master'?st.discogsCollMasterIds.includes(rel.id):st.discogsCollReleaseIds.includes(rel.id);
+}
+async function scanFollowsForNewReleases(){
+  // Explicitly ALL of st.follows, not just whichever ones happen to also
+  // be open as tree nodes right now — those are two separate, unrelated
+  // sets (a followed artist may never have been explored, and an explored
+  // node may not be followed).
+  if(followScanRunning||!st.follows.length)return;
+  followScanRunning=true;
+  const found=[];
+  try{
+    for(let i=0;i<st.follows.length;i+=FOLLOW_SCAN_BATCH){
+      const batch=st.follows.slice(i,i+FOLLOW_SCAN_BATCH);
+      const results=await Promise.all(batch.map(async f=>{
+        const key=f.type+':'+f.discogs_id;
+        try{
+          const path=f.type==='label'?'/labels/'+f.discogs_id+'/releases':'/artists/'+f.discogs_id+'/releases';
+          const rd=await dReq(path,{per_page:'25',sort:'year',sort_order:'desc'});
+          let rels=rd.releases||[];
+          // Same "Main" preference fetchArtistData() already uses for an
+          // artist's own discography — a remix credit or a various-artists
+          // compilation appearance isn't really "a new release BY them" in
+          // the sense this notification means. Labels have no such
+          // distinction (it's just their catalog), so left as-is.
+          if(f.type==='artist'){
+            const mainOnly=rels.filter(r=>r.role==='Main');
+            if(mainOnly.length)rels=mainOnly;
+          }
+          return{f,key,rels};
+        }catch(e){console.warn('WaxTree: follow scan failed for',f.name,e);return{f,key,rels:null};}
+      }));
+      for(const{f,key,rels}of results){
+        if(rels===null)continue;
+        const known=new Set(st.followScanKnownIds[key]||[]);
+        // Baseline on the FIRST-ever check for this followed entry —
+        // otherwise following someone with a long back catalog would flag
+        // their entire history as "new" the moment this feature first
+        // runs, or the moment the user follows someone new.
+        const isFirstCheck=!(key in st.followScanKnownIds);
+        const newOnes=isFirstCheck?[]:rels.filter(r=>!known.has(r.id)&&!isOwnedRelease(r));
+        st.followScanKnownIds[key]=rels.map(r=>r.id);
+        // Cap how many releases from ONE artist/label fetch full detail in
+        // a single scan — a burst of activity from one prolific source
+        // shouldn't crowd out (or quota-starve) everyone else being
+        // checked in the same pass.
+        for(const rel of newOnes.slice(0,5)){
+          try{
+            let fetchId,rdFull;
+            if(rel.type==='master'){
+              if(rel.main_release){fetchId=rel.main_release;rdFull=await dReq('/releases/'+fetchId);}
+              else{fetchId='m'+rel.id;rdFull=await dReq('/masters/'+rel.id);}
+            }else{
+              fetchId=rel.id;rdFull=await dReq('/releases/'+fetchId);
+            }
+            const entries=buildTrackEntries(rdFull,fetchId,`https://www.discogs.com/release/${rel.id}`,rel.year,null,rel.thumb||'');
+            const track=entries.find(t=>t.videoId)||entries[0];
+            if(track){
+              // buildTrackEntries only fills trackArtistName for various-
+              // artist releases — a normal solo release leaves it null,
+              // which would make toggleLike's resolution chain fall back
+              // to the release's LABEL name as the "artist". Not found
+              // via any tree node here (findTrackAndNode never matches),
+              // so this is the only chance to get it right.
+              if(!track.trackArtistName)track.trackArtistName=f.type==='artist'?f.name:(rdFull.artists?.[0]?stripDiscogsSuffix(rdFull.artists[0].name):f.name);
+              discoveredTracks[track.id]=track; // so toggleLike/wantlist can resolve it, same pattern Related Tracks uses
+              found.push({track,followName:f.name,followType:f.type,followThumb:f.thumb,releaseTitle:rdFull.title||rel.title||'',followDiscogsId:f.discogs_id});
+            }
+          }catch(e){console.warn('WaxTree: fetching new release detail failed for',f.name,e);}
+        }
+      }
+      saveSt(); // persist known-ids progressively — a scan spans many batches, no reason to lose earlier progress if later ones fail
+    }
+  }finally{
+    followScanRunning=false;
+    if(found.length){st.newReleasesFound=found;st.newReleasesModal=true;}
+    rr();
+  }
+}
+
 function buildAvatarEl(size=36){
   const url=getAvatarUrl();
   const uname=wtSession?.user?.user_metadata?.username||wtSession?.user?.email?.split('@')[0]||'?';
@@ -4898,6 +4993,83 @@ function buildApp(){
     overlay.appendChild(modal);root.appendChild(overlay);
   }
 
+  if(st.newReleasesModal){
+    const overlay=d('overlay',{onClick:()=>{st.newReleasesModal=false;rr();}});
+    const modal=d('modal daq-modal follows-modal',{onClick:e=>e.stopPropagation()});
+    modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'0'}},
+      el('h2',{cls:'modal-title'},'🆕 New Releases'),
+      b('btn-sec',{onClick:()=>{st.newReleasesModal=false;rr();}},'×')
+    ));
+    const list=d('follows-list',{});
+    st.newReleasesFound.forEach(entry=>{
+      const track=entry.track;
+      const item=d('follows-item',{});
+      if(track.thumbUrl){
+        item.appendChild(el('img',{cls:'follows-thumb',src:track.thumbUrl,alt:'',loading:'lazy'}));
+      }else{
+        const ph=d('follows-thumb-ph',{});ph.appendChild(entry.followType==='label'?svgLabel():svgArtist());item.appendChild(ph);
+      }
+      const info=d('daq-info',{});
+      info.appendChild(s('daq-title',entry.releaseTitle||track.title));
+      info.appendChild(s('daq-meta','New from '+entry.followName+(track.year?' · '+track.year:'')));
+      item.appendChild(info);
+
+      const fActions=d('follows-actions',{});
+      const liked=!!st.likes[track.id];
+      fActions.appendChild(b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'));
+
+      // Same wantlist-dropdown pattern releaseCard() uses for its own
+      // track rows — a plain non-floating .pl-drop, fine here since the
+      // modal overlay has no overflow:hidden ancestor to clip it against
+      // (unlike the mini-player, which needed the floating-portal version).
+      const inDaq=st.dasAscoltare.some(q=>q.id===track.id);
+      const isDropOpen=st.playlistDropId===track.id;
+      const trackWithArtist={...track,artistName:track.trackArtistName||entry.followName};
+      const plWrap=d('pl-wrap',{});
+      plWrap.appendChild(b('t-daq'+(inDaq?' queued':''),{title:'Add to wantlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:track.id;rr();}},'🏷️'));
+      if(isDropOpen){
+        const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
+        const logQueue=()=>logEvent('queue',{track_id:track.id,title:track.title,artist:trackWithArtist.artistName,genre:track.genre||null,year:track.year||null,
+          node_type:entry.followType,node_discogs_id:entry.followDiscogsId,node_name:entry.followName});
+        drop.appendChild(b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
+          if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==track.id);
+          else{st.dasAscoltare=[...st.dasAscoltare,trackWithArtist];logQueue();}
+          st.playlistDropId=null;rr();
+        }},inDaq?'✓ Listen Later':'Listen Later'));
+        st.playlists.forEach(pl=>{
+          const inPl=pl.tracks.some(t=>t.id===track.id);
+          drop.appendChild(b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
+            if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==track.id);
+            else{pl.tracks=[...pl.tracks,trackWithArtist];logQueue();}
+            st.playlistDropId=null;rr();
+          }},inPl?'✓ '+pl.name:pl.name));
+        });
+        drop.appendChild(d('pl-drop-sep',{}));
+        drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
+          const name=prompt('Wantlist name:','');
+          if(!name?.trim())return;
+          st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackWithArtist]}];
+          logQueue();
+          st.playlistDropId=null;rr();
+        }},'+ New wantlist'));
+        plWrap.appendChild(drop);
+        setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
+      }
+      fActions.appendChild(plWrap);
+
+      fActions.appendChild(b('follows-open',{title:'Explore',onClick:()=>{
+        st.newReleasesModal=false;
+        const existing=st.nodes.find(n=>n.discogsId===entry.followDiscogsId&&n.branchId===st.activeBranchId);
+        if(existing){selectNode(existing.id);}
+        else{addNode(entry.followType,entry.followDiscogsId,entry.followName,null,st.activeBranchId);}
+      }},'Explore ↗'));
+      item.appendChild(fActions);
+      list.appendChild(item);
+    });
+    modal.appendChild(list);
+    overlay.appendChild(modal);root.appendChild(overlay);
+  }
+
   // ── My Libraries modal ──────────────────────────────────────
   if(st.librariesModal){
     const overlay=d('overlay',{onClick:()=>{st.librariesModal=false;rr();}});
@@ -5320,7 +5492,17 @@ sb.auth.getSession().then(({data:{session}})=>{
   loadFollows();
   handleDiscogsCallback();
   ensureNodeLoaded(st.selectedId);
-  hydrateFromCloud();
+  // Wait for the cloud pull to settle first — it may bring in follows (or
+  // followScanKnownIds) this device's local copy doesn't have yet, e.g. a
+  // follow added on another device. hydrateFromCloud() never rejects (its
+  // own try/catch swallows failures), so .then() always fires. The
+  // interval is a light re-check while the tab stays open — no server-
+  // side/background component when the app itself isn't open, by design
+  // (the "light version" — see project_waxtree memory).
+  hydrateFromCloud().then(()=>{
+    scanFollowsForNewReleases();
+    setInterval(scanFollowsForNewReleases,20*60*1000);
+  });
   // A plain page reload restores st.nodes from localStorage directly — it never
   // calls selectNode(), so the version check there alone would never fire for
   // a node that's already selected before the reload. Sweep once at boot too.
