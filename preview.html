@@ -4022,18 +4022,19 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     const featuring=(primaryArtistLabel&&track.label&&track.label!==primaryArtistLabel)
       ?track.label.split(',').map(s=>s.trim()).filter(a=>a&&normalizeStr(a)!==normalizeStr(primaryArtistLabel))
       :[];
-    // Pushing everything to the row's right edge (an earlier attempt at
-    // this) landed the like/wantlist icons right next to the unrelated
-    // Explore/buy buttons column — confusing, and explicitly reverted per
-    // user feedback. Back to inline, right after the title — the only
-    // actual fix kept is always rendering the duration slot (empty string,
-    // not omitted) so a track missing a duration doesn't have one fewer
-    // flex item than its neighbors shifting the icons that follow it.
+    // Two earlier attempts at this row's alignment both got reverted per
+    // user feedback: pushing everything to the row's right edge landed the
+    // icons next to the unrelated Explore/buy-buttons column, and always
+    // reserving empty space for a missing duration left a dead gap before
+    // the icons that looked wrong too. Back to the original: no duration
+    // means no element at all, so the icons sit right up against the
+    // title, effectively taking the duration's place instead of leaving a
+    // hole for it.
     return d('rel-track-row',{},
       playBtn,
       s('rel-track-title',track.title),
       featuring.length?s('t-feat','with '+featuring.join(', ')):null,
-      s('t-dur',track.duration||''),
+      track.duration?s('t-dur',track.duration):null,
       b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'),
       plWrap,
       owned?s('own-badge','In your digital library'):null,
