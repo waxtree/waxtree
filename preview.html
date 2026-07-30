@@ -3100,10 +3100,26 @@ async function dReq(path,p={},_retry=0){
   }
   if(!res.ok)throw new Error(`Discogs ${res.status}`);return res.json();
 }
+// Releases included alongside artist/label, matching how a plain search on
+// discogs.com itself behaves (confirmed live 2026-08-01: searching "Strings
+// of Life Derrick May" surfaces the actual release, and Discogs' own
+// relevance ranking still puts an exact artist-name match first even amid
+// a flood of releases for a query like "Derrick May" alone) — the point
+// being to let someone find the right artist/label by a track they
+// remember, not just by a name they already know. Release title is kept
+// as Discogs' own combined "Artist - Title" string (not split — see
+// pickResult()/resolveReleaseAndOpen(), which resolves the real artist via
+// the release's own structured data instead of parsing this string, since
+// it breaks down for various-artist/multi-credit releases like
+// "A / B - Track1 / Track2 / Track3", confirmed live).
 async function searchDiscogs(q){
   const c=lsGet('s:'+q);if(c)return c;
   const data=await dReq('/database/search',{q,per_page:'25'});
-  const r=data.results.filter(r=>r.type==='artist'||r.type==='label').map(r=>({id:r.id,type:r.type,title:r.title,thumb:r.thumb,uri:r.uri}));
+  const r=data.results.filter(r=>r.type==='artist'||r.type==='label'||r.type==='release').map(r=>
+    r.type==='release'
+      ?{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null}
+      :{id:r.id,type:r.type,title:r.title,thumb:r.thumb,uri:r.uri}
+  );
   lsSet('s:'+q,r);return r;
 }
 
@@ -3664,7 +3680,38 @@ function liveSearchTick(){
     st.results=res;rr();
   }).catch(e=>{if(myGen!==searchGen)return;st.loading=false;st.err=e.message;rr();});
 }
-function pickResult(r){st.results=[];st.q='';st.loading=false;st.err='';addNode(r.type,r.id,r.title,null,st.activeBranchId);}
+function pickResult(r){
+  st.results=[];st.q='';st.loading=false;st.err='';
+  if(r.type==='release'){resolveReleaseAndOpen(r);return;}
+  addNode(r.type,r.id,r.title,null,st.activeBranchId);
+}
+// A release isn't a node type the tree understands on its own — resolve it
+// to whichever node actually makes sense to open. Fetches the real release
+// detail rather than parsing the search result's "Artist - Title" string,
+// since that string breaks down for various-artist releases (multiple
+// artists joined with " / ") — this uses the release's own structured
+// artists[]/labels[] instead, same reasoning already applied elsewhere in
+// this codebase against fuzzy title-based matching.
+async function resolveReleaseAndOpen(r){
+  st.loading=true;rr();
+  try{
+    const rd=await dReq('/releases/'+r.id);
+    const primaryArtist=rd.artists?.[0];
+    const isVarious=primaryArtist&&/^various$/i.test(primaryArtist.name.trim());
+    if(primaryArtist&&!isVarious){
+      addNode('artist',primaryArtist.id,stripDiscogsSuffix(primaryArtist.name),null,st.activeBranchId);
+    }else if(rd.labels?.[0]){
+      // Various-artists release — the label is the more useful entry point
+      // than any single one of the many credited artists.
+      addNode('label',rd.labels[0].id,rd.labels[0].name,null,st.activeBranchId);
+    }else{
+      st.err='Could not find an artist or label for that release.';
+    }
+  }catch(e){
+    st.err='Could not open that release: '+e.message;
+  }
+  st.loading=false;rr();
+}
 
 function applyFilters(tracks){
   let r=tracks.filter(t=>{
@@ -4660,7 +4707,7 @@ function buildApp(){
   const swrap=d('search-wrap',{});
   swrap.appendChild(d('search-field',{},s('s-icon','🔍'),
     activeBranch?s('s-badge',activeBranch.name):null,
-    el('input',{cls:'s-input',type:'text',placeholder:'Search artist or label...',value:st.q,
+    el('input',{cls:'s-input',type:'text',placeholder:'Search artist, label, or track...',value:st.q,
       onInput:e=>{
         st.q=e.target.value;
         if(searchDebTimer){clearTimeout(searchDebTimer);searchDebTimer=null;}
@@ -4684,10 +4731,11 @@ function buildApp(){
       // Thumbnail with type badge
       const tw=d('dis-tw',{});
       if(r.thumb){tw.appendChild(el('img',{cls:'dis-thumb',src:r.thumb,alt:'',loading:'lazy'}));}
-      else{tw.appendChild(d('dis-thumb-ph',{},r.type==='label'?'🎵':'🎤'));}
-      tw.appendChild(s('dis-type',r.type==='label'?'Label':'Art.'));
+      else{tw.appendChild(d('dis-thumb-ph',{},r.type==='label'?'🎵':r.type==='release'?'💿':'🎤'));}
+      tw.appendChild(s('dis-type',r.type==='label'?'Label':r.type==='release'?'Rel.':'Art.'));
       item.appendChild(tw);
-      item.appendChild(d('',{},d('dis-name',{},r.title),d('dis-sub',{},r.type==='label'?'Label':'Artist')));
+      const sub=r.type==='release'?([r.label,r.year].filter(Boolean).join(' · ')||'Release'):r.type==='label'?'Label':'Artist';
+      item.appendChild(d('',{},d('dis-name',{},r.title),d('dis-sub',{},sub)));
       dd.appendChild(item);
     });
     swrap.appendChild(dd);
