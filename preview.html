@@ -1646,7 +1646,7 @@ function saveSt(){
     if(e.name==='QuotaExceededError'&&purgeExpiredCache())
       try{localStorage.setItem('wt-discogs-wantlist',JSON.stringify(st.discogsWantlist));}catch{}
   }
-  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen});
+  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -1685,13 +1685,112 @@ async function pushStateToCloud(){
   // it's cheaply re-fetched on selectNode; only the tree structure itself
   // (which artist/label, which branch, pin/tag state) is irreplaceable.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
-  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,avatarDataUrl:getAvatarUrl()};
+  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,avatarDataUrl:getAvatarUrl()};
   try{
     const{error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});
     if(error)throw error;
   }catch(e){
     console.warn('WaxTree: cloud backup failed (will retry on next change):',e);
     window.Sentry?.captureException instanceof Function&&Sentry.captureException(e,{tags:{area:'cloud-backup-push'}});
+  }
+  // Groundwork for the future profiles/sessions/trees/nodes schema (see
+  // supabase/schema_v2_profiles_sessions_trees_nodes.sql) — deliberately
+  // AFTER and independent of the user_state write above: this is a
+  // dual-write, not a replacement. user_state remains the only thing the
+  // app actually reads from/renders; if this fails or has bugs, nothing
+  // about the live app changes. Rides the same 4s debounce as the
+  // user_state push (see scheduleCloudSync()) rather than its own timer.
+  syncNewSchema();
+}
+// client-id (branch.id / node.id / a synthetic 'tree:'+rootId key) ->
+// Supabase uuid. Client ids are short strings ('b'+Date.now(), 'n'+...),
+// not real uuids, and changing that now would ripple through a lot of
+// code that treats them as opaque keys (tracksPageMap, selectedId,
+// parentId references...) — minting a stable uuid per client id here
+// instead is far less invasive, and st.supaIdMap being cloud-synced
+// keeps the mapping identical across devices instead of each one minting
+// its own and creating duplicate rows for the same entity.
+function supaId(clientId){
+  if(!st.supaIdMap[clientId])st.supaIdMap[clientId]=crypto.randomUUID();
+  return st.supaIdMap[clientId];
+}
+// Full recompute on every call, not incremental patches per mutation —
+// deliberately. removeNode() REPARENTS a removed node's children to root
+// (see its own comment) rather than cascading their removal, which is a
+// structural change a naive "delete this one row" hook would get wrong
+// (the DB's own on delete cascade WOULD remove the whole subtree, which
+// is not what actually happened client-side). Recomputing sessions/
+// trees/nodes fresh from st.branches/st.nodes every time sidesteps that
+// entirely — whatever the current shape is, that's what gets upserted,
+// and stale rows for anything no longer present get pruned explicitly
+// below rather than relying on cascade semantics matching the client.
+async function syncNewSchema(){
+  if(!wtSession)return;
+  try{
+    // profiles.tier kept loosely in sync with the premium flag the app
+    // already tracks via auth user_metadata — not authoritative here,
+    // just mirrored so the new schema isn't missing it entirely.
+    await sb.from('profiles').update({tier:st.isPremium?'premium':'free'}).eq('id',wtSession.user.id);
+
+    const sessionRows=st.branches.map(b=>({id:supaId(b.id),user_id:wtSession.user.id,title:b.name,is_saved:true}));
+    if(sessionRows.length){
+      const{error}=await sb.from('sessions').upsert(sessionRows);
+      if(error)throw error;
+    }
+
+    // A branch can hold several independent explorations at once (more
+    // than one top-level search with nothing connecting them) — each
+    // root node is the start of its own tree, all under the same session.
+    const roots=st.nodes.filter(n=>!n.parentId);
+    const treeRows=roots.map(root=>({id:supaId('tree:'+root.id),session_id:supaId(root.branchId),root_node_id:supaId(root.id)}));
+    if(treeRows.length){
+      const{error}=await sb.from('trees').upsert(treeRows);
+      if(error)throw error;
+    }
+
+    // ancestry() (already used for breadcrumbs) walks root-to-node — its
+    // first entry is the root, its length-1 is exactly the depth.
+    const nodeRows=st.nodes.map(n=>{
+      const chain=ancestry(n.id);
+      const root=chain[0]||n;
+      return{
+        id:supaId(n.id),
+        tree_id:supaId('tree:'+root.id),
+        parent_node_id:n.parentId?supaId(n.parentId):null,
+        node_type:n.type,
+        depth_level:Math.max(0,chain.length-1),
+        external_id:String(n.discogsId),
+        external_source:'discogs',
+        data:{name:n.name,pinned:!!n.pinned,tags:n.tags||[]},
+      };
+    });
+    if(nodeRows.length){
+      const{error}=await sb.from('nodes').upsert(nodeRows);
+      if(error)throw error;
+    }
+
+    // Prune stale rows layered outermost-in (session, then tree, then
+    // node) — deleting a stale session/tree cascades its children too,
+    // so this also covers "a whole branch/exploration was removed", not
+    // just individual nodes. Each step computed as an explicit id list
+    // (never a NOT-IN filter against a possibly-empty set) so there's no
+    // ambiguity that could delete more than intended.
+    const keepSessionIds=new Set(sessionRows.map(r=>r.id));
+    const{data:remoteSessions}=await sb.from('sessions').select('id').eq('user_id',wtSession.user.id);
+    const staleSessionIds=(remoteSessions||[]).map(r=>r.id).filter(id=>!keepSessionIds.has(id));
+    if(staleSessionIds.length)await sb.from('sessions').delete().in('id',staleSessionIds);
+
+    const keepTreeIds=new Set(treeRows.map(r=>r.id));
+    const{data:remoteTrees}=await sb.from('trees').select('id,session_id').in('session_id',[...keepSessionIds]);
+    const staleTreeIds=(remoteTrees||[]).map(r=>r.id).filter(id=>!keepTreeIds.has(id));
+    if(staleTreeIds.length)await sb.from('trees').delete().in('id',staleTreeIds);
+
+    const keepNodeIds=new Set(nodeRows.map(r=>r.id));
+    const{data:remoteNodes}=await sb.from('nodes').select('id,tree_id').in('tree_id',[...keepTreeIds]);
+    const staleNodeIds=(remoteNodes||[]).map(r=>r.id).filter(id=>!keepNodeIds.has(id));
+    if(staleNodeIds.length)await sb.from('nodes').delete().in('id',staleNodeIds);
+  }catch(e){
+    console.warn('WaxTree: new-schema sync failed (non-fatal — user_state remains the source of truth):',e);
   }
 }
 function ensureNodeLoaded(id){
@@ -1724,6 +1823,7 @@ async function hydrateFromCloud(){
     if(c.history)st.history=c.history;
     if(c.follows)st.follows=c.follows;
     if(c.followScanKnownIds)st.followScanKnownIds=c.followScanKnownIds;
+    if(c.supaIdMap)st.supaIdMap={...c.supaIdMap,...st.supaIdMap}; // merge, don't clobber — this device may have minted mappings the cloud copy predates
     if(c.discogsUser)st.discogsUser=c.discogsUser;
     if(c.discogsOAuthToken)st.discogsOAuthToken=c.discogsOAuthToken;
     if(c.discogsOAuthSecret)st.discogsOAuthSecret=c.discogsOAuthSecret;
@@ -1776,6 +1876,11 @@ const st={
   // flags a release the FIRST time it's ever seen, on any device.
   followScanKnownIds:saved?.followScanKnownIds||{},
   newReleasesModal:false,newReleasesFound:[],
+  // client-id (branch.id / node.id / a synthetic 'tree:'+rootId key) ->
+  // Supabase uuid, for syncNewSchema() below. Cloud-synced (not just
+  // local) so a second device maps the SAME client entity to the SAME
+  // row instead of minting a fresh uuid and creating a duplicate.
+  supaIdMap:saved?.supaIdMap||{},
   // Set by resolveReleaseAndOpen() when a search result was a specific
   // release (not an artist/label) — tells the tracks section which node
   // and which release to jump straight to once that node's data loads,
