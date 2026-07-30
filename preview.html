@@ -281,6 +281,11 @@ input,select{font:inherit;color:inherit}
 /* Release card — one row per EP/Album, tracks grouped inside */
 .rel-card{display:flex;align-items:flex-start;gap:12px;padding:10px 14px;background:var(--bg-s);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;transition:border-color .15s}
 .rel-card:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--border))}
+/* Briefly marks the card a release search actually landed on, after the
+   auto-scroll — otherwise "the page jumped somewhere" with nothing telling
+   you which of several cards on screen is the one you searched for. */
+@keyframes rel-card-found-pulse{0%,100%{border-color:var(--border);box-shadow:none}30%,70%{border-color:var(--accent);box-shadow:0 0 0 3px rgba(94,196,123,.18)}}
+.rel-card-found{animation:rel-card-found-pulse 1.1s ease-in-out 2}
 .rel-tracks{display:flex;flex-direction:column;gap:5px;flex:1 1 auto;min-width:0}
 .rel-track-row{display:flex;align-items:center;gap:6px;min-width:0}
 .rel-play{width:22px;height:22px;border-radius:50%;background:var(--bg);color:var(--text-m);font-size:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s}
@@ -1771,6 +1776,13 @@ const st={
   // flags a release the FIRST time it's ever seen, on any device.
   followScanKnownIds:saved?.followScanKnownIds||{},
   newReleasesModal:false,newReleasesFound:[],
+  // Set by resolveReleaseAndOpen() when a search result was a specific
+  // release (not an artist/label) — tells the tracks section which node
+  // and which release to jump straight to once that node's data loads,
+  // instead of opening the artist/label and leaving the user to scroll
+  // and find it themselves. Consumed (set back to null) the moment the
+  // matching card is found and scrolled to, so it only ever fires once.
+  scrollToRelease:null,
   discogsUser:saved?.discogsUser||'',
   discogsOAuthToken:saved?.discogsOAuthToken||'',
   discogsOAuthSecret:saved?.discogsOAuthSecret||'',
@@ -3718,7 +3730,14 @@ async function resolveReleaseAndOpen(r){
       addNode('label',rd.labels[0].id,rd.labels[0].name,null,st.activeBranchId);
     }else{
       st.err='Could not find an artist or label for that release.';
+      st.loading=false;rr();return;
     }
+    // addNode() (or selectNode() inside it, if this node was already open)
+    // already set st.selectedId synchronously — capture it now so the
+    // tracks section knows which node to watch, sort/filter stays exactly
+    // whatever it already was (never touched here), only WHICH page gets
+    // shown changes once the target is found.
+    st.scrollToRelease={releaseId:r.id,titleNorm:normalizeStr(rd.title||''),nodeId:st.selectedId};
   }catch(e){
     st.err='Could not open that release: '+e.message;
   }
@@ -4558,6 +4577,25 @@ function buildContent(){
     const filtered=applyFilters(dt.tracks);
     const hasFilter=st.filterTitle||st.filterFormat!=='all'||st.filterSort!=='default'||st.filterGenres.length>0;
     const PAGE=50;
+    // A release search result just resolved to this node — jump straight
+    // to whichever page actually contains it (sort/filter stay exactly
+    // whatever they already were, only the page changes) so the auto-
+    // scroll below has something to find. Matches by release id first
+    // (the common case), falling back to the release's own title within
+    // this already-correctly-scoped node's tracks if the id doesn't
+    // appear directly (an artist's discography groups some releases under
+    // their master's designated main pressing, which can carry a
+    // different concrete id than the specific variant that was searched).
+    let scrollTargetKey=null;
+    if(st.scrollToRelease&&st.scrollToRelease.nodeId===node.id){
+      const idx=filtered.findIndex(t=>t.id.split('-')[0]===String(st.scrollToRelease.releaseId)||normalizeStr(t.album||t.title)===st.scrollToRelease.titleNorm);
+      if(idx>=0){
+        tracksPageMap[node.id]=Math.floor(idx/PAGE);
+        const tt=filtered[idx];
+        const labelKey=tt.trueLabelId!=null?'id:'+tt.trueLabelId:(tt.labelId!=null?'id:'+tt.labelId:normalizeStr(tt.label||''));
+        scrollTargetKey=normalizeStr(tt.album||tt.title)+'|'+labelKey;
+      }
+    }
     let page=tracksPageMap[node.id]||0;
     const totalPages=Math.ceil(filtered.length/PAGE);
     if(page>=totalPages)page=Math.max(0,totalPages-1);
@@ -4617,7 +4655,25 @@ function buildContent(){
       panel.appendChild(fb);
     }
 
-    if(pageSlice.length)groupTracksByRelease(pageSlice).forEach(g=>panel.appendChild(releaseCard(g,node.id,isLabel,node.name)));
+    if(pageSlice.length)groupTracksByRelease(pageSlice).forEach(g=>{
+      const card=releaseCard(g,node.id,isLabel,node.name);
+      if(scrollTargetKey&&g.key===scrollTargetKey){
+        card.id='wt-scroll-target';
+        st.scrollToRelease=null; // consumed — fires once, not on every subsequent render
+        // Deferred, same reasoning as attachFloatingDropdown() elsewhere —
+        // this card isn't actually in the live DOM yet at this point in
+        // the synchronous build; a 0ms timeout runs after the current
+        // paint() has committed it.
+        setTimeout(()=>{
+          const el=document.getElementById('wt-scroll-target');
+          if(!el)return;
+          el.scrollIntoView({behavior:'smooth',block:'center'});
+          el.classList.add('rel-card-found');
+          setTimeout(()=>el.classList.remove('rel-card-found'),2200);
+        },0);
+      }
+      panel.appendChild(card);
+    });
     else panel.appendChild(d('filter-none',{},'No tracks match the filters.'));
 
     if(totalPages>1){
