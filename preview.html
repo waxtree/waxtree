@@ -315,7 +315,7 @@ input,select{font:inherit;color:inherit}
 .daq-rm:hover{color:#5EC47B}
 /* ── Explore dropdown (label/artist/remix-artist merged) ─── */
 .explore-wrap{position:relative;flex-shrink:0}
-/* ── Wantlist dropdown ─────── */
+/* ── Playlist dropdown ─────── */
 .pl-wrap{position:relative;flex-shrink:0}
 .pl-drop{position:absolute;top:calc(100% + 4px);right:0;background:var(--bg-s);border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.28);z-index:300;min-width:176px;overflow:hidden}
 .pl-drop-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--text);cursor:pointer;transition:background .1s;white-space:nowrap;border:none;background:none;width:100%;text-align:left;font-family:inherit}
@@ -333,7 +333,7 @@ input,select{font:inherit;color:inherit}
 .hero-name{display:block;font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hero-count{display:block;font-size:11.5px;color:var(--text-m);margin-top:1px}
 .hero-actions{display:flex;gap:6px;flex-shrink:0}
-/* ── Wantlist modal ─────── */
+/* ── Playlist modal ─────── */
 .pl-modal{max-width:520px}
 .pl-section-hd{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding:12px 0 6px;border-bottom:1px solid var(--border);margin-bottom:4px}
 .genre-section-hd{display:flex;align-items:center;justify-content:space-between;width:100%;padding:9px 12px;margin:10px 0 4px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg-e);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;transition:border-color .15s}
@@ -419,7 +419,7 @@ input,select{font:inherit;color:inherit}
 .btn-pri:hover{opacity:.88}
 
 /* ── YouTube mini-player ─────── */
-/* Not hidden: the Wantlist/Explore dropdowns in .yt-hdr are position:absolute
+/* Not hidden: the Playlist/Explore dropdowns in .yt-hdr are position:absolute
    and extend below their trigger button — an overflow:hidden ancestor here
    clips them to invisible. The video itself doesn't need this: .yt-video-wrap
    already clips its own aspect-ratio box independently. */
@@ -2747,18 +2747,18 @@ function makeDraggable(wrap,handle){
   });
 }
 
-// Stateful (like/wantlist-dropdown/explore-dropdown/nav) — has to be
+// Stateful (like/playlist-dropdown/explore-dropdown/nav) — has to be
 // rebuilt on every syncYtPlayer() call, including while the SAME track
 // keeps playing, or clicking any of these does nothing visible: syncYtPlayer()
 // skips rebuilding the DOM entirely once #yt-wrap already exists (that
 // early-return exists specifically so the YouTube iframe/player isn't torn
 // down and reinitialized — i.e. playback restarted — on every unrelated
 // rr()). Before this was split out, that same early-return silently ate
-// every click on Like/Wantlist/Explore: the state (st.likes,
+// every click on Like/Playlist/Explore: the state (st.likes,
 // st.playlistDropId, st.exploreDropKey) updated correctly, but nothing on
 // screen ever reflected it, since the header markup was only ever built
 // once, on the very first render for that track.
-// Wantlist/Explore dropdowns render as a fixed-position portal on
+// Playlist/Explore dropdowns render as a fixed-position portal on
 // document.body instead of a normal position:absolute child of the
 // button — the header that triggers them lives inside #right-panel
 // (position:fixed, flex-column, with Related Tracks as the next sibling
@@ -2815,7 +2815,7 @@ function buildYtHdr(np){
   const likeBtn=b('t-like'+(liked?' liked':''),{title:'Like',onClick:()=>toggleLike(np.trackId)},liked?'♥':'♡');
   const trackForQueue={id:np.trackId,title:np.title,artistName:np.artistName,videoId:np.videoId,year:fullTrack?.year,label:fullTrack?.label,genre:fullTrack?.genre,thumbUrl:fullTrack?.thumbUrl};
   const inDaq=st.dasAscoltare.some(q=>q.id===np.trackId);
-  // Prefixed, not the raw trackId — releaseCard's own wantlist button
+  // Prefixed, not the raw trackId — releaseCard's own playlist button
   // checks st.playlistDropId===track.id, and the track playing right now
   // is very often ALSO visible as a row in whatever node is open. Sharing
   // the raw id meant opening the mini-player's dropdown could simultaneously
@@ -2824,7 +2824,7 @@ function buildYtHdr(np){
   const npDropKey='np-'+np.trackId;
   const isDropOpen=st.playlistDropId===npDropKey;
   const plWrap=d('pl-wrap',{});
-  const plBtn=b('t-daq'+(inDaq?' queued':''),{title:'Add to wantlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:npDropKey;rr();}},'🏷️');
+  const plBtn=b('t-daq'+(inDaq?' queued':''),{title:'Add to playlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:npDropKey;rr();}},'🏷️');
   plWrap.appendChild(plBtn);
   if(isDropOpen){
     const logQ=()=>logEvent('queue',{track_id:np.trackId,title:np.title,artist:np.artistName,genre:fullTrack?.genre||null,year:fullTrack?.year||null});
@@ -2844,12 +2844,12 @@ function buildYtHdr(np){
       });
       drop.appendChild(d('pl-drop-sep',{}));
       drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
-        const name=prompt('Wantlist name:','');
+        const name=prompt('Playlist name:','');
         if(!name?.trim())return;
         st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackForQueue]}];
         logQ();
         st.playlistDropId=null;rr();
-      }},'+ New wantlist'));
+      }},'+ New playlist'));
     });
   }
   const expWrap=d('explore-wrap',{});
@@ -2876,7 +2876,7 @@ function syncYtPlayer(){
   const existingWrap=document.getElementById('yt-wrap');
   if(existingWrap){
     // Video/iframe untouched here — only the stateful header is rebuilt,
-    // so Like/Wantlist/Explore actually respond while the same track
+    // so Like/Playlist/Explore actually respond while the same track
     // keeps playing, without restarting playback.
     const oldHdr=existingWrap.querySelector('.yt-hdr');
     const newHdr=buildYtHdr(np);
@@ -3911,7 +3911,7 @@ async function scanFollowsForNewReleases(){
               // via any tree node here (findTrackAndNode never matches),
               // so this is the only chance to get it right.
               if(!track.trackArtistName)track.trackArtistName=f.type==='artist'?f.name:(rdFull.artists?.[0]?stripDiscogsSuffix(rdFull.artists[0].name):f.name);
-              discoveredTracks[track.id]=track; // so toggleLike/wantlist can resolve it, same pattern Related Tracks uses
+              discoveredTracks[track.id]=track; // so toggleLike/playlist can resolve it, same pattern Related Tracks uses
               found.push({track,followName:f.name,followType:f.type,followThumb:f.thumb,releaseTitle:rdFull.title||rel.title||'',followDiscogsId:f.discogs_id});
             }
           }catch(e){console.warn('WaxTree: fetching new release detail failed for',f.name,e);}
@@ -4079,7 +4079,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     const trackWithArtist={...track,artistName:displayArtist};
     const plWrap=d('pl-wrap',{});
     const plBtn=b('t-daq'+(inDaq?' queued':''),{
-      title:'Add to wantlist',
+      title:'Add to playlist',
       onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:track.id;rr();}
     },'🏷️');
     plWrap.appendChild(plBtn);
@@ -4104,13 +4104,13 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
       });
       drop.appendChild(d('pl-drop-sep',{}));
       drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
-        const name=prompt('Wantlist name:','');
+        const name=prompt('Playlist name:','');
         if(!name?.trim())return;
         st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackWithArtist]}];
         logEvent('queue',{track_id:track.id,title:track.title,artist:displayArtist,genre:track.genre||null,year:track.year||null,
           node_type:relNode?.type||null,node_discogs_id:relNode?.discogsId||null,node_name:relNode?.name||null});
         st.playlistDropId=null;rr();
-      }},'+ New wantlist'));
+      }},'+ New playlist'));
       plWrap.appendChild(drop);
       setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
     }
@@ -4607,7 +4607,7 @@ function buildApp(){
   const activeBranch=getBranch(st.activeBranchId);
   root.appendChild(d('hdr',{},
     el('span',{cls:'logo'},el('img',{src:'./logo.svg',height:'40',alt:'',cls:'logo-img'}),el('span',{cls:'logo-brand'},el('em',{},'Wax'),'Tree'),el('span',{cls:'logo-sub'},'Beta v.1')),s('sp'),
-    (()=>{const cnt=st.dasAscoltare.length+st.playlists.reduce((s,p)=>s+p.tracks.length,0);const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Wantlists',onClick:()=>{st.playlistsModal=true;rr();}},'🏷️ Wantlists');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
+    (()=>{const cnt=st.dasAscoltare.length+st.playlists.reduce((s,p)=>s+p.tracks.length,0);const btn=b('daq-hdr-btn'+(cnt?' active':''),{title:'Playlists',onClick:()=>{st.playlistsModal=true;rr();}},'🏷️ Playlists');if(cnt){const badge=document.createElement('span');badge.className='daq-count';badge.textContent=cnt;btn.appendChild(badge);}return btn;})(),
     (()=>{
       if(!wtSession)return null;
       const wrap=d('profile-wrap',{});
@@ -4744,10 +4744,10 @@ function buildApp(){
     const overlay=d('overlay',{onClick:close});
     const modal=d('modal pl-modal',{onClick:e=>e.stopPropagation()});
     modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'0'}},
-      el('h2',{cls:'modal-title'},'🏷️ Wantlists'),
+      el('h2',{cls:'modal-title'},'🏷️ Playlists'),
       b('btn-sec',{onClick:close},'×')
     ));
-    modal.appendChild(s('modal-sub','Create as many wantlists as you like — split by genre, by a gig you\'re digging for, whatever makes sense to you. Rename or delete them anytime.'));
+    modal.appendChild(s('modal-sub','Create as many playlists as you like — split by genre, by a gig you\'re digging for, whatever makes sense to you. Rename or delete them anytime.'));
     const body=d('',{style:{overflowY:'auto',maxHeight:'68vh'}});
 
     // ── Listen Later
@@ -4778,13 +4778,13 @@ function buildApp(){
     });
     body.appendChild(llList);
 
-    // ── Custom wantlists header + create
+    // ── Custom playlists header + create
     const plHd=d('pl-section-hd',{});
-    plHd.appendChild(document.createTextNode('My Wantlists'));
-    plHd.appendChild(s('pl-section-cnt',st.playlists.length+(st.playlists.length===1?' wantlist':' wantlists')));
+    plHd.appendChild(document.createTextNode('My Playlists'));
+    plHd.appendChild(s('pl-section-cnt',st.playlists.length+(st.playlists.length===1?' playlist':' playlists')));
     body.appendChild(plHd);
     const newRow=d('pl-new-row',{});
-    const newInput=el('input',{type:'text',cls:'pl-new-input',placeholder:'New wantlist name…'});
+    const newInput=el('input',{type:'text',cls:'pl-new-input',placeholder:'New playlist name…'});
     newRow.appendChild(newInput);
     newRow.appendChild(b('btn-pri',{onClick:()=>{
       const name=newInput.value.trim();if(!name)return;
@@ -4792,7 +4792,7 @@ function buildApp(){
     }},'Create'));
     body.appendChild(newRow);
 
-    // ── Each wantlist
+    // ── Each playlist
     st.playlists.forEach(pl=>{
       const sec=d('',{style:{marginBottom:'14px'}});
       const phd=d('pl-section-hd',{});
@@ -5029,7 +5029,7 @@ function buildApp(){
       const liked=!!st.likes[track.id];
       fActions.appendChild(b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'));
 
-      // Same wantlist-dropdown pattern releaseCard() uses for its own
+      // Same playlist-dropdown pattern releaseCard() uses for its own
       // track rows — a plain non-floating .pl-drop, fine here since the
       // modal overlay has no overflow:hidden ancestor to clip it against
       // (unlike the mini-player, which needed the floating-portal version).
@@ -5037,7 +5037,7 @@ function buildApp(){
       const isDropOpen=st.playlistDropId===track.id;
       const trackWithArtist={...track,artistName:track.trackArtistName||entry.followName};
       const plWrap=d('pl-wrap',{});
-      plWrap.appendChild(b('t-daq'+(inDaq?' queued':''),{title:'Add to wantlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:track.id;rr();}},'🏷️'));
+      plWrap.appendChild(b('t-daq'+(inDaq?' queued':''),{title:'Add to playlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isDropOpen?null:track.id;rr();}},'🏷️'));
       if(isDropOpen){
         const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
         const logQueue=()=>logEvent('queue',{track_id:track.id,title:track.title,artist:trackWithArtist.artistName,genre:track.genre||null,year:track.year||null,
@@ -5057,12 +5057,12 @@ function buildApp(){
         });
         drop.appendChild(d('pl-drop-sep',{}));
         drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
-          const name=prompt('Wantlist name:','');
+          const name=prompt('Playlist name:','');
           if(!name?.trim())return;
           st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackWithArtist]}];
           logQueue();
           st.playlistDropId=null;rr();
-        }},'+ New wantlist'));
+        }},'+ New playlist'));
         plWrap.appendChild(drop);
         setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
       }
