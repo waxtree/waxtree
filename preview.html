@@ -281,13 +281,25 @@ input,select{font:inherit;color:inherit}
 /* Release card — one row per EP/Album, tracks grouped inside */
 .rel-card{display:flex;align-items:flex-start;gap:12px;padding:10px 14px;background:var(--bg-s);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;transition:border-color .15s}
 .rel-card:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--border))}
-.rel-tracks{display:flex;flex-direction:column;gap:5px;flex:1 1 42%;min-width:0}
+.rel-tracks{display:flex;flex-direction:column;gap:5px;flex:1 1 auto;min-width:0}
 .rel-track-row{display:flex;align-items:center;gap:6px;min-width:0}
 .rel-play{width:22px;height:22px;border-radius:50%;background:var(--bg);color:var(--text-m);font-size:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s}
 .rel-play:hover{background:var(--accent);color:#fff}
 .rel-play.has-video{color:var(--accent)}
 .rel-track-title{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0}
-.rel-mid{flex:1 1 22%;min-width:0;padding-top:2px}
+/* Fixed width, not flex:1 1 22% (what this used to be) — a
+   percentage/grow-based basis meant .rel-mid's actual rendered width
+   depended on its OWN content (title length, how many genre tags wrapped)
+   and on t-actions' content width (Explore/buy button text length varies
+   a lot: "Explore" vs "Explore artist: Nick Beringer"), which meant
+   .rel-tracks' starting edge — where every play button and track title
+   lines up — shifted left/right from one release card to the next
+   (reported with a screenshot, 2026-07-31: play buttons landing at
+   visibly different X positions across cards in the same list). A
+   constant width removes both of those variables from the equation, so
+   that edge lands at the same X on every card regardless of what's in
+   the middle column or the actions column. */
+.rel-mid{flex:0 1 200px;width:200px;min-width:0;padding-top:2px}
 .rel-title{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Artisti correlati */
 .corr-section{margin-bottom:18px;padding:12px 14px;background:var(--bg-e);border-radius:10px;border:1px solid var(--border)}
