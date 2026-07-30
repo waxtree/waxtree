@@ -4250,9 +4250,16 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
       const btn=e.currentTarget;
       btn.textContent='…';btn.style.opacity='0.55';
       const bcArtist=isLabel?(first.label||''):nodeName;
+      // On a label node, first.label already holds the per-track artist
+      // (fetchLabelData's override) and nodeName IS the label; on an
+      // artist node it's the reverse — first.label is the release's real
+      // label, nodeName the artist. Sending both lets the edge function
+      // try a label-based search too — Bandcamp is very often organized
+      // by label rather than by artist, especially for smaller labels.
+      const bcLabel=isLabel?nodeName:(first.label||'');
       let finalUrl=`https://bandcamp.com/search?q=${encodeURIComponent(releaseTitle)}&item_type=a`;
       try{
-        const{data}=await sb.functions.invoke('bc-search',{body:{artist:bcArtist,title:releaseTitle,release:releaseTitle}});
+        const{data}=await sb.functions.invoke('bc-search',{body:{artist:bcArtist,label:bcLabel,title:releaseTitle,release:releaseTitle}});
         if(data?.tracks?.[0]?.url)finalUrl=data.tracks[0].url;
       }catch(err){console.error('[BC error]',err?.message||err);}
       btn.textContent='Bandcamp ↗';btn.style.opacity='';

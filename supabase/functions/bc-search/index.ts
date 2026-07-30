@@ -10,29 +10,101 @@ const respond = (body: unknown, status = 200) =>
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-// Accept any URL with an artist subdomain (artist.bandcamp.com/*).
+// Accept any URL with an artist/label subdomain (name.bandcamp.com/*).
 // These always have a real dot before "bandcamp", unlike bandcamp.com/search which doesn't.
 function isBcArtistUrl(url: string) {
   return url.includes('.bandcamp.com');
 }
 
-// Bandcamp's own autocomplete — same API used by the search bar on bandcamp.com.
-async function bcAutocomplete(query: string): Promise<string | null> {
+function norm(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+interface BcHit {
+  type: string;
+  name: string;
+  band_name: string;
+  album_name?: string;
+  item_url_path: string;
+}
+
+// Bandcamp's own search index (same API the search bar on bandcamp.com
+// uses) — returns structured {band_name, name, album_name} fields, which
+// is what makes real verification possible instead of blindly trusting
+// rank order. This was previously called with GET and query-string params;
+// the real API is POST with a JSON body (search_text/search_filter/
+// full_page/fan_id) — confirmed live 2026-07-30, the old call shape
+// returns a MissingParamError every time, meaning this whole strategy was
+// silently failing and falling straight through to unverified fallbacks.
+async function bcAutocomplete(query: string): Promise<BcHit[]> {
   try {
-    const url = `https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic?q=${encodeURIComponent(query)}&locale=en-US&search_filter=`;
-    const res = await fetch(url, {
-      headers: { 'User-Agent': UA, Accept: 'application/json', Referer: 'https://bandcamp.com/' },
+    const res = await fetch('https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic', {
+      method: 'POST',
+      headers: { 'User-Agent': UA, 'Content-Type': 'application/json', Accept: 'application/json', Referer: 'https://bandcamp.com/' },
+      body: JSON.stringify({ search_text: query, search_filter: '', full_page: false, fan_id: null }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
-    const results: Array<Record<string, string>> = data?.auto?.results || [];
-    const hit =
-      results.find((r) => (r.type === 'a' || r.type === 't') && r.item_url) ||
-      results.find((r) => r.item_url) ||
-      results.find((r) => r.url);
-    return hit?.item_url || hit?.url || null;
+    return (data?.auto?.results || []) as BcHit[];
   } catch {
-    return null;
+    return [];
+  }
+}
+
+// A structured hit only counts as a real match if the credited name
+// (artist OR label — Bandcamp pages are very often filed under the label,
+// not the artist, especially for smaller/underground acts) AND the
+// release/track title both correspond to what was actually searched for.
+// This is what stops "first autocomplete suggestion" from silently
+// standing in for "the right page" — confirmed live: unverified, a query
+// with no genuine match can still return SOME plausible-looking result.
+function verifyHit(hit: BcHit, wantNames: string[], wantTitle: string): boolean {
+  const bandN = norm(hit.band_name);
+  const nameOk = wantNames.some((w) => w && (bandN.includes(w) || w.includes(bandN)));
+  if (!nameOk) return false;
+  if (!wantTitle) return true; // artist/label-only search, no title to check
+  // Guard each side against being empty before using it in .includes() —
+  // "anything".includes("") is always true in JS, so an album-less hit
+  // (the common case: only track-type hits carry album_name) would
+  // otherwise pass via the empty albumN side no matter what the real
+  // title said. Caught by an offline test before shipping: a hit for a
+  // genuinely different release ("A Completely Different EP") verified
+  // as a false positive against "Cause & Effect" purely because
+  // album_name was undefined.
+  const titleN = norm(hit.name);
+  const albumN = norm(hit.album_name || '');
+  const titleMatch = !!titleN && (titleN.includes(wantTitle) || wantTitle.includes(titleN));
+  const albumMatch = !!albumN && (albumN.includes(wantTitle) || wantTitle.includes(albumN));
+  return titleMatch || albumMatch;
+}
+
+// Bandcamp album/track pages consistently title themselves
+// "{Release/Track Title} | {Artist} | {Label}" (confirmed live 2026-07-30
+// against real release and track pages) — a single page fetch is enough
+// to verify ANY candidate URL against both the credited name and the
+// title, regardless of which strategy found it. This is what lets the
+// otherwise-unverifiable Google/DuckDuckGo fallbacks still be trusted
+// before redirecting, instead of forwarding whatever they happened to
+// rank first.
+async function verifyPageTitle(url: string, wantNames: string[], wantTitle: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html' } });
+    if (!res.ok) return false;
+    const html = await res.text();
+    const m = html.match(/<title>([^<]*)<\/title>/i);
+    if (!m) return false;
+    const pageTitleN = norm(m[1]);
+    const nameOk = wantNames.some((w) => w && pageTitleN.includes(w));
+    if (!nameOk) return false;
+    return !wantTitle || pageTitleN.includes(wantTitle);
+  } catch {
+    return false;
   }
 }
 
@@ -61,7 +133,6 @@ async function googleSearch(q: string, serperKey: string): Promise<string | null
 }
 
 // DuckDuckGo HTML search — fallback when autocomplete and Google both fail.
-// Uses isBcArtistUrl (any *.bandcamp.com) instead of the old strict /track/ or /album/ check.
 async function ddgSearch(q: string): Promise<string | null> {
   try {
     const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
@@ -88,52 +159,95 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   try {
-    const { artist, title, release } = await req.json();
-    if (!artist?.trim()) return respond({ tracks: [], error: 'artist required' }, 400);
+    const { artist, label, title, release } = await req.json();
+    if (!artist?.trim() && !label?.trim()) return respond({ tracks: [], error: 'artist or label required' }, 400);
 
     const debug: string[] = [];
-    const artistName = artist.trim();
-    const keyword = release?.trim() || title?.trim() || '';
+    const artistName = (artist || '').trim();
+    const labelName = (label || '').trim();
+    const keyword = (release || title || '').trim();
+    const artistN = norm(artistName);
+    const labelN = norm(labelName);
+    const keywordN = norm(keyword);
+    const wantNames = [artistN, labelN].filter(Boolean);
+
+    // Enriched with real title/artist/album whenever the match came from a
+    // structured bcAutocomplete hit (the common case now that strategy 1/2
+    // actually work) — previously always null regardless of match quality,
+    // which is why the BANDCAMP section on artist/label pages showed rows
+    // with blank titles.
+    const push = (url: string, hit?: BcHit) => [{
+      url,
+      title: hit?.name ?? null,
+      artist: hit?.band_name ?? null,
+      album: hit?.album_name ?? null,
+      released: null,
+      thumb: null,
+    }];
+
+    // Strategy 1: Bandcamp's own search, artist + release/track title.
+    if (artistName && keyword) {
+      const hits = await bcAutocomplete(`${artistName} ${keyword}`);
+      const hit = hits.find((h) => verifyHit(h, wantNames, keywordN));
+      debug.push(`bc(artist+kw): ${hit?.item_url_path || 'no verified match'}`);
+      if (hit) return respond({ tracks: push(hit.item_url_path, hit), debug });
+    }
+
+    // Strategy 2: label + release/track title — Bandcamp is very often
+    // organized by label rather than by artist, especially for
+    // underground/independent releases, so this catches real matches
+    // strategy 1 alone would miss.
+    if (labelName && keyword) {
+      const hits = await bcAutocomplete(`${labelName} ${keyword}`);
+      const hit = hits.find((h) => verifyHit(h, wantNames, keywordN));
+      debug.push(`bc(label+kw): ${hit?.item_url_path || 'no verified match'}`);
+      if (hit) return respond({ tracks: push(hit.item_url_path, hit), debug });
+    }
+
+    // Strategy 3/4: artist/label alone — lands on their own Bandcamp page
+    // rather than the specific release, but still a genuinely verified
+    // match on the credited name, which beats a generic search page.
+    if (artistName) {
+      const hits = await bcAutocomplete(artistName);
+      const hit = hits.find((h) => verifyHit(h, wantNames, ''));
+      debug.push(`bc(artist): ${hit?.item_url_path || 'no verified match'}`);
+      if (hit) return respond({ tracks: push(hit.item_url_path, hit), debug });
+    }
+    if (labelName) {
+      const hits = await bcAutocomplete(labelName);
+      const hit = hits.find((h) => verifyHit(h, wantNames, ''));
+      debug.push(`bc(label): ${hit?.item_url_path || 'no verified match'}`);
+      if (hit) return respond({ tracks: push(hit.item_url_path, hit), debug });
+    }
+
+    // Strategy 5/6: external search engines don't return structured
+    // band/title fields, so a candidate URL from here gets ONE extra page
+    // fetch to verify its own <title> tag before being trusted — Bandcamp
+    // pages consistently title themselves "Title | Artist | Label".
+    // Without this, these were the strategies most likely to redirect to
+    // an unrelated page: rank order alone is not correspondence.
     const serperKey = Deno.env.get('SERPER_API_KEY') || '';
-
-    const push = (url: string) => [{ url, title: null, artist: null, album: null, released: null, thumb: null }];
-
-    // Strategy 1: Bandcamp autocomplete — artist + keyword (most accurate, no API key needed)
-    if (keyword) {
-      const url = await bcAutocomplete(`${artistName} ${keyword}`);
-      debug.push(`bc_auto(artist+kw): ${url || 'null'}`);
-      if (url) return respond({ tracks: push(url), debug });
-    }
-
-    // Strategy 2: Bandcamp autocomplete — artist only
-    const artistUrl = await bcAutocomplete(artistName);
-    debug.push(`bc_auto(artist): ${artistUrl || 'null'}`);
-    if (artistUrl) return respond({ tracks: push(artistUrl), debug });
-
-    // Strategy 3: Google search via Serper.dev — artist + keyword
     if (keyword && serperKey) {
-      const q = `${artistName} ${keyword} site:bandcamp.com`;
-      debug.push(`google(artist+kw): ${q}`);
+      const q = `${artistName || labelName} ${keyword} site:bandcamp.com`;
       const url = await googleSearch(q, serperKey);
-      if (url) return respond({ tracks: push(url), debug });
+      const ok = url ? await verifyPageTitle(url, wantNames, keywordN) : false;
+      debug.push(`google(kw): ${url || 'null'} verified=${ok}`);
+      if (url && ok) return respond({ tracks: push(url), debug });
     }
-
-    // Strategy 4: Google search via Serper.dev — artist only
     if (serperKey) {
-      const q = `${artistName} site:bandcamp.com`;
-      debug.push(`google(artist): ${q}`);
+      const q = `${artistName || labelName} site:bandcamp.com`;
       const url = await googleSearch(q, serperKey);
-      if (url) return respond({ tracks: push(url), debug });
+      const ok = url ? await verifyPageTitle(url, wantNames, '') : false;
+      debug.push(`google(name): ${url || 'null'} verified=${ok}`);
+      if (url && ok) return respond({ tracks: push(url), debug });
     }
-
-    // Strategy 5: DuckDuckGo — final fallback (no API key needed).
-    // Fixed vs old version: accepts any *.bandcamp.com URL, not just /track/ or /album/.
-    const ddgQ = keyword ? `${artistName} ${keyword} bandcamp` : `${artistName} bandcamp`;
-    debug.push(`ddg: ${ddgQ}`);
+    const ddgQ = keyword ? `${artistName || labelName} ${keyword} bandcamp` : `${artistName || labelName} bandcamp`;
     const ddgUrl = await ddgSearch(ddgQ);
-    if (ddgUrl) return respond({ tracks: push(ddgUrl), debug });
+    const ddgOk = ddgUrl ? await verifyPageTitle(ddgUrl, wantNames, keywordN) : false;
+    debug.push(`ddg: ${ddgUrl || 'null'} verified=${ddgOk}`);
+    if (ddgUrl && ddgOk) return respond({ tracks: push(ddgUrl), debug });
 
-    debug.push('not found');
+    debug.push('no verified match — caller falls back to a plain bandcamp.com search');
     return respond({ tracks: [], debug });
   } catch (err) {
     return respond({ tracks: [], error: err instanceof Error ? err.message : String(err) });
