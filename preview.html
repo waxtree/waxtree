@@ -2308,6 +2308,7 @@ const RELATED_SOURCES=[
   {id:'cosine',label:'Related by Cosine.club',available:false},
 ];
 let ytMixLoading=new Set();
+let ytVerifyLoading=new Set();
 function relatedSourceLabel(id){return RELATED_SOURCES.find(s=>s.id===id)?.label||id;}
 // YouTube's own auto-generated "Topic" channels for a music act are named
 // "<Artist> - Topic" — stripping that suffix turns channelTitle back into
@@ -2347,13 +2348,36 @@ function filterYtMixItems(items,excludeVideoId,sourceArtistName){
     // actually has topic tags to compare against (no baseline = no
     // filter, rather than accidentally rejecting everything). A candidate
     // with no topic tags of its own is kept — YouTube not having tagged it
-    // isn't evidence it's a bad match, just missing data.
+    // isn't evidence it's a bad match, just missing data. Confirmed live
+    // this has a real ceiling: YouTube's topicCategories are broad genre
+    // buckets, not scenes — an underground house track and a mass-produced
+    // "AFRO HOUSE 2025 🌴" upload both land under plain "Electronic_music",
+    // so this alone can't tell them apart. The emoji/all-caps filter below
+    // is what actually catches that case.
     .filter(it=>{
       if(!sourceTopics.size)return true;
       const itTopics=ytTopicSet(it.topics);
       if(!itTopics.size)return true;
       for(const t of itTopics)if(sourceTopics.has(t))return true;
       return false;
+    })
+    // A genuine label/artist upload (or a YouTube auto-"Topic" channel
+    // entry) never has emoji in its title — that's specifically an SEO/
+    // content-farm upload pattern ("RETURN LYRICS- (AFRO HOUSE 2025
+    // 🌴 Sunset Glow...)" was the confirmed live example). Same story for
+    // a title that's mostly uppercase with a self-declared genre+year in
+    // parentheses/brackets, e.g. "(AFRO HOUSE 2025)" — a real release
+    // title doesn't announce its own genre and a release year inline like
+    // an ad does.
+    .filter(it=>{
+      const t=it.title||'';
+      if(/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u.test(t))return false;
+      if(/[([][^)\]]*\b(19|20)\d{2}\b[^)\]]*[)\]]/.test(t)){
+        const letters=t.replace(/[^a-zA-Z]/g,'');
+        const upper=t.replace(/[^A-Z]/g,'');
+        if(letters.length>0&&upper.length/letters.length>0.6)return false;
+      }
+      return true;
     })
     .slice(0,20); // API already caps at 25 (yt-search.js maxResults) — leave room for the filters above to trim some
 }
@@ -2370,45 +2394,61 @@ function parseYtArtistFromTitle(title){
   const dashIdx=(title||'').indexOf(' - ');
   return dashIdx>0?title.slice(0,dashIdx).trim():null;
 }
-// Mirrors resolveReleaseAndOpen()'s shape (search first, open once
-// resolved) — a YouTube pick only ever has names to go on, never a
-// Discogs id, so "Explore" here has to search rather than jump straight
-// to a known id like it does everywhere else in the app. Tries the
-// title-parsed artist name first, then the channel name as a fallback,
-// but ANY candidate still has to clear two checks before it can open a
-// node — after the Bandcamp-redirect lesson that a name match alone isn't
-// proof of the right entry (Discogs has plenty of same-named artists
-// across totally different scenes): the search hit's OWN name must match
-// exactly (not just "first result"), AND that artist/label's real
-// discography must contain something matching the actual video title.
-// Neither candidate clearing verification means saying so, not guessing.
-async function resolveYtNameAndOpen(item,type){
+// Verification, not just on Explore-click anymore — a track that can't be
+// confidently traced back to a real Discogs artist/label doesn't get
+// shown as a "Related" pick at all now, rather than showing up with a
+// Explore button that's a coin flip. Tries the title-parsed artist name
+// first (see parseYtArtistFromTitle above), then the channel name — some
+// picks are only correctly named one way or the other (a YouTube "Topic"
+// channel IS the real artist profile with no artist name in the title at
+// all, e.g. "Injection (Original Mix)" by "Malin Genie - Topic"; other
+// times, per the Bandcamp-redirect lesson, the channel is an unrelated
+// uploader and only the title says who it's really by). Checks both
+// artist and label for each name, and — same as before — a name match
+// alone isn't proof: that artist/label's own discography has to actually
+// contain something matching the video's title before it counts as
+// verified.
+async function verifyYtCandidate(item){
   const titleArtist=parseYtArtistFromTitle(item.title);
   const channelName=stripYtTopicSuffix(item.channelTitle);
-  const candidates=[...new Set([titleArtist,channelName].filter(Boolean))];
-  if(!candidates.length)return;
-  st.loading=true;rr();
-  try{
-    const titleNorm=normalizeStr(item.title);
-    for(const name of candidates){
-      const nameNorm=normalizeStr(name);
-      const results=await searchDiscogs(name);
+  const nameCandidates=[...new Set([titleArtist,channelName].filter(Boolean))];
+  const titleNorm=normalizeStr(item.title);
+  for(const name of nameCandidates){
+    const nameNorm=normalizeStr(name);
+    let results;
+    try{results=await searchDiscogs(name);}catch{continue;}
+    for(const type of['artist','label']){
       const matches=results.filter(r=>r.type===type&&normalizeStr(r.title)===nameNorm);
       for(const c of matches){
-        const path=type==='label'?'/labels/'+c.id+'/releases':'/artists/'+c.id+'/releases';
-        const rd=await dReq(path,{per_page:'100'});
-        const hit=(rd.releases||[]).some(r=>{
-          const rt=normalizeStr(r.title||'');
-          return rt&&titleNorm&&(titleNorm.includes(rt)||rt.includes(titleNorm));
-        });
-        if(hit){addNode(type,c.id,c.title,null,st.activeBranchId);st.loading=false;rr();return;}
+        try{
+          const path=type==='label'?'/labels/'+c.id+'/releases':'/artists/'+c.id+'/releases';
+          const rd=await dReq(path,{per_page:'100'});
+          const hit=(rd.releases||[]).some(r=>{
+            const rt=normalizeStr(r.title||'');
+            return rt&&titleNorm&&(titleNorm.includes(rt)||rt.includes(titleNorm));
+          });
+          if(hit)return{type,discogsId:c.id,discogsName:c.title};
+        }catch{}
       }
     }
-    st.err='Could not confidently match "'+item.title+'" to a Discogs '+type+'.';
-  }catch(e){
-    st.err='Search failed: '+e.message;
   }
-  st.loading=false;rr();
+  return null;
+}
+// Small concurrent batches, not all 20 at once — dReq already throttles
+// itself (45 req/60s) but there's no reason to open that many requests
+// simultaneously against the shared Discogs proxy just because we can.
+const YT_VERIFY_BATCH=4;
+async function verifyYtMixItems(items){
+  const out=[];
+  for(let i=0;i<items.length;i+=YT_VERIFY_BATCH){
+    const batch=items.slice(i,i+YT_VERIFY_BATCH);
+    const resolved=await Promise.all(batch.map(async it=>{
+      const r=await verifyYtCandidate(it);
+      return r?{...it,resolved:r}:null;
+    }));
+    out.push(...resolved.filter(Boolean));
+  }
+  return out;
 }
 function buildYtMixCard(item){
   const trackId='yt:'+item.id;
@@ -2463,18 +2503,17 @@ function buildYtMixCard(item){
   }
   actions.appendChild(plWrap);
 
-  const expDropKey='yt-'+item.id;
-  const isExpOpen=st.exploreDropKey===expDropKey;
-  const expWrap=d('explore-wrap',{});
-  const expBtn=b('esplora-btn explore-toggle',{onClick:e=>{e.stopPropagation();st.exploreDropKey=isExpOpen?null:expDropKey;rr();}},isExpOpen?'Explore ▴':'Explore ▾');
-  expWrap.appendChild(expBtn);
-  if(isExpOpen){
-    attachFloatingDropdown(expBtn,()=>{st.exploreDropKey=null;rr();},drop=>{
-      drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;resolveYtNameAndOpen(item,'artist');}},'Explore as artist'));
-      drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;resolveYtNameAndOpen(item,'label');}},'Explore as label'));
-    });
+  // item.resolved is set by verifyYtMixItems() before a card ever gets
+  // built — every card shown has already been confirmed against a real
+  // Discogs artist/label, so this just opens it directly. No dropdown, no
+  // guessing: there's exactly one confirmed answer by the time this runs.
+  if(item.resolved){
+    const r=item.resolved;
+    actions.appendChild(b('esplora-btn',{
+      title:'Explore '+r.type+': '+r.discogsName,
+      onClick:e=>{e.stopPropagation();addNode(r.type,r.discogsId,r.discogsName,null,st.activeBranchId);},
+    },'Explore: '+r.discogsName));
   }
-  actions.appendChild(expWrap);
 
   card.appendChild(actions);
   return card;
@@ -2520,9 +2559,26 @@ function renderRelatedTracks(){
     }
     const cached=lsGet('ytmix:'+videoId);
     if(cached){
-      const items=filterYtMixItems(cached,videoId,st.nowPlaying.artistName);
-      if(!items.length){host.appendChild(s('rp-coming-soon','No related tracks found'));return;}
-      items.forEach(item=>host.appendChild(buildYtMixCard(item)));
+      // Verification (verifyYtMixItems) costs real Discogs calls per
+      // candidate, so its result is cached separately from the raw Mix
+      // fetch and only computed once per source video, not on every
+      // render.
+      const verifyKey='ytver:'+videoId;
+      const verified=lsGet(verifyKey);
+      if(verified){
+        if(!verified.length){host.appendChild(s('rp-coming-soon','No verified related tracks found'));return;}
+        verified.forEach(item=>host.appendChild(buildYtMixCard(item)));
+        return;
+      }
+      if(!ytVerifyLoading.has(videoId)){
+        ytVerifyLoading.add(videoId);
+        const items=filterYtMixItems(cached,videoId,st.nowPlaying.artistName);
+        verifyYtMixItems(items)
+          .then(v=>lsSet(verifyKey,v))
+          .catch(e=>{console.warn('WaxTree: Related by YouTube verification failed:',e?.message||e);lsSet(verifyKey,[]);})
+          .then(()=>{ytVerifyLoading.delete(videoId);rr();});
+      }
+      host.appendChild(s('rp-coming-soon','Verifying…'));
       return;
     }
     if(!ytMixLoading.has(videoId)){
