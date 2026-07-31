@@ -2357,39 +2357,54 @@ function filterYtMixItems(items,excludeVideoId,sourceArtistName){
     })
     .slice(0,20); // API already caps at 25 (yt-search.js maxResults) — leave room for the filters above to trim some
 }
+// Track titles in this scene consistently follow "Artist - Title [Label
+// CATNO]", the same shape Discogs listings themselves use — far more
+// reliable for finding the real artist than channelTitle, which is
+// frequently a label's promo channel, a compiler, or an unrelated fan
+// reupload. Confirmed live: "Janeret - Dawn [RORA013]" uploaded by a
+// channel called "CMYK" — Explore was searching Discogs for "CMYK" and
+// finding nothing to do with Janeret, exactly the wrong-guess risk
+// verification below exists to catch, but better to try the right name
+// first than lean entirely on verification rejecting the wrong one.
+function parseYtArtistFromTitle(title){
+  const dashIdx=(title||'').indexOf(' - ');
+  return dashIdx>0?title.slice(0,dashIdx).trim():null;
+}
 // Mirrors resolveReleaseAndOpen()'s shape (search first, open once
-// resolved) — a YouTube pick only ever has a channel *name*, never a
+// resolved) — a YouTube pick only ever has names to go on, never a
 // Discogs id, so "Explore" here has to search rather than jump straight
-// to a known id like it does everywhere else in the app. Two checks, both
-// required, after the Bandcamp-redirect lesson that a name match alone
-// isn't proof of the right entry (Discogs has plenty of same-named
-// artists across totally different scenes): the search hit's OWN name
-// must match exactly (not just "first result"), AND that artist/label's
-// real discography must contain something matching the actual video
-// title — otherwise this stays a guess, and guesses that land on the
-// wrong artist are worse than just saying it couldn't verify one.
+// to a known id like it does everywhere else in the app. Tries the
+// title-parsed artist name first, then the channel name as a fallback,
+// but ANY candidate still has to clear two checks before it can open a
+// node — after the Bandcamp-redirect lesson that a name match alone isn't
+// proof of the right entry (Discogs has plenty of same-named artists
+// across totally different scenes): the search hit's OWN name must match
+// exactly (not just "first result"), AND that artist/label's real
+// discography must contain something matching the actual video title.
+// Neither candidate clearing verification means saying so, not guessing.
 async function resolveYtNameAndOpen(item,type){
-  const clean=stripYtTopicSuffix(item.channelTitle);
-  if(!clean)return;
+  const titleArtist=parseYtArtistFromTitle(item.title);
+  const channelName=stripYtTopicSuffix(item.channelTitle);
+  const candidates=[...new Set([titleArtist,channelName].filter(Boolean))];
+  if(!candidates.length)return;
   st.loading=true;rr();
   try{
-    const results=await searchDiscogs(clean);
-    const cleanNorm=normalizeStr(clean);
-    const candidates=results.filter(r=>r.type===type&&normalizeStr(r.title)===cleanNorm);
-    if(!candidates.length){st.err='Could not confidently match "'+clean+'" to a Discogs '+type+'.';st.loading=false;rr();return;}
     const titleNorm=normalizeStr(item.title);
-    let verified=null;
-    for(const c of candidates){
-      const path=type==='label'?'/labels/'+c.id+'/releases':'/artists/'+c.id+'/releases';
-      const rd=await dReq(path,{per_page:'100'});
-      const hit=(rd.releases||[]).some(r=>{
-        const rt=normalizeStr(r.title||'');
-        return rt&&titleNorm&&(titleNorm.includes(rt)||rt.includes(titleNorm));
-      });
-      if(hit){verified=c;break;}
+    for(const name of candidates){
+      const nameNorm=normalizeStr(name);
+      const results=await searchDiscogs(name);
+      const matches=results.filter(r=>r.type===type&&normalizeStr(r.title)===nameNorm);
+      for(const c of matches){
+        const path=type==='label'?'/labels/'+c.id+'/releases':'/artists/'+c.id+'/releases';
+        const rd=await dReq(path,{per_page:'100'});
+        const hit=(rd.releases||[]).some(r=>{
+          const rt=normalizeStr(r.title||'');
+          return rt&&titleNorm&&(titleNorm.includes(rt)||rt.includes(titleNorm));
+        });
+        if(hit){addNode(type,c.id,c.title,null,st.activeBranchId);st.loading=false;rr();return;}
+      }
     }
-    if(!verified){st.err='Found "'+clean+'" on Discogs but couldn’t verify "'+item.title+'" is really theirs — not opening a possibly-wrong match.';st.loading=false;rr();return;}
-    addNode(type,verified.id,verified.title,null,st.activeBranchId);
+    st.err='Could not confidently match "'+item.title+'" to a Discogs '+type+'.';
   }catch(e){
     st.err='Search failed: '+e.message;
   }
