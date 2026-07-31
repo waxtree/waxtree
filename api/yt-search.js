@@ -37,8 +37,11 @@ export default async function handler(req, res) {
     // (general quota pool, not the tight 100/day search.list one) — 'RD'
     // + a video id is YouTube's own auto-generated "Mix" playlist for that
     // video, still reachable this way even though relatedToVideoId on
-    // search.list itself was removed in 2023. Exploratory: verifying this
-    // still works before building anything on top of it.
+    // search.list itself was removed in 2023. Confirmed live (2026-07-31)
+    // this draws from the same underlying data as the personalized "Mix"
+    // shown on youtube.com — quality varies by source video (occasional
+    // genre-inconsistent filler track), which is what the client-side
+    // duration sanity filter is for. Powers "Related by YouTube".
     if (playlistId) {
       const plUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
       plUrl.searchParams.set('part', 'snippet')
@@ -51,7 +54,17 @@ export default async function handler(req, res) {
         title: it.snippet?.title || '',
         channelTitle: it.snippet?.channelTitle || '',
       })).filter(x => x.id)
-      return res.status(200).json({ results: items })
+      if (!items.length) return res.status(200).json({ results: [] })
+
+      const videosUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
+      videosUrl.searchParams.set('part', 'contentDetails')
+      videosUrl.searchParams.set('id', items.map(x => x.id).join(','))
+      videosUrl.searchParams.set('key', YT_API_KEY)
+      const vd = await ytFetch(videosUrl)
+      const durById = {}
+      ;(vd.items || []).forEach(v => { durById[v.id] = parseIso8601Duration(v.contentDetails?.duration) })
+      const results = items.map(x => ({ ...x, durationSec: durById[x.id] || 0 }))
+      return res.status(200).json({ results })
     }
 
     // Cheap path (~3 units total, no search.list quota spent at all): once a

@@ -480,6 +480,9 @@ input,select{font:inherit;color:inherit}
 .rp{min-height:0}
 #rp-np-empty{padding:18px 12px;font-size:12px;color:var(--text-f);text-align:center;line-height:1.5;display:none}
 .rp-corr-hd{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px;display:block}
+.rp-hd-row{display:flex;align-items:center;justify-content:space-between}
+.rp-src-btn{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);background:none;border:none;cursor:pointer;font-family:inherit;padding:0;transition:color .15s}
+.rp-src-btn:hover{color:var(--text-m)}
 .rp-coming-soon{display:block;text-align:center;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-f);opacity:.45;margin-top:24px}
 .rp-rel-row{display:flex;align-items:center;gap:10px;padding:7px 4px;border-radius:8px;cursor:pointer;transition:background .1s}
 .rp-rel-row:hover{background:var(--bg-h)}
@@ -1646,7 +1649,7 @@ function saveSt(){
     if(e.name==='QuotaExceededError'&&purgeExpiredCache())
       try{localStorage.setItem('wt-discogs-wantlist',JSON.stringify(st.discogsWantlist));}catch{}
   }
-  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen});
+  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,relatedTracksSource:st.relatedTracksSource});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -1890,6 +1893,10 @@ const st={
   // flags a release the FIRST time it's ever seen, on any device.
   followScanKnownIds:saved?.followScanKnownIds||{},
   newReleasesModal:false,newReleasesFound:[],
+  // Which algorithm powers the Related Tracks panel — persisted locally
+  // since it's a stable preference, not something that needs cloud sync.
+  // relatedSourceMenuOpen is pure UI state, never persisted.
+  relatedTracksSource:saved?.relatedTracksSource||'youtube',relatedSourceMenuOpen:false,
   // client-id (branch.id / node.id / a synthetic 'tree:'+rootId key) ->
   // Supabase uuid, for syncNewSchema() below. Cloud-synced (not just
   // local) so a second device maps the SAME client entity to the SAME
@@ -2277,21 +2284,105 @@ async function refreshRelatedTracks(nowTrack,seen,known){
   finally{relatedLoading=false;rr();}
 }
 function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))|0;}return Math.abs(h);}
-// Paused at the user's explicit request (2026-07-21) — correlation quality
-// still wasn't good enough after several rounds of real, verified fixes
-// (see [[project_waxtree_related_tracks_stalemate]] in memory). Reverted
-// the visible panel back to a plain "Coming soon" placeholder rather than
-// showing picks. Deliberately NOT deleted: refreshRelatedTracks(),
-// scoreRelatedCandidate(), buildTasteModel() and the rest of the pipeline
-// below are untouched and simply never called from here anymore — nothing
-// is fetched, no quota spent, no cache written. If this gets revisited,
-// get concrete evidence (a console screenshot, a specific bad example)
-// before changing the algorithm again rather than another blind pass.
+// The Discogs-metadata correlation pipeline below (refreshRelatedTracks(),
+// scoreRelatedCandidate(), buildTasteModel()) was paused at the user's
+// explicit request (2026-07-21) — quality still wasn't good enough after
+// several rounds of real, verified fixes (see
+// [[project_waxtree_related_tracks_stalemate]] in memory). Deliberately
+// NOT deleted, just never called from here. "Related Tracks" now instead
+// defaults to "Related by YouTube" (fetchYoutubeMix, below) — YouTube's
+// own auto-generated Mix playlist for whatever's currently playing, which
+// is the real recommendation engine's output rather than a from-scratch
+// scoring model. The header's dropdown is designed to hold more than one
+// source (a second, "Related by Cosine.club", is coming once that site's
+// API key is available) rather than being tied to a single algorithm.
+const RELATED_SOURCES=[
+  {id:'youtube',label:'Related by YouTube',available:true},
+  {id:'cosine',label:'Related by Cosine.club',available:false},
+];
+let ytMixLoading=new Set();
+function relatedSourceLabel(id){return RELATED_SOURCES.find(s=>s.id===id)?.label||id;}
+function filterYtMixItems(items,excludeVideoId){
+  return items
+    .filter(it=>it.id!==excludeVideoId)
+    .filter(it=>it.durationSec>=60&&it.durationSec<=900) // drop obvious outliers (ads, full-mix uploads, broken lookups) rather than trust every entry
+    .slice(0,10);
+}
+function buildYtMixCard(item){
+  const trackId='yt:'+item.id;
+  const thumbUrl='https://i.ytimg.com/vi/'+item.id+'/mqdefault.jpg';
+  // Registered exactly like the New Releases modal registers its own
+  // externally-sourced picks — nothing else in the tree knows this track,
+  // so toggleLike/playlist/doPlay all need to find it here.
+  discoveredTracks[trackId]={id:trackId,videoId:item.id,title:item.title,trackArtistName:item.channelTitle,thumbUrl,duration:item.durationSec||null};
+  const liked=!!st.likes[trackId];
+  const card=d('follows-item rp-yt-card',{onClick:()=>doPlay(trackId,item.id,item.title,item.channelTitle)});
+  card.appendChild(el('img',{cls:'follows-thumb',src:thumbUrl,alt:'',loading:'lazy'}));
+  const info=d('daq-info',{});
+  info.appendChild(s('daq-title',item.title));
+  info.appendChild(s('daq-meta',item.channelTitle));
+  card.appendChild(info);
+  card.appendChild(b('t-like'+(liked?' liked':''),{title:'Like',onClick:e=>{e.stopPropagation();toggleLike(trackId);}},liked?'♥':'♡'));
+  return card;
+}
 function renderRelatedTracks(){
   const host=document.getElementById('related-tracks');
   if(!host)return;
   host.innerHTML='';
-  host.appendChild(s('rp-corr-hd','Related Tracks'));
+  const hd=d('rp-corr-hd rp-hd-row',{});
+  const srcBtn=b('rp-src-btn',{onClick:e=>{e.stopPropagation();st.relatedSourceMenuOpen=!st.relatedSourceMenuOpen;rr();}},relatedSourceLabel(st.relatedTracksSource)+' ▾');
+  hd.appendChild(srcBtn);
+  host.appendChild(hd);
+  if(st.relatedSourceMenuOpen){
+    // document.body-portal dropdown, same helper the mini-player's
+    // playlist/explore menus use — a normal position:absolute child here
+    // was already found not to stack correctly against #right-panel's
+    // fixed-position layout (see attachFloatingDropdown's own comment).
+    attachFloatingDropdown(srcBtn,()=>{st.relatedSourceMenuOpen=false;rr();},drop=>{
+      RELATED_SOURCES.forEach(src=>{
+        const checked=st.relatedTracksSource===src.id;
+        const item=b('pl-drop-item'+(checked?' checked':''),{
+          disabled:!src.available,
+          style:src.available?{}:{opacity:.45,cursor:'default'},
+          onClick:()=>{
+            if(!src.available)return;
+            st.relatedTracksSource=src.id;st.relatedSourceMenuOpen=false;rr();
+          },
+        },(checked?'✓ ':'')+src.label+(src.available?'':' (soon)'));
+        drop.appendChild(item);
+      });
+    });
+  }
+
+  if(!st.nowPlaying){
+    host.appendChild(s('rp-coming-soon','Play something to see picks'));
+    return;
+  }
+  if(st.relatedTracksSource==='youtube'){
+    const videoId=st.nowPlaying.videoId;
+    if(!videoId){
+      host.appendChild(s('rp-coming-soon','Resolving video…'));
+      return;
+    }
+    const cached=lsGet('ytmix:'+videoId);
+    if(cached){
+      const items=filterYtMixItems(cached,videoId);
+      if(!items.length){host.appendChild(s('rp-coming-soon','No related tracks found'));return;}
+      items.forEach(item=>host.appendChild(buildYtMixCard(item)));
+      return;
+    }
+    if(!ytMixLoading.has(videoId)){
+      ytMixLoading.add(videoId);
+      fetchYoutubeMix(videoId)
+        .catch(e=>{console.warn('WaxTree: Related by YouTube failed:',e?.message||e);return[];})
+        .then(()=>{ytMixLoading.delete(videoId);rr();});
+    }
+    host.appendChild(s('rp-coming-soon','Loading…'));
+    return;
+  }
+  // Any other source id currently has available:false in RELATED_SOURCES
+  // (the menu itself prevents selecting it), so this is unreached today —
+  // kept as the natural fallback for whenever Cosine.club goes live.
   host.appendChild(s('rp-coming-soon','Coming soon'));
 }
 
@@ -2406,6 +2497,20 @@ async function searchYouTubeApi(q){
 // result — versus 100+ units for every single search.list call. Once
 // ytChannelMap below has an artist's/label's channel on file, every later
 // track by them can be checked here first instead of paying for a search.
+// Powers "Related by YouTube" in the Related Tracks panel — YouTube's own
+// auto-generated "Mix" playlist for the currently-playing video (see
+// api/yt-search.js's playlistId branch). Same lsGet/lsSet local cache
+// pattern as searchYouTubeApi/fetchChannelUploads above.
+async function fetchYoutubeMix(videoId){
+  const ck='ytmix:'+videoId;
+  const c=lsGet(ck);if(c)return c;
+  const res=await fetch('/api/yt-search?playlistId=RD'+encodeURIComponent(videoId));
+  const json=await res.json().catch(()=>({}));
+  if(!res.ok||json.error)throw new Error(json.error||'YouTube Mix lookup failed ('+res.status+')');
+  const results=json.results||[];
+  lsSet(ck,results);
+  return results;
+}
 async function fetchChannelUploads(channelId){
   const ck='ytch:'+channelId;
   const c=lsGet(ck);if(c)return c;
