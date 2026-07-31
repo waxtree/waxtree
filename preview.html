@@ -3470,7 +3470,10 @@ function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
         if(mbUrl){item.entries.forEach(e=>e.thumbUrl=mbUrl);patched=true;rr();}
       }catch{}
     }
-    if(patched)lsSet(cacheKey,nd); // persist the same (mutated) object so covers survive a reload
+    if(patched){
+      lsSet(cacheKey,nd); // persist the same (mutated) object so covers survive a reload
+      pushSharedNodeCache(cacheKey.startsWith('l8:')?'label':'artist',cacheKey.slice(3),nd);
+    }
   })();
 }
 
@@ -3491,8 +3494,37 @@ function getCachedNodeData(type,discogsId){
   console.info('[WaxTree Debug] cache HIT for',key);
   return c;
 }
+
+// Cross-user companion to the local ct2: cache above — the first person to
+// open a given artist/label pays for the Discogs round-trips, everyone
+// after that (any device, any account, no time limit but the same 30-day
+// staleness window as the local cache) gets it back instantly. See
+// supabase/discogs_node_cache.sql. Failures here are always non-fatal —
+// worst case is exactly what happened before this existed: a normal
+// Discogs fetch.
+async function getSharedNodeCache(type,discogsId){
+  try{
+    const{data,error}=await sb.from('discogs_node_cache').select('data,cached_at').eq('id',type+':'+discogsId).maybeSingle();
+    if(error||!data)return null;
+    if(Date.now()-new Date(data.cached_at).getTime()>=CT2_TTL_MS)return null;
+    if(data.data?._v!==TRACK_DATA_VERSION)return null;
+    if(type==='artist'&&!data.data?.tracks?.length)return null;
+    return data.data;
+  }catch{return null;}
+}
+// Fire-and-forget on purpose — never worth blocking the UI on a cache
+// write succeeding. Same row gets upserted again as background enrichment
+// (correlated artists, missing cover art) settles, so it converges on the
+// complete version within a couple seconds even though the very first
+// write can be missing those.
+function pushSharedNodeCache(type,discogsId,data){
+  sb.from('discogs_node_cache').upsert({id:type+':'+discogsId,type,discogs_id:String(discogsId),data,cached_at:new Date().toISOString()})
+    .then(({error})=>{if(error)console.warn('WaxTree: shared node cache push failed (non-fatal):',error);});
+}
 async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=false){
   const c=getCachedNodeData('artist',discogsId);if(c)return c;
+  const shared=await getSharedNodeCache('artist',discogsId);
+  if(shared&&!isCancelled()){lsSet('a7:'+discogsId,shared);return shared;}
   // Newest-first: fetchReleaseBatches below stops once it hits the 200-track
   // cap, so for a discography bigger than that, whichever end we start from
   // is the only end that ever gets fetched. Oldest-first meant a prolific
@@ -3548,6 +3580,7 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
     _v:TRACK_DATA_VERSION
   };
   lsSet('a7:'+discogsId,nd);
+  pushSharedNodeCache('artist',discogsId,nd);
 
   // Background: correlated artists (secondary sidebar data) and missing cover art —
   // neither blocks the track list from appearing. Skipped when the caller
@@ -3569,6 +3602,7 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
             .filter(a=>{if(seen.has(a.k))return false;seen.add(a.k);return true;})
             .slice(0,10).map(a=>a.name);
           lsSet('a7:'+discogsId,nd);rr();
+          pushSharedNodeCache('artist',discogsId,nd);
         }catch{}
       })();
     }
@@ -3580,6 +3614,8 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
 
 async function fetchLabelData(discogsId,isCancelled=()=>false){
   const c=getCachedNodeData('label',discogsId);if(c)return c;
+  const shared=await getSharedNodeCache('label',discogsId);
+  if(shared&&!isCancelled()){lsSet('l8:'+discogsId,shared);return shared;}
   // Newest-first — see fetchArtistData()'s comment above the same change.
   // A label with a big back catalog was showing releases up to ~2020 and
   // no newer, digital-only ones included, purely because the 200-track cap
@@ -3643,6 +3679,7 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
     _v:TRACK_DATA_VERSION
   };
   lsSet('l8:'+discogsId,nd);
+  pushSharedNodeCache('label',discogsId,nd);
   resolveCoversInBackground(needsCover,'l8:'+discogsId,isCancelled,nd);
   return nd;
 }
