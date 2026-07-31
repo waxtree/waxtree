@@ -174,9 +174,19 @@ function loadGA(){
   });
 })([loadGA]);
 
+// Where to send the user after a successful (or already-active) sign-in.
+// Validated against a fixed allowlist rather than used raw — this repo is
+// public, so an unvalidated ?next= would be a real open-redirect bug, not
+// just a theoretical one.
+const REDIRECT_ALLOWLIST=['preview.html','admin.html'];
+function getRedirectTarget(){
+  const next=new URLSearchParams(location.search).get('next');
+  return REDIRECT_ALLOWLIST.includes(next)?next:'preview.html';
+}
+
 // Already logged in?
 sb.auth.getSession().then(({data:{session}})=>{
-  if(session)window.location.href='preview.html';
+  if(session)window.location.href=getRedirectTarget();
 });
 
 // Eye toggle
@@ -225,7 +235,7 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
     showFormErr(msg);
   } else {
     localStorage.setItem('wt-theme',html.dataset.theme);
-    window.location.href='preview.html';
+    window.location.href=getRedirectTarget();
   }
 });
 </script>

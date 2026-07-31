@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en" data-theme="dark" translate="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>WaxTree — Admin</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+[data-theme=dark]{--bg:#09090B;--bg-s:#111114;--bg-e:#17171B;--bg-h:#1F1F25;--text:#E8EDEA;--text-m:#7A9A8A;--text-f:#3E5A4A;--accent:#5EC47B;--accent-light:#90E0AA;--border:#1E1E25;--shadow:0 8px 32px rgba(0,0,0,.85);--err:#F47B5E}
+[data-theme=light]{--bg:#E8F0EA;--bg-s:#F4FBF6;--bg-e:#EAF2EC;--bg-h:#D4E8D8;--text:#1B2D22;--text-m:#3D6B4E;--text-f:#8FB09A;--accent:#3DAE5A;--accent-light:#5EC47B;--border:#C0D9C7;--shadow:0 8px 32px rgba(0,0,0,.12);--err:#D94F2E}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;padding:32px}
+.wrap{max-width:1100px;margin:0 auto}
+h1{font-size:22px;font-weight:700;margin-bottom:4px}
+.sub{font-size:13px;color:var(--text-m);margin-bottom:28px}
+.state{padding:60px 20px;text-align:center;color:var(--text-m);font-size:14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:32px}
+.tile{background:var(--bg-s);border:1px solid var(--border);border-radius:14px;padding:16px 18px}
+.tile-label{font-size:11px;font-weight:600;color:var(--text-m);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.tile-val{font-size:24px;font-weight:700}
+.tile-sub{font-size:12px;color:var(--text-f);margin-top:2px}
+section{margin-bottom:32px}
+section h2{font-size:15px;font-weight:700;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;background:var(--bg-s);border:1px solid var(--border);border-radius:14px;overflow:hidden;font-size:13px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border)}
+th{font-size:11px;font-weight:600;color:var(--text-m);text-transform:uppercase;letter-spacing:.03em;background:var(--bg-e)}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600}
+.badge.premium{background:rgba(94,196,123,.16);color:var(--accent)}
+.badge.free{background:var(--bg-h);color:var(--text-m)}
+.badge.mismatch{background:rgba(244,123,94,.14);color:var(--err)}
+.toggle-btn{padding:6px 12px;border-radius:8px;border:1.5px solid var(--border);background:none;color:var(--text);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:border-color .15s,opacity .15s}
+.toggle-btn:hover{border-color:var(--accent)}
+.toggle-btn:disabled{opacity:.5;cursor:default}
+.email{font-family:ui-monospace,monospace;font-size:12px}
+.err-inline{color:var(--err);font-size:11px;margin-top:4px}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <h1>WaxTree — Admin</h1>
+  <div class="sub">Internal only. Not linked from the app.</div>
+  <div id="root"><div class="state">Loading…</div></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL='https://asmnqlqvlpcwcaaughuu.supabase.co';
+const SUPABASE_KEY='sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ';
+const {createClient}=window.supabase;
+const sb=createClient(SUPABASE_URL,SUPABASE_KEY);
+const root=document.getElementById('root');
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtDate(s){if(!s)return '—';return new Date(s).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});}
+
+async function authedFetch(path,opts={}){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)throw new Error('no session');
+  return fetch(path,{
+    ...opts,
+    headers:{...(opts.headers||{}),Authorization:'Bearer '+session.access_token,'Content-Type':'application/json'},
+  });
+}
+
+function renderUnauthorized(){
+  root.innerHTML='<div class="state">Not authorized.</div>';
+}
+
+function renderStats(stats){
+  const{users,digging_events,shared_caches,new_schema}=stats;
+  return `
+    <div class="tiles">
+      <div class="tile"><div class="tile-label">Users</div><div class="tile-val">${users.total}</div><div class="tile-sub">${users.premium} premium · ${users.free} free</div></div>
+      <div class="tile"><div class="tile-label">Digging events</div><div class="tile-val">${digging_events.total}</div><div class="tile-sub">${digging_events.last_7_days} in last 7 days</div></div>
+      <div class="tile"><div class="tile-label">Discogs cache (shared)</div><div class="tile-val">${shared_caches.discogs_node_cache}</div><div class="tile-sub">artists/labels cached</div></div>
+      <div class="tile"><div class="tile-label">YouTube matches</div><div class="tile-val">${shared_caches.yt_video_matches_found}</div><div class="tile-sub">${shared_caches.yt_video_matches_confirmed_none} confirmed no match</div></div>
+      <div class="tile"><div class="tile-label">Trees / Nodes</div><div class="tile-val">${new_schema.trees} / ${new_schema.nodes}</div><div class="tile-sub">${new_schema.sessions} sessions</div></div>
+    </div>
+    <section>
+      <h2>Events by type</h2>
+      <table><thead><tr><th>Event</th><th>Count</th></tr></thead><tbody>
+        ${Object.entries(digging_events.by_type).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('')||'<tr><td colspan="2">No events yet</td></tr>'}
+      </tbody></table>
+    </section>
+  `;
+}
+
+function userRow(u){
+  const mismatch=u.profiles_tier!=null&&(u.profiles_tier==='premium')!==u.premium;
+  return `
+    <tr data-id="${esc(u.id)}">
+      <td class="email">${esc(u.email)}</td>
+      <td>${fmtDate(u.created_at)}</td>
+      <td>${fmtDate(u.last_sign_in_at)}</td>
+      <td>${u.library_track_count??'—'}</td>
+      <td>
+        <span class="badge ${u.premium?'premium':'free'}">${u.premium?'Premium':'Free'}</span>
+        ${mismatch?`<div class="err-inline">profiles.tier: ${esc(u.profiles_tier)} (mismatch)</div>`:''}
+      </td>
+      <td><button class="toggle-btn" data-action="toggle" data-premium="${u.premium}">Make ${u.premium?'Free':'Premium'}</button></td>
+    </tr>
+  `;
+}
+
+function renderUsers(users){
+  return `
+    <section>
+      <h2>Users</h2>
+      <table><thead><tr><th>Email</th><th>Joined</th><th>Last sign-in</th><th>Library tracks</th><th>Tier</th><th></th></tr></thead>
+      <tbody>${users.map(userRow).join('')}</tbody></table>
+    </section>
+  `;
+}
+
+async function toggleUser(userId,currentlyPremium,btn){
+  btn.disabled=true;
+  const original=btn.textContent;
+  btn.textContent='…';
+  try{
+    const r=await authedFetch('/api/admin-set-premium',{method:'POST',body:JSON.stringify({user_id:userId,premium:!currentlyPremium})});
+    if(!r.ok){
+      const body=await r.json().catch(()=>({}));
+      throw new Error(body.error||('HTTP '+r.status));
+    }
+    await load(); // simplest correct thing — re-fetch so the row/tiles reflect the real new state
+  }catch(e){
+    btn.disabled=false;
+    btn.textContent=original;
+    alert('Failed to update tier: '+e.message);
+  }
+}
+
+async function load(){
+  try{
+    const{data:{session}}=await sb.auth.getSession();
+    if(!session){window.location.href='login.html?next=admin.html';return;}
+
+    const[statsRes,usersRes]=await Promise.all([
+      authedFetch('/api/admin-stats'),
+      authedFetch('/api/admin-users'),
+    ]);
+    if(statsRes.status===401||statsRes.status===403||usersRes.status===401||usersRes.status===403){
+      renderUnauthorized();return;
+    }
+    if(!statsRes.ok||!usersRes.ok){
+      root.innerHTML='<div class="state">Failed to load — try reloading.</div>';return;
+    }
+    const stats=await statsRes.json();
+    const{users}=await usersRes.json();
+    root.innerHTML=renderStats(stats)+renderUsers(users);
+    root.querySelectorAll('[data-action="toggle"]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const tr=btn.closest('tr');
+        const userId=tr.dataset.id;
+        const currentlyPremium=btn.dataset.premium==='true';
+        if(!confirm(`Set this user to ${currentlyPremium?'Free':'Premium'}?`))return;
+        toggleUser(userId,currentlyPremium,btn);
+      });
+    });
+  }catch(e){
+    root.innerHTML='<div class="state">Error: '+esc(e.message)+'</div>';
+  }
+}
+
+load();
+</script>
+</body>
+</html>
