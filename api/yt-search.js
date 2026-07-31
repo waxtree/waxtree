@@ -49,10 +49,16 @@ export default async function handler(req, res) {
       plUrl.searchParams.set('maxResults', '25')
       plUrl.searchParams.set('key', YT_API_KEY)
       const pd = await ytFetch(plUrl)
+      // For a playlistItems entry, snippet.channelTitle is the PLAYLIST's
+      // owner — for an auto-generated 'RD' Mix that's YouTube's own system
+      // channel, literally "YouTube" for every single item, not the
+      // artist. snippet.videoOwnerChannelTitle is the actual uploader of
+      // that specific video, which is what "Related by YouTube" needs to
+      // show and what the same-artist exclusion below compares against.
       const items = (pd.items || []).map(it => ({
         id: it.snippet?.resourceId?.videoId,
         title: it.snippet?.title || '',
-        channelTitle: it.snippet?.channelTitle || '',
+        channelTitle: it.snippet?.videoOwnerChannelTitle || it.snippet?.channelTitle || '',
       })).filter(x => x.id)
       if (!items.length) return res.status(200).json({ results: [] })
 
