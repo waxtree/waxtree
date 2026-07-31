@@ -30,8 +30,30 @@ export default async function handler(req, res) {
   const params = req.method === 'GET' ? req.query : (req.body || {})
   const channelId = params.channelId || ''
   const q = params.q || ''
+  const playlistId = params.playlistId || ''
 
   try {
+    // Same playlistItems.list endpoint as the channel-shortcut path below
+    // (general quota pool, not the tight 100/day search.list one) — 'RD'
+    // + a video id is YouTube's own auto-generated "Mix" playlist for that
+    // video, still reachable this way even though relatedToVideoId on
+    // search.list itself was removed in 2023. Exploratory: verifying this
+    // still works before building anything on top of it.
+    if (playlistId) {
+      const plUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
+      plUrl.searchParams.set('part', 'snippet')
+      plUrl.searchParams.set('playlistId', playlistId)
+      plUrl.searchParams.set('maxResults', '25')
+      plUrl.searchParams.set('key', YT_API_KEY)
+      const pd = await ytFetch(plUrl)
+      const items = (pd.items || []).map(it => ({
+        id: it.snippet?.resourceId?.videoId,
+        title: it.snippet?.title || '',
+        channelTitle: it.snippet?.channelTitle || '',
+      })).filter(x => x.id)
+      return res.status(200).json({ results: items })
+    }
+
     // Cheap path (~3 units total, no search.list quota spent at all): once a
     // track has already confirmed an artist's/label's channel once, list
     // that channel's own uploads instead of paying for another search.list
