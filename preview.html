@@ -1903,7 +1903,10 @@ const st={
   // Which algorithm powers the Related Tracks panel — persisted locally
   // since it's a stable preference, not something that needs cloud sync.
   // relatedSourceMenuOpen is pure UI state, never persisted.
-  relatedTracksSource:saved?.relatedTracksSource||'youtube',relatedSourceMenuOpen:false,
+  // 'youtube' is paused (see RELATED_SOURCES below) — anyone whose saved
+  // state still has it selected from before falls back to 'cosine'
+  // automatically instead of silently rendering an unselectable source.
+  relatedTracksSource:(saved?.relatedTracksSource&&saved.relatedTracksSource!=='youtube')?saved.relatedTracksSource:'cosine',relatedSourceMenuOpen:false,
   // client-id (branch.id / node.id / a synthetic 'tree:'+rootId key) ->
   // Supabase uuid, for syncNewSchema() below. Cloud-synced (not just
   // local) so a second device maps the SAME client entity to the SAME
@@ -2303,9 +2306,18 @@ function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))
 // scoring model. The header's dropdown is designed to hold more than one
 // source (a second, "Related by Cosine.club", is coming once that site's
 // API key is available) rather than being tied to a single algorithm.
+// YouTube's own Mix stayed too unreliable after several rounds of real
+// fixes (genre tags too broad, verification too strict, quality still
+// dropping the deeper you clicked) — paused rather than kept iterating
+// blind, same call as the earlier Discogs-correlation pause (see
+// [[project_waxtree_related_tracks_stalemate]]). Cosine.club is a
+// purpose-built similarity API (has its own /tracks/{id}/similar and a
+// /tracks/lookup by Discogs/YouTube URL) rather than something being
+// reverse-engineered out of a consumer product, so it's the new default
+// once wired up.
 const RELATED_SOURCES=[
-  {id:'youtube',label:'Related by YouTube',available:true},
-  {id:'cosine',label:'Related by Cosine.club',available:false},
+  {id:'cosine',label:'Related by Cosine.club',available:true},
+  {id:'youtube',label:'Related by YouTube',available:false},
 ];
 let ytMixLoading=new Set();
 let ytVerifyLoading=new Set();
