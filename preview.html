@@ -182,6 +182,13 @@ input,select{font:inherit;color:inherit}
 .follows-list{max-height:420px;overflow-y:auto;margin:12px 0 4px}
 .follows-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
 .follows-item:last-child{border-bottom:none}
+/* #right-panel is only 260px wide — heart+playlist+explore can't fit
+   inline next to the thumbnail and title the way they do in the wider
+   mini-player. flex-basis:100% forces the actions row onto its own line
+   below, right-aligned, instead of squeezing everything onto one row. */
+.rp-yt-card{flex-wrap:wrap;cursor:pointer}
+.rp-yt-actions{flex:1 1 100%;display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:2px}
+.rp-yt-actions .esplora-btn{padding:4px 9px;font-size:10px}
 .follows-thumb{width:38px;height:38px;border-radius:8px;object-fit:cover;border:1px solid var(--border);flex-shrink:0;display:block;background:var(--bg-e)}
 .follows-thumb-ph{width:38px;height:38px;border-radius:8px;background:var(--bg-e);border:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--text-m)}
 .follows-thumb-ph svg{width:16px;height:16px}
@@ -2306,7 +2313,32 @@ function filterYtMixItems(items,excludeVideoId){
   return items
     .filter(it=>it.id!==excludeVideoId)
     .filter(it=>it.durationSec>=60&&it.durationSec<=900) // drop obvious outliers (ads, full-mix uploads, broken lookups) rather than trust every entry
-    .slice(0,10);
+    .slice(0,20); // API already caps at 25 (yt-search.js maxResults) — leave room for the duration filter above to trim a few
+}
+// YouTube's own auto-generated "Topic" channels for a music act are named
+// "<Artist> - Topic" — stripping that suffix turns channelTitle back into
+// a real, searchable artist/label name. A personal upload channel (not a
+// Topic channel) keeps its name as-is; it may or may not resolve to
+// anything on Discogs, same risk as typing that name into the normal
+// search bar.
+function stripYtTopicSuffix(name){return (name||'').replace(/\s*-\s*Topic$/i,'').trim();}
+// Mirrors resolveReleaseAndOpen()'s shape (search first, open once
+// resolved) — a YouTube pick only ever has a channel *name*, never a
+// Discogs id, so "Explore" here has to search rather than jump straight
+// to a known id like it does everywhere else in the app.
+async function resolveYtNameAndOpen(name,type){
+  const clean=stripYtTopicSuffix(name);
+  if(!clean)return;
+  st.loading=true;rr();
+  try{
+    const results=await searchDiscogs(clean);
+    const match=results.find(r=>r.type===type);
+    if(!match){st.err='Could not find a Discogs '+type+' matching "'+clean+'".';st.loading=false;rr();return;}
+    addNode(type,match.id,match.title,null,st.activeBranchId);
+  }catch(e){
+    st.err='Search failed: '+e.message;
+  }
+  st.loading=false;rr();
 }
 function buildYtMixCard(item){
   const trackId='yt:'+item.id;
@@ -2322,7 +2354,59 @@ function buildYtMixCard(item){
   info.appendChild(s('daq-title',item.title));
   info.appendChild(s('daq-meta',item.channelTitle));
   card.appendChild(info);
-  card.appendChild(b('t-like'+(liked?' liked':''),{title:'Like',onClick:e=>{e.stopPropagation();toggleLike(trackId);}},liked?'♥':'♡'));
+
+  const actions=d('rp-yt-actions',{});
+  actions.appendChild(b('t-like'+(liked?' liked':''),{title:'Like',onClick:e=>{e.stopPropagation();toggleLike(trackId);}},liked?'♥':'♡'));
+
+  const trackForQueue={id:trackId,title:item.title,artistName:item.channelTitle,videoId:item.id,thumbUrl};
+  const inDaq=st.dasAscoltare.some(q=>q.id===trackId);
+  const plDropKey='yt-'+item.id;
+  const isPlOpen=st.playlistDropId===plDropKey;
+  const plWrap=d('pl-wrap',{});
+  const plBtn=b('t-daq'+(inDaq?' queued':''),{title:'Add to playlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isPlOpen?null:plDropKey;rr();}},'🏷️');
+  plWrap.appendChild(plBtn);
+  if(isPlOpen){
+    const logQ=()=>logEvent('queue',{track_id:trackId,title:item.title,artist:item.channelTitle});
+    attachFloatingDropdown(plBtn,()=>{st.playlistDropId=null;rr();},drop=>{
+      drop.appendChild(b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
+        if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==trackId);
+        else{st.dasAscoltare=[...st.dasAscoltare,trackForQueue];logQ();}
+        st.playlistDropId=null;rr();
+      }},inDaq?'✓ Listen Later':'Listen Later'));
+      st.playlists.forEach(pl=>{
+        const inPl=pl.tracks.some(t=>t.id===trackId);
+        drop.appendChild(b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
+          if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==trackId);
+          else{pl.tracks=[...pl.tracks,trackForQueue];logQ();}
+          st.playlistDropId=null;rr();
+        }},inPl?'✓ '+pl.name:pl.name));
+      });
+      drop.appendChild(d('pl-drop-sep',{}));
+      drop.appendChild(b('pl-drop-item pl-drop-new',{onClick:()=>{
+        const name=prompt('Playlist name:','');
+        if(!name?.trim())return;
+        st.playlists=[...st.playlists,{id:'pl-'+Date.now(),name:name.trim(),tracks:[trackForQueue]}];
+        logQ();
+        st.playlistDropId=null;rr();
+      }},'+ New playlist'));
+    });
+  }
+  actions.appendChild(plWrap);
+
+  const expDropKey='yt-'+item.id;
+  const isExpOpen=st.exploreDropKey===expDropKey;
+  const expWrap=d('explore-wrap',{});
+  const expBtn=b('esplora-btn explore-toggle',{onClick:e=>{e.stopPropagation();st.exploreDropKey=isExpOpen?null:expDropKey;rr();}},isExpOpen?'Explore ▴':'Explore ▾');
+  expWrap.appendChild(expBtn);
+  if(isExpOpen){
+    attachFloatingDropdown(expBtn,()=>{st.exploreDropKey=null;rr();},drop=>{
+      drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;resolveYtNameAndOpen(item.channelTitle,'artist');}},'Explore as artist'));
+      drop.appendChild(b('pl-drop-item',{onClick:()=>{st.exploreDropKey=null;resolveYtNameAndOpen(item.channelTitle,'label');}},'Explore as label'));
+    });
+  }
+  actions.appendChild(expWrap);
+
+  card.appendChild(actions);
   return card;
 }
 function renderRelatedTracks(){
