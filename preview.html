@@ -1741,8 +1741,16 @@ async function syncNewSchema(){
     // A branch can hold several independent explorations at once (more
     // than one top-level search with nothing connecting them) — each
     // root node is the start of its own tree, all under the same session.
+    // trees.root_node_id and nodes.tree_id reference each other (see the
+    // schema file's own comment on this), so a tree can't be written with
+    // its root_node_id already set — the node doesn't exist yet and the FK
+    // would reject it (confirmed live: this made every first-ever sync
+    // fail with a 409 on trees and silently skip the nodes upsert entirely,
+    // since the whole function aborts on the first thrown error). Write
+    // trees with root_node_id null first, then nodes, then go back and set
+    // root_node_id now that the row it points to actually exists.
     const roots=st.nodes.filter(n=>!n.parentId);
-    const treeRows=roots.map(root=>({id:supaId('tree:'+root.id),session_id:supaId(root.branchId),root_node_id:supaId(root.id)}));
+    const treeRows=roots.map(root=>({id:supaId('tree:'+root.id),session_id:supaId(root.branchId),root_node_id:null}));
     if(treeRows.length){
       const{error}=await sb.from('trees').upsert(treeRows);
       if(error)throw error;
@@ -1766,6 +1774,12 @@ async function syncNewSchema(){
     });
     if(nodeRows.length){
       const{error}=await sb.from('nodes').upsert(nodeRows);
+      if(error)throw error;
+    }
+
+    if(treeRows.length){
+      const rootUpdates=roots.map(root=>({id:supaId('tree:'+root.id),session_id:supaId(root.branchId),root_node_id:supaId(root.id)}));
+      const{error}=await sb.from('trees').upsert(rootUpdates);
       if(error)throw error;
     }
 
