@@ -56,14 +56,25 @@ export default async function handler(req, res) {
       })).filter(x => x.id)
       if (!items.length) return res.status(200).json({ results: [] })
 
+      // topicDetails rides along on the same videos.list call as duration —
+      // no extra request. topicCategories are Wikipedia-URL genre/topic tags
+      // (e.g. ".../wiki/House_music") the client uses to drop picks that
+      // don't share any genre with whatever's currently playing (a Mix can
+      // include an unrelated filler track — this is what confirms it's
+      // actually unrelated instead of guessing from the title).
       const videosUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
-      videosUrl.searchParams.set('part', 'contentDetails')
+      videosUrl.searchParams.set('part', 'contentDetails,topicDetails')
       videosUrl.searchParams.set('id', items.map(x => x.id).join(','))
       videosUrl.searchParams.set('key', YT_API_KEY)
       const vd = await ytFetch(videosUrl)
-      const durById = {}
-      ;(vd.items || []).forEach(v => { durById[v.id] = parseIso8601Duration(v.contentDetails?.duration) })
-      const results = items.map(x => ({ ...x, durationSec: durById[x.id] || 0 }))
+      const metaById = {}
+      ;(vd.items || []).forEach(v => {
+        metaById[v.id] = {
+          durationSec: parseIso8601Duration(v.contentDetails?.duration),
+          topics: v.topicDetails?.topicCategories || [],
+        }
+      })
+      const results = items.map(x => ({ ...x, durationSec: metaById[x.id]?.durationSec || 0, topics: metaById[x.id]?.topics || [] }))
       return res.status(200).json({ results })
     }
 
