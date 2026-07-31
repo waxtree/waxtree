@@ -2501,48 +2501,52 @@ async function verifyYtMixItems(items,sourceGenreSet){
   }
   return out;
 }
-function buildYtMixCard(item){
-  const trackId='yt:'+item.id;
-  const thumbUrl='https://i.ytimg.com/vi/'+item.id+'/mqdefault.jpg';
+// Shared by every Related Tracks source (YouTube Mix picks, Cosine.club
+// picks, anything added later) — each source normalizes its own item shape
+// into {playId,videoId,title,subtitle,thumbUrl,duration,resolved,extra}
+// first, so the card UI (like/playlist/Explore) is written once instead of
+// once per source.
+function buildRelatedCard(entry){
+  const{playId,videoId,title,subtitle,thumbUrl,duration,resolved,extra}=entry;
   // Registered exactly like the New Releases modal registers its own
   // externally-sourced picks — nothing else in the tree knows this track,
   // so toggleLike/playlist/doPlay all need to find it here.
-  // resolved (with its genreSet) rides along so that if THIS pick gets
-  // played next, its own real Discogs genres become the baseline for
-  // filtering ITS related tracks in turn — otherwise every hop past the
-  // first would fall back to YouTube's much coarser topic tags, which is
-  // exactly the "gets worse the deeper you click" drift that was reported.
-  discoveredTracks[trackId]={id:trackId,videoId:item.id,title:item.title,trackArtistName:item.channelTitle,thumbUrl,duration:item.durationSec||null,resolved:item.resolved||null};
-  const liked=!!st.likes[trackId];
-  const card=d('follows-item rp-yt-card',{onClick:()=>doPlay(trackId,item.id,item.title,item.channelTitle)});
+  // resolved (with its genreSet, when the source has one) rides along so
+  // that if THIS pick gets played next, its own real Discogs data becomes
+  // available to whatever the next hop's source needs — otherwise every
+  // hop past the first would lose that context, exactly the "gets worse
+  // the deeper you click" drift that was reported for YouTube Mix.
+  discoveredTracks[playId]={id:playId,videoId,title,trackArtistName:subtitle,thumbUrl,duration:duration||null,resolved:resolved||null,...(extra||{})};
+  const liked=!!st.likes[playId];
+  const card=d('follows-item rp-yt-card',{onClick:()=>doPlay(playId,videoId,title,subtitle)});
   card.appendChild(el('img',{cls:'follows-thumb',src:thumbUrl,alt:'',loading:'lazy'}));
   const info=d('daq-info',{});
-  info.appendChild(s('daq-title',item.title));
-  info.appendChild(s('daq-meta',item.channelTitle));
+  info.appendChild(s('daq-title',title));
+  info.appendChild(s('daq-meta',subtitle));
   card.appendChild(info);
 
   const actions=d('rp-yt-actions',{});
-  actions.appendChild(b('t-like'+(liked?' liked':''),{title:'Like',onClick:e=>{e.stopPropagation();toggleLike(trackId);}},liked?'♥':'♡'));
+  actions.appendChild(b('t-like'+(liked?' liked':''),{title:'Like',onClick:e=>{e.stopPropagation();toggleLike(playId);}},liked?'♥':'♡'));
 
-  const trackForQueue={id:trackId,title:item.title,artistName:item.channelTitle,videoId:item.id,thumbUrl};
-  const inDaq=st.dasAscoltare.some(q=>q.id===trackId);
-  const plDropKey='yt-'+item.id;
+  const trackForQueue={id:playId,title,artistName:subtitle,videoId,thumbUrl};
+  const inDaq=st.dasAscoltare.some(q=>q.id===playId);
+  const plDropKey='rel-'+playId;
   const isPlOpen=st.playlistDropId===plDropKey;
   const plWrap=d('pl-wrap',{});
   const plBtn=b('t-daq'+(inDaq?' queued':''),{title:'Add to playlist',onClick:e=>{e.stopPropagation();st.playlistDropId=isPlOpen?null:plDropKey;rr();}},'🏷️');
   plWrap.appendChild(plBtn);
   if(isPlOpen){
-    const logQ=()=>logEvent('queue',{track_id:trackId,title:item.title,artist:item.channelTitle});
+    const logQ=()=>logEvent('queue',{track_id:playId,title,artist:subtitle});
     attachFloatingDropdown(plBtn,()=>{st.playlistDropId=null;rr();},drop=>{
       drop.appendChild(b('pl-drop-item'+(inDaq?' checked':''),{onClick:()=>{
-        if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==trackId);
+        if(inDaq)st.dasAscoltare=st.dasAscoltare.filter(q=>q.id!==playId);
         else{st.dasAscoltare=[...st.dasAscoltare,trackForQueue];logQ();}
         st.playlistDropId=null;rr();
       }},inDaq?'✓ Listen Later':'Listen Later'));
       st.playlists.forEach(pl=>{
-        const inPl=pl.tracks.some(t=>t.id===trackId);
+        const inPl=pl.tracks.some(t=>t.id===playId);
         drop.appendChild(b('pl-drop-item'+(inPl?' checked':''),{onClick:()=>{
-          if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==trackId);
+          if(inPl)pl.tracks=pl.tracks.filter(t=>t.id!==playId);
           else{pl.tracks=[...pl.tracks,trackForQueue];logQ();}
           st.playlistDropId=null;rr();
         }},inPl?'✓ '+pl.name:pl.name));
@@ -2559,27 +2563,126 @@ function buildYtMixCard(item){
   }
   actions.appendChild(plWrap);
 
-  // item.resolved is set by verifyYtMixItems() before a card ever gets
-  // built — every card shown has already been confirmed against a real
-  // Discogs artist/label, so this just opens it directly. No dropdown, no
-  // guessing: there's exactly one confirmed answer by the time this runs.
-  if(item.resolved){
-    const r=item.resolved;
+  // resolved is set by each source's own verification step before a card
+  // ever gets built — every card shown has already been confirmed against
+  // a real Discogs artist/label, so this just opens it directly. No
+  // dropdown, no guessing: there's exactly one confirmed answer by the
+  // time this runs.
+  if(resolved){
     actions.appendChild(b('esplora-btn',{
-      title:'Explore '+r.type+': '+r.discogsName,
-      onClick:e=>{e.stopPropagation();addNode(r.type,r.discogsId,r.discogsName,null,st.activeBranchId);},
-    },'Explore: '+r.discogsName));
+      title:'Explore '+resolved.type+': '+resolved.discogsName,
+      onClick:e=>{e.stopPropagation();addNode(resolved.type,resolved.discogsId,resolved.discogsName,null,st.activeBranchId);},
+    },'Explore: '+resolved.discogsName));
   }
 
   card.appendChild(actions);
   return card;
 }
+
+// ── Related by Cosine.club ────────────────────────────────
+// Cosine already knows the real Discogs release behind each pick
+// (external_link) and the matching YouTube video (video_id) — no name
+// guessing or discography search needed, just a straight release-id fetch
+// to pull out the real artist for Explore. Far cheaper and more reliable
+// than the YouTube Mix path above, which had to guess an artist name from
+// a video title/channel and then search for it.
+async function cosineFetch(action,params){
+  const url=new URL('/api/cosine-search',location.origin);
+  url.searchParams.set('action',action);
+  Object.entries(params).forEach(([k,v])=>{if(v!=null)url.searchParams.set(k,v);});
+  const res=await fetch(url);
+  const json=await res.json().catch(()=>({}));
+  if(!res.ok||json.error)throw new Error(json.error||'Cosine.club request failed ('+res.status+')');
+  return json;
+}
+// Confirmed lookup (and confirmed no-match) never expires, same treatment
+// as wt-yt-matches — plain non-expiring localStorage, not the ct2: budget
+// cache, and a dedicated false-sentinel map since lsGet/lsSet's own
+// cache-hit check (`if(c)return c`) can't distinguish a falsy real value
+// from a miss.
+function loadCosineIdMap(){try{const r=localStorage.getItem('wt-cosine-ids');return r?JSON.parse(r):{};}catch{return{};}}
+function saveCosineIdMap(m){try{localStorage.setItem('wt-cosine-ids',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist Cosine track ids:',e);}}
+let cosineIdMap=loadCosineIdMap();
+async function resolveCosineTrackId(np){
+  // Fast path: this track is itself a previously-fetched Cosine pick (see
+  // buildRelatedCard's extra above) — its Cosine id is already known, no
+  // network round trip needed to find it again.
+  const known=discoveredTracks[np.trackId]?.cosineId;
+  if(known){cosineIdMap[np.trackId]=known;saveCosineIdMap(cosineIdMap);return known;}
+  const discogsUrl=findTrackAndNode(np.trackId)?.track?.discogsUrl||discoveredTracks[np.trackId]?.discogsUrl||null;
+  const lookupUrl=discogsUrl||(np.videoId?'https://www.youtube.com/watch?v='+np.videoId:null);
+  let id=false;
+  if(lookupUrl){
+    try{
+      const json=await cosineFetch('lookup',{url:lookupUrl});
+      id=json.data?.[0]?.id||false;
+    }catch(e){console.warn('WaxTree: Cosine track lookup failed:',e?.message||e);id=false;}
+  }
+  cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);
+  return id;
+}
+async function fetchCosineSimilar(cosineId){
+  const ck='cosinesim:'+cosineId;
+  const c=lsGet(ck);if(c)return c;
+  const json=await cosineFetch('similar',{id:cosineId,limit:20});
+  const results=json.data?.similar_tracks||[];
+  lsSet(ck,results);
+  return results;
+}
+// Same artist already lives in the center column as its own node (see
+// filterYtMixItems above) — still true regardless of which source found
+// the pick. Anything missing the fields a card actually needs (a playable
+// video, a real Discogs release to Explore to) is dropped before spending
+// a Discogs call resolving it.
+function filterCosineItems(items,np){
+  const sourceArtistNorm=normalizeStr(np?.artistName||'');
+  return items.filter(it=>{
+    if(!it.video_id||!it.external_link)return false;
+    if(!sourceArtistNorm)return true;
+    return normalizeStr(it.artist||'')!==sourceArtistNorm;
+  });
+}
+const COSINE_RESOLVE_BATCH=4;
+// external_link is Cosine's own claimed Discogs release for this pick —
+// fetching that release directly gives its REAL artist credit, no name
+// matching or discography search involved (that's what made the YouTube
+// path both expensive and error-prone — see verifyYtCandidate above). A
+// Various Artists release still needs the per-track credit though, same
+// as buildTrackEntries does for the tree itself.
+async function resolveCosineCard(item){
+  const m=(item.external_link||'').match(/\/release\/(\d+)/);
+  if(!m)return null;
+  try{
+    const rd=await dReq('/releases/'+m[1]);
+    const artists=rd.artists||[];
+    const isVA=artists.some(a=>/^various$/i.test(a.name||''));
+    if(!isVA&&artists[0]){
+      return{...item,resolved:{type:'artist',discogsId:artists[0].id,discogsName:stripDiscogsSuffix(artists[0].name)}};
+    }
+    const trackNorm=normalizeStr(item.track||item.name||'');
+    const tl=(rd.tracklist||[]).find(t=>t.title&&trackNorm&&normalizeStr(t.title)===trackNorm);
+    const pt=tl?.artists?.[0];
+    if(pt)return{...item,resolved:{type:'artist',discogsId:pt.id,discogsName:stripDiscogsSuffix(pt.name)}};
+    return null; // can't confidently attribute this VA track — don't show it rather than guess
+  }catch{return null;}
+}
+async function resolveCosineCards(items){
+  const out=[];
+  for(let i=0;i<items.length;i+=COSINE_RESOLVE_BATCH){
+    const batch=items.slice(i,i+COSINE_RESOLVE_BATCH);
+    const resolved=await Promise.all(batch.map(resolveCosineCard));
+    out.push(...resolved.filter(Boolean));
+  }
+  return out;
+}
+let cosineIdLoading=new Set();
+let cosineResolveLoading=new Set();
 // Real Discogs genres/styles for whatever's currently playing, used to
 // filter candidates in verifyYtCandidate(). Two sources: a track actually
 // opened from a tree node has its own .genre (a " · "-joined style list,
 // see buildTrackEntries()); a track playing because it was itself a
 // verified "Related by YouTube" pick carries its resolved.genreSet from
-// when IT was verified (see buildYtMixCard) — keeps genre continuity
+// when IT was verified (see buildRelatedCard) — keeps genre continuity
 // across multiple hops instead of resetting to no baseline after the
 // first click.
 function getSourceGenreSet(){
@@ -2647,7 +2750,10 @@ function renderRelatedTracks(){
       const verified=lsGet(verifyKey);
       if(verified){
         if(!verified.length){host.appendChild(s('rp-coming-soon','No verified related tracks found'));return;}
-        verified.forEach(item=>host.appendChild(buildYtMixCard(item)));
+        verified.forEach(item=>host.appendChild(buildRelatedCard({
+          playId:'yt:'+item.id,videoId:item.id,title:item.title,subtitle:item.channelTitle,
+          thumbUrl:'https://i.ytimg.com/vi/'+item.id+'/mqdefault.jpg',duration:item.durationSec||null,resolved:item.resolved,
+        })));
         return;
       }
       if(!ytVerifyLoading.has(videoId)){
@@ -2670,9 +2776,48 @@ function renderRelatedTracks(){
     host.appendChild(s('rp-coming-soon','Loading…'));
     return;
   }
+  if(st.relatedTracksSource==='cosine'){
+    const np=st.nowPlaying;
+    const cachedId=cosineIdMap[np.trackId];
+    if(cachedId===undefined){
+      if(!cosineIdLoading.has(np.trackId)){
+        cosineIdLoading.add(np.trackId);
+        resolveCosineTrackId(np)
+          .catch(()=>{})
+          .then(()=>{cosineIdLoading.delete(np.trackId);rr();});
+      }
+      host.appendChild(s('rp-coming-soon','Looking up track…'));
+      return;
+    }
+    if(cachedId===false){
+      host.appendChild(s('rp-coming-soon','No related tracks found'));
+      return;
+    }
+    const cosineId=cachedId;
+    const cardsKey='cosinecards:'+cosineId;
+    const cards=lsGet(cardsKey);
+    if(cards){
+      if(!cards.length){host.appendChild(s('rp-coming-soon','No related tracks found'));return;}
+      cards.forEach(item=>host.appendChild(buildRelatedCard({
+        playId:'cosine:'+item.video_id,videoId:item.video_id,title:item.track||item.name,subtitle:item.artist,
+        thumbUrl:'https://i.ytimg.com/vi/'+item.video_id+'/mqdefault.jpg',duration:null,resolved:item.resolved,
+        extra:{discogsUrl:item.external_link,cosineId:item.id},
+      })));
+      return;
+    }
+    if(!cosineResolveLoading.has(cosineId)){
+      cosineResolveLoading.add(cosineId);
+      fetchCosineSimilar(cosineId)
+        .then(items=>resolveCosineCards(filterCosineItems(items,np)))
+        .then(v=>lsSet(cardsKey,v))
+        .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed:',e?.message||e);lsSet(cardsKey,[]);})
+        .then(()=>{cosineResolveLoading.delete(cosineId);rr();});
+    }
+    host.appendChild(s('rp-coming-soon','Finding related tracks…'));
+    return;
+  }
   // Any other source id currently has available:false in RELATED_SOURCES
-  // (the menu itself prevents selecting it), so this is unreached today —
-  // kept as the natural fallback for whenever Cosine.club goes live.
+  // (the menu itself prevents selecting it), so this is unreached today.
   host.appendChild(s('rp-coming-soon','Coming soon'));
 }
 
