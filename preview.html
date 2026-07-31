@@ -2394,11 +2394,23 @@ function parseYtArtistFromTitle(title){
   const dashIdx=(title||'').indexOf(' - ');
   return dashIdx>0?title.slice(0,dashIdx).trim():null;
 }
+// A collab credit ("Adam Beyer & Coco Francavilla - Silent Mapping") was
+// being searched as one combined string, which essentially never matches
+// a single Discogs artist entity — confirmed live this was the biggest
+// cause of otherwise-legitimate picks failing verification. Splitting on
+// the usual collab separators means each individual name gets its own
+// shot; a genuine collab only needs ONE half to have a matching Discogs
+// profile to verify.
+function splitCollabNames(name){
+  if(!name)return[];
+  return name.split(/\s+(?:&|,|vs\.?|feat\.?|ft\.?|and|x)\s+/i).map(n=>n.trim()).filter(Boolean);
+}
 // Verification, not just on Explore-click anymore — a track that can't be
 // confidently traced back to a real Discogs artist/label doesn't get
 // shown as a "Related" pick at all now, rather than showing up with a
 // Explore button that's a coin flip. Tries the title-parsed artist name
-// first (see parseYtArtistFromTitle above), then the channel name — some
+// first (see parseYtArtistFromTitle above), then the channel name, then
+// each of those split into individual names for a collab credit — some
 // picks are only correctly named one way or the other (a YouTube "Topic"
 // channel IS the real artist profile with no artist name in the title at
 // all, e.g. "Injection (Original Mix)" by "Malin Genie - Topic"; other
@@ -2408,10 +2420,22 @@ function parseYtArtistFromTitle(title){
 // alone isn't proof: that artist/label's own discography has to actually
 // contain something matching the video's title before it counts as
 // verified.
-async function verifyYtCandidate(item){
+//
+// sourceGenreSet, when given, is one more gate AFTER a real Discogs match
+// is found: the matched release's own genres/styles (Discogs' real,
+// scene-level tags — Deep House, Tech House, Minimal Techno etc., far
+// more specific than YouTube's own topicCategories, which only bucket as
+// broad as "Electronic_music") have to share something with it. Confirmed
+// live this is necessary even post-verification: Amelie Lens is a real,
+// correctly-verified artist, but straight techno sharing zero style
+// overlap with what was actually playing (a quieter house/minimal sound)
+// still isn't a "related" pick just because both are "Electronic_music"
+// to YouTube.
+async function verifyYtCandidate(item,sourceGenreSet){
   const titleArtist=parseYtArtistFromTitle(item.title);
   const channelName=stripYtTopicSuffix(item.channelTitle);
-  const nameCandidates=[...new Set([titleArtist,channelName].filter(Boolean))];
+  const rawNames=[titleArtist,channelName].filter(Boolean);
+  const nameCandidates=[...new Set(rawNames.flatMap(n=>[n,...splitCollabNames(n)]))];
   const titleNorm=normalizeStr(item.title);
   for(const name of nameCandidates){
     const nameNorm=normalizeStr(name);
@@ -2429,11 +2453,20 @@ async function verifyYtCandidate(item){
         try{
           const path=type==='label'?'/labels/'+c.id+'/releases':'/artists/'+c.id+'/releases';
           const rd=await dReq(path,{per_page:'100'});
-          const hit=(rd.releases||[]).some(r=>{
+          const hitRelease=(rd.releases||[]).find(r=>{
             const rt=normalizeStr(r.title||'');
             return rt&&titleNorm&&(titleNorm.includes(rt)||rt.includes(titleNorm));
           });
-          if(hit)return{type,discogsId:c.id,discogsName:c.title};
+          if(!hitRelease)continue;
+          let genreSet=[];
+          try{
+            const relFull=await dReq('/releases/'+hitRelease.id);
+            genreSet=[...(relFull.styles||[]),...(relFull.genres||[])].map(normalizeStr);
+          }catch{}
+          if(sourceGenreSet?.size&&genreSet.length){
+            if(!genreSet.some(g=>sourceGenreSet.has(g)))continue; // real match, wrong scene — not "related"
+          }
+          return{type,discogsId:c.id,discogsName:c.title,genreSet};
         }catch{}
       }
     }
@@ -2444,12 +2477,12 @@ async function verifyYtCandidate(item){
 // itself (45 req/60s) but there's no reason to open that many requests
 // simultaneously against the shared Discogs proxy just because we can.
 const YT_VERIFY_BATCH=4;
-async function verifyYtMixItems(items){
+async function verifyYtMixItems(items,sourceGenreSet){
   const out=[];
   for(let i=0;i<items.length;i+=YT_VERIFY_BATCH){
     const batch=items.slice(i,i+YT_VERIFY_BATCH);
     const resolved=await Promise.all(batch.map(async it=>{
-      const r=await verifyYtCandidate(it);
+      const r=await verifyYtCandidate(it,sourceGenreSet);
       return r?{...it,resolved:r}:null;
     }));
     out.push(...resolved.filter(Boolean));
@@ -2462,7 +2495,12 @@ function buildYtMixCard(item){
   // Registered exactly like the New Releases modal registers its own
   // externally-sourced picks — nothing else in the tree knows this track,
   // so toggleLike/playlist/doPlay all need to find it here.
-  discoveredTracks[trackId]={id:trackId,videoId:item.id,title:item.title,trackArtistName:item.channelTitle,thumbUrl,duration:item.durationSec||null};
+  // resolved (with its genreSet) rides along so that if THIS pick gets
+  // played next, its own real Discogs genres become the baseline for
+  // filtering ITS related tracks in turn — otherwise every hop past the
+  // first would fall back to YouTube's much coarser topic tags, which is
+  // exactly the "gets worse the deeper you click" drift that was reported.
+  discoveredTracks[trackId]={id:trackId,videoId:item.id,title:item.title,trackArtistName:item.channelTitle,thumbUrl,duration:item.durationSec||null,resolved:item.resolved||null};
   const liked=!!st.likes[trackId];
   const card=d('follows-item rp-yt-card',{onClick:()=>doPlay(trackId,item.id,item.title,item.channelTitle)});
   card.appendChild(el('img',{cls:'follows-thumb',src:thumbUrl,alt:'',loading:'lazy'}));
@@ -2524,6 +2562,25 @@ function buildYtMixCard(item){
   card.appendChild(actions);
   return card;
 }
+// Real Discogs genres/styles for whatever's currently playing, used to
+// filter candidates in verifyYtCandidate(). Two sources: a track actually
+// opened from a tree node has its own .genre (a " · "-joined style list,
+// see buildTrackEntries()); a track playing because it was itself a
+// verified "Related by YouTube" pick carries its resolved.genreSet from
+// when IT was verified (see buildYtMixCard) — keeps genre continuity
+// across multiple hops instead of resetting to no baseline after the
+// first click.
+function getSourceGenreSet(){
+  const np=st.nowPlaying;
+  if(!np)return new Set();
+  if(np.fromDiscogs){
+    const genreStr=findTrackAndNode(np.trackId)?.track?.genre;
+    if(genreStr)return new Set(genreStr.split(' · ').map(normalizeStr));
+  }
+  const dt=discoveredTracks[np.trackId];
+  if(dt?.resolved?.genreSet?.length)return new Set(dt.resolved.genreSet);
+  return new Set();
+}
 function renderRelatedTracks(){
   const host=document.getElementById('related-tracks');
   if(!host)return;
@@ -2569,7 +2626,12 @@ function renderRelatedTracks(){
       // candidate, so its result is cached separately from the raw Mix
       // fetch and only computed once per source video, not on every
       // render.
-      const verifyKey='ytver:'+videoId;
+      // Versioned key — bumped whenever verifyYtCandidate's own logic
+      // changes (collab-name splitting, the genre cross-check) so a
+      // previously-cached "only 3 verified" result gets thrown away and
+      // re-checked with the improved logic, instead of sitting there for
+      // its full 30-day TTL.
+      const verifyKey='ytver2:'+videoId;
       const verified=lsGet(verifyKey);
       if(verified){
         if(!verified.length){host.appendChild(s('rp-coming-soon','No verified related tracks found'));return;}
@@ -2579,7 +2641,7 @@ function renderRelatedTracks(){
       if(!ytVerifyLoading.has(videoId)){
         ytVerifyLoading.add(videoId);
         const items=filterYtMixItems(cached,videoId,st.nowPlaying.artistName);
-        verifyYtMixItems(items)
+        verifyYtMixItems(items,getSourceGenreSet())
           .then(v=>lsSet(verifyKey,v))
           .catch(e=>{console.warn('WaxTree: Related by YouTube verification failed:',e?.message||e);lsSet(verifyKey,[]);})
           .then(()=>{ytVerifyLoading.delete(videoId);rr();});
