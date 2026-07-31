@@ -2329,9 +2329,19 @@ function filterYtMixItems(items,excludeVideoId,sourceArtistName){
   const sourceArtistNorm=normalizeStr(sourceArtistName||'');
   return items
     .filter(it=>it.id!==excludeVideoId)
-    // Same artist already lives in the center column as its own node —
-    // no reason to duplicate them inside "Related Tracks".
-    .filter(it=>!sourceArtistNorm||normalizeStr(stripYtTopicSuffix(it.channelTitle))!==sourceArtistNorm)
+    // Same artist already lives in the center column as its own node — no
+    // reason to duplicate them inside "Related Tracks". Checks both the
+    // channel name AND whether the video title itself leads with the
+    // artist's name ("Schatrax - Track", "Schatrax: Track"): confirmed
+    // live that a Mix frequently includes the same artist re-uploaded by
+    // an unrelated fan channel (channelTitle wouldn't say "Schatrax" at
+    // all in that case, only the title does).
+    .filter(it=>{
+      if(!sourceArtistNorm)return true;
+      if(normalizeStr(stripYtTopicSuffix(it.channelTitle))===sourceArtistNorm)return false;
+      const titleNorm=normalizeStr(it.title);
+      return !titleNorm.startsWith(sourceArtistNorm);
+    })
     .filter(it=>it.durationSec>=60&&it.durationSec<=900) // drop obvious outliers (ads, full-mix uploads, broken lookups) rather than trust every entry
     // Genre-consistency: only enforced when the currently-playing video
     // actually has topic tags to compare against (no baseline = no
