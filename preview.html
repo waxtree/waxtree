@@ -2418,7 +2418,13 @@ async function verifyYtCandidate(item){
     let results;
     try{results=await searchDiscogs(name);}catch{continue;}
     for(const type of['artist','label']){
-      const matches=results.filter(r=>r.type===type&&normalizeStr(r.title)===nameNorm);
+      // Discogs appends " (2)", " (3)" etc. to disambiguate same-named
+      // artists/labels — that's Discogs' own bookkeeping, not part of the
+      // real name, so it has to come off before an exact-match comparison
+      // means anything (confirmed live: "Francesco D'amico (2)" would
+      // never match "Francesco D'Amico" otherwise, even when it's the
+      // right person).
+      const matches=results.filter(r=>r.type===type&&normalizeStr((r.title||'').replace(/\s*\(\d+\)$/,''))===nameNorm);
       for(const c of matches){
         try{
           const path=type==='label'?'/labels/'+c.id+'/releases':'/artists/'+c.id+'/releases';
