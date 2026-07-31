@@ -1,6 +1,6 @@
 const COSINE_API_KEY = process.env.COSINE_API_KEY ?? ''
 const COSINE_BASE = 'https://cosine.club/api/v1'
-const UA = 'WaxTree/1.0 (https://waxtree.vercel.app)'
+const UA = 'WaxTree/1.0 (https://waxtree.vercel.app)' // redeploy to pick up COSINE_API_KEY
 
 async function cosineFetch(path, params) {
   const url = new URL(COSINE_BASE + path)
