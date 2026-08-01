@@ -5421,10 +5421,18 @@ function buildContent(){
   }
 
   // Tracks with filter
+  let ownedGroups=[];
   if(dt.tracks?.length){
     const filtered=applyFilters(dt.tracks);
     const hasFilter=st.filterTitle||st.filterFormat!=='all'||st.filterSort!=='default'||st.filterGenres.length>0;
     const PAGE=50;
+    // Releases already in the user's Discogs collection are pulled out of
+    // the normal browsable/paginated list entirely and shown together in
+    // their own section at the end instead (see ownedGroups' render below,
+    // in the same spot Bandcamp uses) — no point paginating past vinyl
+    // already owned while digging for something new.
+    const browsableTracks=filtered.filter(t=>!inDiscogsCollection(t));
+    ownedGroups=groupTracksByRelease(filtered.filter(t=>inDiscogsCollection(t)));
     // A release search result just resolved to this node — jump straight
     // to whichever page actually contains it (sort/filter stay exactly
     // whatever they already were, only the page changes) so the auto-
@@ -5434,21 +5442,23 @@ function buildContent(){
     // appear directly (an artist's discography groups some releases under
     // their master's designated main pressing, which can carry a
     // different concrete id than the specific variant that was searched).
+    // Searches browsableTracks, not filtered — an owned release lives in
+    // ownedGroups' own section now, not a page of this list.
     let scrollTargetKey=null;
     if(st.scrollToRelease&&st.scrollToRelease.nodeId===node.id){
-      const idx=filtered.findIndex(t=>t.id.split('-')[0]===String(st.scrollToRelease.releaseId)||normalizeStr(t.album||t.title)===st.scrollToRelease.titleNorm);
+      const idx=browsableTracks.findIndex(t=>t.id.split('-')[0]===String(st.scrollToRelease.releaseId)||normalizeStr(t.album||t.title)===st.scrollToRelease.titleNorm);
       if(idx>=0){
         tracksPageMap[node.id]=Math.floor(idx/PAGE);
-        const tt=filtered[idx];
+        const tt=browsableTracks[idx];
         const labelKey=tt.trueLabelId!=null?'id:'+tt.trueLabelId:(tt.labelId!=null?'id:'+tt.labelId:normalizeStr(tt.label||''));
         scrollTargetKey=normalizeStr(tt.album||tt.title)+'|'+labelKey;
       }
     }
     let page=tracksPageMap[node.id]||0;
-    const totalPages=Math.ceil(filtered.length/PAGE);
+    const totalPages=Math.ceil(browsableTracks.length/PAGE);
     if(page>=totalPages)page=Math.max(0,totalPages-1);
     tracksPageMap[node.id]=page;
-    const pageSlice=filtered.slice(page*PAGE,(page+1)*PAGE);
+    const pageSlice=browsableTracks.slice(page*PAGE,(page+1)*PAGE);
     // One batched shared-cache lookup for everything visible on this page,
     // instead of resolveTrackVideoId's own per-track fallback query firing
     // once per unresolved track (up to PAGE=50 individual round trips on a
@@ -5539,7 +5549,23 @@ function buildContent(){
     }
   }
 
-  // ── Bandcamp section — hidden entirely when the search finds nothing
+  // ── In your collection — releases already in the user's synced Discogs
+  // collection, pulled out of the normal browsable list above (see
+  // ownedGroups/browsableTracks) and grouped here instead, in the same
+  // bottom-of-page slot (and reusing the same divider styling) the
+  // Bandcamp section below uses.
+  if(ownedGroups.length){
+    const ownedSec=d('bc-section',{});
+    ownedSec.appendChild(d('bc-hdr',{},el('p',{cls:'sec-lbl'},'IN YOUR COLLECTION')));
+    ownedGroups.forEach(g=>ownedSec.appendChild(releaseCard(g,node.id,isLabel,node.name)));
+    panel.appendChild(ownedSec);
+  }
+
+  // ── Bandcamp section — built (fetchBandcamp/bcCacheMap still run
+  // normally, elsewhere) but not appended/shown; the per-release "Bandcamp
+  // ↗" buy button still reads bcCacheMap via findBcMatch for its direct-
+  // link shortcut, so the underlying fetch has to keep happening even
+  // though this standalone list is hidden.
   const bcData=bcCacheMap[node.id];
   if(bcData&&(bcData.loading||bcData.tracks.length)){
     const bcSec=d('bc-section',{});
@@ -5564,7 +5590,8 @@ function buildContent(){
         bcSec.appendChild(row);
       });
     }
-    panel.appendChild(bcSec);
+    // Not appended — see comment above. bcSec is still fully built (cheap)
+    // rather than skipped outright, so re-enabling this later is a one-line change.
   }
 
   return panel;
