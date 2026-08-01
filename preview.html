@@ -2606,9 +2606,60 @@ async function cosineFetch(action,params){
 // cache, and a dedicated false-sentinel map since lsGet/lsSet's own
 // cache-hit check (`if(c)return c`) can't distinguish a falsy real value
 // from a miss.
+//
+// Only a genuine, successful "Cosine has no match for this URL" response
+// gets written here as `false`. A THROWN request (network blip, Cosine
+// rate limit, a burst of concurrent lookups from switching tracks quickly
+// — confirmed live 2026-08-01 this happens) must NOT be cached as a
+// no-match — that would permanently poison a track that has real Cosine
+// data, exactly the "No related tracks found" bug reported live even
+// though the same track returns results on cosine.club directly. On a
+// throw, resolveCosineTrackId returns undefined and writes nothing, so
+// the next render's lookup gets a genuine retry instead of a cached lie.
 function loadCosineIdMap(){try{const r=localStorage.getItem('wt-cosine-ids');return r?JSON.parse(r):{};}catch{return{};}}
 function saveCosineIdMap(m){try{localStorage.setItem('wt-cosine-ids',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist Cosine track ids:',e);}}
 let cosineIdMap=loadCosineIdMap();
+// One-time remediation for tracks already poisoned by the bug fixed above
+// (a thrown lookup used to get cached as a permanent false, same class of
+// bug as purgeStaleYtNoMatches below) — strip every false entry once so
+// those tracks get a genuine retry instead of staying stuck on "No related
+// tracks found" forever. Real ids are untouched.
+(function purgeStaleCosineNoMatches(){
+  const PURGE_KEY='wt-cosine-false-purge-v1';
+  if(localStorage.getItem(PURGE_KEY))return;
+  let purged=0;
+  Object.keys(cosineIdMap).forEach(k=>{if(cosineIdMap[k]===false){delete cosineIdMap[k];purged++;}});
+  if(purged)saveCosineIdMap(cosineIdMap);
+  try{localStorage.setItem(PURGE_KEY,'1');}catch{}
+})();
+// Same remediation for the resolved-cards cache — a failed resolution pass
+// used to get persisted as a permanent empty array under ct2:cosinecards:*
+// (30-day TTL, so it wouldn't even self-heal soon). Sweeps every ct2: key
+// under that prefix and drops any entry holding an empty array.
+(function purgeStaleCosineEmptyCards(){
+  const PURGE_KEY='wt-cosine-cards-purge-v1';
+  if(localStorage.getItem(PURGE_KEY))return;
+  const toRemove=[];
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(!k||!k.startsWith('ct2:cosinecards:'))continue;
+    try{
+      const{d}=JSON.parse(localStorage.getItem(k));
+      if(Array.isArray(d)&&!d.length)toRemove.push(k);
+    }catch{}
+  }
+  toRemove.forEach(k=>localStorage.removeItem(k));
+  try{localStorage.setItem(PURGE_KEY,'1');}catch{}
+})();
+// Spacing out retries after a failure, not a permanent cache — same
+// concurrent-request burst that can trip a transient failure would also
+// immediately retrigger it on the very next render if nothing paced that
+// out, since resolveCosineTrackId/resolveCosineCards purposely leave a
+// failed lookup unresolved (see above) so it's retried rather than stuck.
+const COSINE_RETRY_COOLDOWN_MS=15000;
+let cosineRetryFailedAt={};
+function cosineOnCooldown(key){const t=cosineRetryFailedAt[key];return!!t&&Date.now()-t<COSINE_RETRY_COOLDOWN_MS;}
+function cosineMarkFailed(key){cosineRetryFailedAt[key]=Date.now();}
 async function resolveCosineTrackId(np){
   // Fast path: this track is itself a previously-fetched Cosine pick (see
   // buildRelatedCard's extra above) — its Cosine id is already known, no
@@ -2617,13 +2668,19 @@ async function resolveCosineTrackId(np){
   if(known){cosineIdMap[np.trackId]=known;saveCosineIdMap(cosineIdMap);return known;}
   const discogsUrl=findTrackAndNode(np.trackId)?.track?.discogsUrl||discoveredTracks[np.trackId]?.discogsUrl||null;
   const lookupUrl=discogsUrl||(np.videoId?'https://www.youtube.com/watch?v='+np.videoId:null);
-  let id=false;
-  if(lookupUrl){
-    try{
-      const json=await cosineFetch('lookup',{url:lookupUrl});
-      id=json.data?.[0]?.id||false;
-    }catch(e){console.warn('WaxTree: Cosine track lookup failed:',e?.message||e);id=false;}
+  if(!lookupUrl){
+    // Genuinely nothing to look up with — this one's a real, cacheable no-match.
+    cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);
+    return false;
   }
+  let json;
+  try{
+    json=await cosineFetch('lookup',{url:lookupUrl});
+  }catch(e){
+    console.warn('WaxTree: Cosine track lookup failed (will retry):',e?.message||e);
+    return undefined;
+  }
+  const id=json.data?.[0]?.id||false;
   cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);
   return id;
 }
@@ -2655,31 +2712,45 @@ const COSINE_RESOLVE_BATCH=4;
 // path both expensive and error-prone — see verifyYtCandidate above). A
 // Various Artists release still needs the per-track credit though, same
 // as buildTrackEntries does for the tree itself.
+// Lets a genuine dReq failure (network blip, the shared Discogs throttle
+// queue, a burst of concurrent lookups from switching tracks quickly)
+// THROW rather than swallowing it into the same "null" a genuinely
+// un-attributable VA track returns — resolveCosineCards below needs to
+// tell those two cases apart, since only the second one is safe to cache
+// as a permanent zero.
 async function resolveCosineCard(item){
   const m=(item.external_link||'').match(/\/release\/(\d+)/);
   if(!m)return null;
-  try{
-    const rd=await dReq('/releases/'+m[1]);
-    const artists=rd.artists||[];
-    const isVA=artists.some(a=>/^various$/i.test(a.name||''));
-    if(!isVA&&artists[0]){
-      return{...item,resolved:{type:'artist',discogsId:artists[0].id,discogsName:stripDiscogsSuffix(artists[0].name)}};
-    }
-    const trackNorm=normalizeStr(item.track||item.name||'');
-    const tl=(rd.tracklist||[]).find(t=>t.title&&trackNorm&&normalizeStr(t.title)===trackNorm);
-    const pt=tl?.artists?.[0];
-    if(pt)return{...item,resolved:{type:'artist',discogsId:pt.id,discogsName:stripDiscogsSuffix(pt.name)}};
-    return null; // can't confidently attribute this VA track — don't show it rather than guess
-  }catch{return null;}
+  const rd=await dReq('/releases/'+m[1]);
+  const artists=rd.artists||[];
+  const isVA=artists.some(a=>/^various$/i.test(a.name||''));
+  if(!isVA&&artists[0]){
+    return{...item,resolved:{type:'artist',discogsId:artists[0].id,discogsName:stripDiscogsSuffix(artists[0].name)}};
+  }
+  const trackNorm=normalizeStr(item.track||item.name||'');
+  const tl=(rd.tracklist||[]).find(t=>t.title&&trackNorm&&normalizeStr(t.title)===trackNorm);
+  const pt=tl?.artists?.[0];
+  if(pt)return{...item,resolved:{type:'artist',discogsId:pt.id,discogsName:stripDiscogsSuffix(pt.name)}};
+  return null; // can't confidently attribute this VA track — don't show it rather than guess
 }
+// Returns {cards,complete}. complete:false means at least one item hit a
+// real error (not just "couldn't attribute") — the caller must NOT persist
+// that result as the final answer, or a transient failure permanently
+// poisons this track's related tracks as empty (confirmed live 2026-08-01:
+// this was the actual bug behind "No related tracks found" showing for a
+// track that cosine.club's own site returns real results for).
 async function resolveCosineCards(items){
   const out=[];
+  let complete=true;
   for(let i=0;i<items.length;i+=COSINE_RESOLVE_BATCH){
     const batch=items.slice(i,i+COSINE_RESOLVE_BATCH);
-    const resolved=await Promise.all(batch.map(resolveCosineCard));
-    out.push(...resolved.filter(Boolean));
+    const settled=await Promise.allSettled(batch.map(resolveCosineCard));
+    settled.forEach(r=>{
+      if(r.status==='fulfilled'){if(r.value)out.push(r.value);}
+      else{complete=false;console.warn('WaxTree: Cosine card resolution failed (will retry):',r.reason?.message||r.reason);}
+    });
   }
-  return out;
+  return{cards:out,complete};
 }
 let cosineIdLoading=new Set();
 let cosineResolveLoading=new Set();
@@ -2786,10 +2857,11 @@ function renderRelatedTracks(){
     const np=st.nowPlaying;
     const cachedId=cosineIdMap[np.trackId];
     if(cachedId===undefined){
-      if(!cosineIdLoading.has(np.trackId)){
+      if(!cosineIdLoading.has(np.trackId)&&!cosineOnCooldown('id:'+np.trackId)){
         cosineIdLoading.add(np.trackId);
         resolveCosineTrackId(np)
-          .catch(()=>{})
+          .then(id=>{if(id===undefined)cosineMarkFailed('id:'+np.trackId);})
+          .catch(()=>{cosineMarkFailed('id:'+np.trackId);})
           .then(()=>{cosineIdLoading.delete(np.trackId);rr();});
       }
       host.appendChild(s('rp-coming-soon','Looking up track…'));
@@ -2811,12 +2883,18 @@ function renderRelatedTracks(){
       })));
       return;
     }
-    if(!cosineResolveLoading.has(cosineId)){
+    if(!cosineResolveLoading.has(cosineId)&&!cosineOnCooldown('cards:'+cosineId)){
       cosineResolveLoading.add(cosineId);
       fetchCosineSimilar(cosineId)
         .then(items=>resolveCosineCards(filterCosineItems(items,np)))
-        .then(v=>lsSet(cardsKey,v))
-        .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed:',e?.message||e);lsSet(cardsKey,[]);})
+        .then(({cards,complete})=>{
+          // Only a CLEAN pass (no request errors along the way) gets
+          // persisted — a partial/failed pass just cools down and retries
+          // next render instead of locking in an incomplete answer.
+          if(complete)lsSet(cardsKey,cards);
+          else cosineMarkFailed('cards:'+cosineId);
+        })
+        .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed (will retry):',e?.message||e);cosineMarkFailed('cards:'+cosineId);})
         .then(()=>{cosineResolveLoading.delete(cosineId);rr();});
     }
     host.appendChild(s('rp-coming-soon','Finding related tracks…'));
