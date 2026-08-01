@@ -312,7 +312,11 @@ input,select{font:inherit;color:inherit}
    that edge lands at the same X on every card regardless of what's in
    the middle column or the actions column. */
 .rel-mid{flex:0 1 200px;width:200px;min-width:0;padding-top:2px}
-.rel-title{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rel-title-row{display:flex;align-items:center;gap:6px;min-width:0}
+.rel-title{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.rel-listened-icon{background:none;border:none;padding:0;cursor:pointer;font-size:13px;line-height:1;flex-shrink:0;color:var(--text-f);transition:color .15s,transform .12s}
+.rel-listened-icon:hover{transform:scale(1.15);color:var(--text-m)}
+.rel-listened-icon.marked{color:var(--accent)}
 /* Artisti correlati */
 .corr-section{margin-bottom:18px;padding:12px 14px;background:var(--bg-e);border-radius:10px;border:1px solid var(--border)}
 .corr-lbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-f);margin-bottom:8px;display:block}
@@ -5077,11 +5081,29 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     );
   });
 
+  // Small icon next to the title, same treatment as a track's own Like
+  // heart — shown once every track in the release is marked '✓ played'
+  // (or already moved), never as one of the pill-style action buttons.
+  // Opt-in: reaching "all played" only reveals the icon, it doesn't move
+  // the release on its own.
+  const allPlayed=tracks.length>0&&tracks.every(t=>st.listens[t.id]?.badged);
+  const isListened=st.alreadyListened.includes(group.key);
+  let listenedIcon=null;
+  if(isListened){
+    listenedIcon=b('rel-listened-icon marked',{title:'Click to remove from Already Listened',onClick:()=>{
+      st.alreadyListened=st.alreadyListened.filter(k=>k!==group.key);rr();
+    }},'☑');
+  }else if(allPlayed){
+    listenedIcon=b('rel-listened-icon',{title:'Click to move to Already Listened',onClick:()=>{
+      st.alreadyListened=[...st.alreadyListened,group.key];rr();
+    }},'☐');
+  }
+
   // ── MIDDLE: release/EP/Album title + year·label + genres (release-level, shown once)
   const yearLabel=[first.year,isVariousArtists?'Various Artists':(primaryArtistLabel||first.label)].filter(Boolean).join(' · ');
   const genres=first.genre?first.genre.split(' · '):[];
   const mid=d('rel-mid',{},
-    s('rel-title',first.album||first.title),
+    d('rel-title-row',{},s('rel-title',first.album||first.title),listenedIcon),
     yearLabel?s('t-meta',yearLabel):null,
     genres.length?d('t-meta-row',{},
       ...genres.map(g=>{const c=genreColor(g);return el('span',{cls:'genre-badge',style:`background:${c}1A;border-color:${c}66;color:${c}`},g);})
@@ -5211,29 +5233,12 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   const digitalOnly=tracks.some(t=>t.digital)&&!tracks.some(t=>t.hasVinyl);
   if(first.discogsUrl&&!digitalOnly)buyBtns.push(el('a',{cls:'buy-btn dg',href:first.discogsUrl,target:'_blank',rel:'noreferrer'},'Discogs ↗'));
 
-  // Opt-in, not automatic — every track showing '✓ played' just means the
-  // option becomes available; the user still has to actually move it, same
-  // as owned-in-collection releases require a real Discogs sync rather than
-  // silently reorganizing the page on their behalf.
-  const allPlayed=tracks.length>0&&tracks.every(t=>st.listens[t.id]?.badged);
-  const isListened=st.alreadyListened.includes(group.key);
-  let listenedBtn=null;
-  if(isListened){
-    listenedBtn=b('esplora-btn',{title:'Move this release back to the normal list',onClick:()=>{
-      st.alreadyListened=st.alreadyListened.filter(k=>k!==group.key);rr();
-    }},'↩ Remove from Already Listened');
-  }else if(allPlayed){
-    listenedBtn=b('esplora-btn',{title:'Move this release to Already Listened, at the end of the page',onClick:()=>{
-      st.alreadyListened=[...st.alreadyListened,group.key];rr();
-    }},'✓ Move to Already Listened');
-  }
-
   return d('rel-card',{},
     art,
     mid,
     d('rel-tracks',{},...trackRows),
     d('t-actions',{},
-      d('t-act-explore',{},...exploreEls,listenedBtn),
+      d('t-act-explore',{},...exploreEls),
       d('t-act-buy',{},...buyBtns),
     ),
   );
