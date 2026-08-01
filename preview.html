@@ -4064,6 +4064,18 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
   const hasVinyl=(rd.formats||[]).some(f=>/vinyl/i.test(f.name))||!!vinylTitles?.has(normalizeStr(rd.title||''));
   const labelId=rd.labels?.[0]?.id||null;
   const labelName=rd.labels?.[0]?.name||relLabelHint||'';
+  // Discogs lists a release's artists in billing order — the first entry
+  // is the release's real primary artist even when someone else is ALSO
+  // credited purely for guesting on one track (a "featuring" credit here
+  // is very often only embedded in that one track's title text, e.g.
+  // "Ensoniq Ft. Steve O'Sullivan", with no structured per-track artist
+  // data at all — confirmed live 2026-08-01 via the Discogs API directly).
+  // This is the middle fallback for a track's real artist: weaker than a
+  // genuine per-track override (trackArtistName below, when Discogs does
+  // provide one) but far more specific than defaulting to whichever
+  // artist's own page the track happened to be opened from.
+  const releaseArtistName=rd.artists?.[0]?stripDiscogsSuffix(rd.artists[0].name):null;
+  const releaseArtistId=rd.artists?.[0]?.id||null;
   const year=rd.year||relYear;
   const videos=rd.videos||[];
   const normV=s=>s.toLowerCase().replace(/\b0+([1-9])/g,'$1').replace(/[^a-z0-9]/g,'');
@@ -4111,7 +4123,7 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
     id:`${fetchId}-${t.position||i}`,title:t.title,duration:t.duration||'',
     year,label:labelName,labelId,genre,thumbUrl,bpm,album:rd.title||'',
     digital:isDigital,hasVinyl,discogsUrl:releaseUrl,videoId:matchVideo(i),catno:'',
-    fromLabel:false,trackArtistName,trackArtistId,trackArtists,
+    fromLabel:false,trackArtistName,trackArtistId,trackArtists,releaseArtistName,releaseArtistId,
     exploreId:null,exploreName:null,exploreType:null,exploreLabel:null
   };});
 }
@@ -4500,7 +4512,7 @@ function toggleLike(id){
       // Discogs lists one) now wins over the browsed node's name — same
       // fix as trackRows' displayArtist above, so a liked/history snapshot
       // doesn't freeze in the same wrong attribution.
-      const artistName=tr.artistName||tr.trackArtistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.label||'';
+      const artistName=tr.artistName||tr.trackArtistName||tr.releaseArtistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.label||'';
       st.likedTracks[id]={id,title:tr.title,artistName,year:tr.year,label:tr.label,labelId:tr.labelId,trackArtistId:tr.trackArtistId,genre:tr.genre,thumbUrl:tr.thumbUrl,videoId:tr.videoId};
     }
   }else{
@@ -4984,7 +4996,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     // playing artist, which then fed a wrong artist into Explore, likes,
     // and Related Tracks' own Cosine search (searching "Steve O'Sullivan
     // Endless" instead of "Deniro Endless" — real data, wrong track).
-    const displayArtist=isLabel?track.label:(track.trackArtistName||nodeName);
+    const displayArtist=isLabel?track.label:(track.trackArtistName||track.releaseArtistName||nodeName);
     const liked=!!st.likes[track.id],badged=!!st.listens[track.id]?.badged;
     const owned=isOwned(track.title,displayArtist);
     // Every track without a Discogs video is a candidate here, not just
@@ -5833,7 +5845,7 @@ function buildApp(){
       // Discogs lists one) now wins over the browsed node's name — same
       // fix as trackRows' displayArtist above, so a liked/history snapshot
       // doesn't freeze in the same wrong attribution.
-      const artistName=tr.artistName||tr.trackArtistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.label||'';
+      const artistName=tr.artistName||tr.trackArtistName||tr.releaseArtistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.label||'';
       const snap={id,title:tr.title,artistName,year:tr.year,label:tr.label,labelId:tr.labelId,trackArtistId:tr.trackArtistId,genre:tr.genre,thumbUrl:tr.thumbUrl,videoId:tr.videoId};
       st.likedTracks[id]=snap;
       likedTracks.push(snap);
