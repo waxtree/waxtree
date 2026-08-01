@@ -28,18 +28,52 @@ export default async function handler(req, res) {
     const totalUsers = users.length
     const premiumUsers = users.filter(u => u.user_metadata?.premium === true).length
 
+    const now = Date.now()
+    const cutoff7d = now - 7 * 24 * 60 * 60 * 1000
+    const cutoff30d = now - 30 * 24 * 60 * 60 * 1000
+    const active7d = users.filter(u => u.last_sign_in_at && new Date(u.last_sign_in_at).getTime() >= cutoff7d).length
+    const active30d = users.filter(u => u.last_sign_in_at && new Date(u.last_sign_in_at).getTime() >= cutoff30d).length
+
+    // Signups per day for the last 30 days, zero-filled so a quiet day
+    // still shows as a real 0 bar rather than being absent entirely.
+    const signupsByDay = {}
+    for (let i = 29; i >= 0; i--) {
+      signupsByDay[new Date(now - i * 86400000).toISOString().slice(0, 10)] = 0
+    }
+    users.forEach(u => {
+      const d = (u.created_at || '').slice(0, 10)
+      if (d in signupsByDay) signupsByDay[d]++
+    })
+
     // digging_events is small enough today (see supabase/digging_events.sql's
     // own note) to just fetch and count by type in JS. Move this to a
     // Postgres view/RPC once it's grown past a few thousand rows.
-    const eventsRes = await sbAdmin('/rest/v1/digging_events?select=event,created_at&order=created_at.desc&limit=5000')
+    const eventsRes = await sbAdmin('/rest/v1/digging_events?select=event,payload,created_at&order=created_at.desc&limit=5000')
     const events = eventsRes.ok ? await eventsRes.json() : []
     const eventsByType = {}
-    const cutoff7d = Date.now() - 7 * 24 * 60 * 60 * 1000
     let events7d = 0
+    // 'explore' events carry the artist/label name that was opened (see
+    // preview.html's addNode -> logEvent('explore',...)) — tallying these
+    // is the closest thing to "what's actually getting dug into" the app
+    // has, distinct from raw search volume. 'play' events carry the real
+    // Discogs genre/style string of whatever was playing.
+    const exploreCounts = {}
+    const genreCounts = {}
     for (const e of events) {
       eventsByType[e.event] = (eventsByType[e.event] || 0) + 1
       if (new Date(e.created_at).getTime() >= cutoff7d) events7d++
+      if (e.event === 'explore' && e.payload?.name) {
+        exploreCounts[e.payload.name] = (exploreCounts[e.payload.name] || 0) + 1
+      }
+      if (e.event === 'play' && e.payload?.genre) {
+        String(e.payload.genre).split('·').forEach(g => {
+          g = g.trim()
+          if (g) genreCounts[g] = (genreCounts[g] || 0) + 1
+        })
+      }
     }
+    const topExplored = Object.entries(exploreCounts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count }))
+    const topGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([genre, count]) => ({ genre, count }))
 
     const [discogsCache, ytMatched, ytNoMatch, ytChannels, sessions, trees, nodes] = await Promise.all([
       countRows('discogs_node_cache'),
@@ -52,8 +86,11 @@ export default async function handler(req, res) {
     ])
 
     return res.status(200).json({
-      users: { total: totalUsers, premium: premiumUsers, free: totalUsers - premiumUsers },
+      users: { total: totalUsers, premium: premiumUsers, free: totalUsers - premiumUsers, active_7d: active7d, active_30d: active30d },
+      signups_by_day: signupsByDay,
       digging_events: { total: events.length, by_type: eventsByType, last_7_days: events7d },
+      top_explored: topExplored,
+      top_genres: topGenres,
       shared_caches: {
         discogs_node_cache: discogsCache,
         yt_video_matches_found: ytMatched,
