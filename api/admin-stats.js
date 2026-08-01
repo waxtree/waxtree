@@ -52,19 +52,12 @@ export default async function handler(req, res) {
     const events = eventsRes.ok ? await eventsRes.json() : []
     const eventsByType = {}
     let events7d = 0
-    // 'explore' events carry the artist/label name that was opened (see
-    // preview.html's addNode -> logEvent('explore',...)) — tallying these
-    // is the closest thing to "what's actually getting dug into" the app
-    // has, distinct from raw search volume. 'play' events carry the real
-    // Discogs genre/style string of whatever was playing.
-    const exploreCounts = {}
+    // 'play' events carry the real Discogs genre/style string of whatever
+    // was playing (see preview.html's tryBadge -> logEvent('play',...)).
     const genreCounts = {}
     for (const e of events) {
       eventsByType[e.event] = (eventsByType[e.event] || 0) + 1
       if (new Date(e.created_at).getTime() >= cutoff7d) events7d++
-      if (e.event === 'explore' && e.payload?.name) {
-        exploreCounts[e.payload.name] = (exploreCounts[e.payload.name] || 0) + 1
-      }
       if (e.event === 'play' && e.payload?.genre) {
         String(e.payload.genre).split('·').forEach(g => {
           g = g.trim()
@@ -72,7 +65,6 @@ export default async function handler(req, res) {
         })
       }
     }
-    const topExplored = Object.entries(exploreCounts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count }))
     const topGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([genre, count]) => ({ genre, count }))
 
     const [discogsCache, ytMatched, ytNoMatch, ytChannels, sessions, trees, nodes] = await Promise.all([
@@ -89,7 +81,6 @@ export default async function handler(req, res) {
       users: { total: totalUsers, premium: premiumUsers, free: totalUsers - premiumUsers, active_7d: active7d, active_30d: active30d },
       signups_by_day: signupsByDay,
       digging_events: { total: events.length, by_type: eventsByType, last_7_days: events7d },
-      top_explored: topExplored,
       top_genres: topGenres,
       shared_caches: {
         discogs_node_cache: discogsCache,

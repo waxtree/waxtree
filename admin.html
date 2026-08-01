@@ -103,7 +103,7 @@ function renderTopList(title,rows,labelKey,countLabel){
 }
 
 function renderStats(stats){
-  const{users,signups_by_day,digging_events,top_explored,top_genres,shared_caches,new_schema}=stats;
+  const{users,signups_by_day,digging_events,top_genres,shared_caches,new_schema}=stats;
   return `
     <div class="tiles">
       <div class="tile"><div class="tile-label">Users</div><div class="tile-val">${users.total}</div><div class="tile-sub">${users.premium} premium · ${users.free} free</div></div>
@@ -122,7 +122,6 @@ function renderStats(stats){
       </tbody></table>
     </section>
     <section class="top-list">
-      ${renderTopList('Most explored artists/labels',top_explored,'name','Explores')}
       ${renderTopList('Most played styles/genres',top_genres,'genre','Plays')}
     </section>
   `;
@@ -137,13 +136,15 @@ function userRow(u){
       <td>${fmtDate(u.created_at)}</td>
       <td>${fmtDate(u.last_sign_in_at)}</td>
       <td>${u.library_track_count??'—'}</td>
+      <td>${u.search_count??0}</td>
+      <td>${u.nodes_count??0}</td>
       <td>
         <span class="badge ${u.premium?'premium':'free'}">${u.premium?'Premium':'Free'}</span>
         ${mismatch?`<div class="err-inline">profiles.tier: ${esc(u.profiles_tier)} (mismatch)</div>`:''}
       </td>
       <td><button class="toggle-btn" data-action="toggle" data-premium="${u.premium}">Make ${u.premium?'Free':'Premium'}</button></td>
     </tr>
-    <tr class="events-row" data-events-for="${esc(u.id)}" style="display:none"><td colspan="7"></td></tr>
+    <tr class="events-row" data-events-for="${esc(u.id)}" style="display:none"><td colspan="9"></td></tr>
   `;
 }
 
@@ -151,7 +152,7 @@ function renderUsers(users){
   return `
     <section>
       <h2>Users</h2>
-      <table><thead><tr><th></th><th>Email</th><th>Joined</th><th>Last sign-in</th><th>Library tracks</th><th>Tier</th><th></th></tr></thead>
+      <table><thead><tr><th></th><th>Email</th><th>Joined</th><th>Last sign-in</th><th>Library tracks</th><th>Searches</th><th>Nodes opened</th><th>Tier</th><th></th></tr></thead>
       <tbody>${users.map(userRow).join('')}</tbody></table>
     </section>
   `;

@@ -23,6 +23,15 @@ export default async function handler(req, res) {
     const profiles = profilesRes.ok ? await profilesRes.json() : []
     const tierById = Object.fromEntries(profiles.map(p => [p.id, p.tier]))
 
+    // user_state.data.nodes is each user's actual saved tree (see
+    // preview.html's saveSt/pushStateToCloud) — counting it directly is
+    // more reliable than tallying 'explore' digging_events, since a node
+    // stays counted here even if it was added before digging_events
+    // shipped, or its own logEvent batch got dropped client-side.
+    const stateRes = await sbAdmin('/rest/v1/user_state?select=user_id,data')
+    const states = stateRes.ok ? await stateRes.json() : []
+    const nodesCountById = Object.fromEntries(states.map(s => [s.user_id, (s.data?.nodes || []).length]))
+
     const rows = users.map(u => ({
       id: u.id,
       email: u.email,
@@ -32,6 +41,7 @@ export default async function handler(req, res) {
       profiles_tier: tierById[u.id] ?? null,
       library_track_count: u.user_metadata?.library_track_count ?? null,
       search_count: u.user_metadata?.search_count ?? null,
+      nodes_count: nodesCountById[u.id] ?? 0,
     })).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
     return res.status(200).json({ users: rows })
