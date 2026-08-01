@@ -2736,6 +2736,16 @@ function filterCosineItems(items,np){
   });
 }
 const COSINE_RESOLVE_BATCH=4;
+// Stop once there are enough good results, rather than resolving every
+// candidate Cosine returned (up to 20) — each one costs a real Discogs
+// call (see resolveCosineCard), and dReq's own per-call retry/backoff on a
+// rate limit or shared-proxy contention (no personal Discogs token
+// connected — see getToken()) can be 15-45s BY ITSELF. Confirmed live
+// 2026-08-01: "Finding related tracks…" sitting for minutes traced back to
+// exactly this — up to 20 sequential Discogs calls, some individually
+// stuck retrying. Most releases resolve successfully on the first try, so
+// stopping at a good-enough count typically needs far fewer than all 20.
+const COSINE_TARGET_CARDS=8;
 // external_link is Cosine's own claimed Discogs release for this pick —
 // fetching that release directly gives its REAL artist credit, no name
 // matching or discography search involved (that's what made the YouTube
@@ -2772,7 +2782,7 @@ async function resolveCosineCard(item){
 async function resolveCosineCards(items){
   const out=[];
   let complete=true;
-  for(let i=0;i<items.length;i+=COSINE_RESOLVE_BATCH){
+  for(let i=0;i<items.length&&out.length<COSINE_TARGET_CARDS;i+=COSINE_RESOLVE_BATCH){
     const batch=items.slice(i,i+COSINE_RESOLVE_BATCH);
     const settled=await Promise.allSettled(batch.map(resolveCosineCard));
     settled.forEach(r=>{
