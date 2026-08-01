@@ -2598,7 +2598,13 @@ async function cosineFetch(action,params){
   Object.entries(params).forEach(([k,v])=>{if(v!=null)url.searchParams.set(k,v);});
   const res=await fetch(url);
   const json=await res.json().catch(()=>({}));
-  if(!res.ok||json.error)throw new Error(json.error||'Cosine.club request failed ('+res.status+')');
+  if(!res.ok||json.error){
+    // status rides along so callers can tell a definitive "not found" (404)
+    // apart from a transient failure worth retrying — see resolveCosineTrackId.
+    const err=new Error(json.error||'Cosine.club request failed ('+res.status+')');
+    err.status=res.status;
+    throw err;
+  }
   return json;
 }
 // Confirmed lookup (and confirmed no-match) never expires, same treatment
@@ -2684,22 +2690,54 @@ async function resolveCosineTrackId(np){
   // Confirmed live: a track's own YouTube link returned real Cosine
   // results when its Discogs release URL alone came back empty.
   const candidates=[youtubeUrl,discogsUrl].filter(Boolean);
-  if(!candidates.length){
-    // Genuinely nothing to look up with — this one's a real, cacheable no-match.
-    cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);
-    return false;
-  }
+  if(!candidates.length)return await cosineIdViaSearch(np);
   let anyFailed=false;
   for(const url of candidates){
     let json;
     try{json=await cosineFetch('lookup',{url});}
-    catch(e){console.warn('WaxTree: Cosine track lookup failed (will retry):',e?.message||e);anyFailed=true;continue;}
+    catch(e){
+      // A 404 here is Cosine's own, real "no match for this exact URL" —
+      // NOT a failure worth retrying. /tracks/lookup's index turned out to
+      // be far narrower than its own text search: confirmed live
+      // (2026-08-01) a track's YouTube AND Discogs URLs both 404'd here
+      // while searching cosine.club by title/artist for that same track
+      // found it immediately — see cosineIdViaSearch's fallback below.
+      // Anything else (network blip, 5xx, rate limit) IS worth retrying.
+      if(e.status===404)continue;
+      console.warn('WaxTree: Cosine track lookup failed (will retry):',e?.message||e);anyFailed=true;continue;
+    }
     const id=json.data?.[0]?.id;
     if(id){cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);return id;}
   }
   if(anyFailed)return undefined; // at least one attempt errored — don't cache a negative, retry later
-  cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap); // every candidate genuinely came back empty
-  return false;
+  // Every direct URL lookup came back a clean 404 — fall back to a real
+  // text search before concluding Cosine genuinely has nothing on this track.
+  return await cosineIdViaSearch(np);
+}
+// Verified against title/artist before accepting a hit — /search is a
+// fuzzy text match (unlike the exact-URL lookup above), so the top result
+// isn't automatically the right track. Picking a wrong seed track here
+// would make every one of ITS "related" picks wrong too, the same
+// verify-or-don't-show discipline already applied to each individual pick.
+async function cosineIdViaSearch(np){
+  const title=np.title||'';
+  if(!title){cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);return false;}
+  const artist=np.artistName||'';
+  let json;
+  try{json=await cosineFetch('search',{q:(artist+' '+title).trim()});}
+  catch(e){console.warn('WaxTree: Cosine search fallback failed (will retry):',e?.message||e);return undefined;}
+  const titleNorm=normalizeStr(title);
+  const artistNorm=normalizeStr(artist);
+  const hit=(json.data||[]).find(h=>{
+    const hTitle=normalizeStr(h.track||h.name||'');
+    const hArtist=normalizeStr(h.artist||'');
+    const titleOk=hTitle&&titleNorm&&(hTitle.includes(titleNorm)||titleNorm.includes(hTitle));
+    const artistOk=!artistNorm||!hArtist||hArtist.includes(artistNorm)||artistNorm.includes(hArtist);
+    return titleOk&&artistOk;
+  });
+  const id=hit?.id||false;
+  cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);
+  return id;
 }
 async function fetchCosineSimilar(cosineId){
   const ck='cosinesim:'+cosineId;
