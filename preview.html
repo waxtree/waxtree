@@ -1926,6 +1926,12 @@ const st={
   discogsCollMasterIds:saved?.discogsCollMasterIds||[],
   discogsCollection:loadDiscogsCollection(),
   librariesModal:false,librariesTab:'vinyl',librariesSearch:'',
+  // Set at boot (see sb.auth.getSession() below) when the user has never
+  // synced a local folder or a Discogs collection — shows a one-time
+  // welcome blurb above the Sync tab. Not persisted: recomputed from
+  // scratch on every login, so it keeps reappearing until an actual sync
+  // happens, then stops for good once one has.
+  welcomeSyncIntro:false,
   libraryMatchRunning:false,libraryMatchProgress:{done:0,total:0,found:0},
   discogsWantReleaseIds:saved?.discogsWantReleaseIds||[],
   discogsWantMasterIds:saved?.discogsWantMasterIds||[],
@@ -5907,7 +5913,7 @@ function buildApp(){
     // sync is actually in flight would orphan it silently, so the same
     // discogsSyncing guard the old standalone modal had now applies to
     // Libraries' own close handlers too.
-    const closeLib=()=>{if(!st.discogsSyncing){st.librariesModal=false;rr();}};
+    const closeLib=()=>{if(!st.discogsSyncing){st.librariesModal=false;st.welcomeSyncIntro=false;rr();}};
     const overlay=d('overlay',{onClick:closeLib});
     const modal=d('modal daq-modal follows-modal libraries-modal',{onClick:e=>e.stopPropagation()});
     modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'0'}},
@@ -5929,6 +5935,12 @@ function buildApp(){
     modal.appendChild(tabs);
 
     if(st.librariesTab==='sync'){
+      if(st.welcomeSyncIntro){
+        const welcome=d('sync-welcome',{});
+        welcome.appendChild(el('p',{style:'font-weight:600;color:var(--text);margin:0 0 4px'},'Welcome to WaxTree!'));
+        welcome.appendChild(el('p',{cls:'modal-sub',style:'margin:0'},'Add your music by linking your local folder and connecting your Discogs account below. WaxTree will start tagging the tracks you already own or want as you dig, and stay in sync with your whole library.'));
+        modal.appendChild(welcome);
+      }
       modal.appendChild(el('p',{cls:'modal-sub'},'Connect your music sources — matching tracks get tagged while you dig.'));
 
       // ── Local music folder
@@ -6317,6 +6329,14 @@ sb.auth.getSession().then(({data:{session}})=>{
   st.searchCount=wtSession.user.user_metadata?.search_count||0;
   st.ownedTracks=loadOwnedTracks()||wtSession.user.user_metadata?.owned_tracks||[];
   st.isPremium=wtSession.user.user_metadata?.premium===true;
+  // Nudge anyone who's never linked a music source yet, every login, until
+  // they do — checks both the local scan and the Discogs sync (either one
+  // counts), and also the cloud-persisted track count so a user who synced
+  // on another device doesn't get re-nagged on a fresh browser with empty
+  // localStorage (see buildLocalLibrarySection's own libCount for the same
+  // fallback pattern).
+  const hasSyncedAnything=!!st.discogsCollSyncedAt||st.ownedTracks.length>0||!!wtSession.user.user_metadata?.library_track_count;
+  if(!hasSyncedAnything){st.librariesModal=true;st.librariesTab='sync';st.welcomeSyncIntro=true;}
   paint();
   loadFollows();
   handleDiscogsCallback();
