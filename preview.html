@@ -2659,7 +2659,16 @@ let cosineIdMap=loadCosineIdMap();
 const COSINE_RETRY_COOLDOWN_MS=15000;
 let cosineRetryFailedAt={};
 function cosineOnCooldown(key){const t=cosineRetryFailedAt[key];return!!t&&Date.now()-t<COSINE_RETRY_COOLDOWN_MS;}
-function cosineMarkFailed(key){cosineRetryFailedAt[key]=Date.now();}
+// Marking a failure also has to actually WAKE the panel up to retry —
+// during idle playback nothing else calls rr() (the seek bar updates via
+// its own lightweight DOM write, not a full re-render — see
+// updateCustomSeekUI), so without this a cooldown's expiry would never
+// itself trigger another attempt and the panel would sit on "Looking up
+// track…"/"Finding related tracks…" forever. Confirmed live 2026-08-01.
+function cosineMarkFailed(key){
+  cosineRetryFailedAt[key]=Date.now();
+  setTimeout(rr,COSINE_RETRY_COOLDOWN_MS+200);
+}
 async function resolveCosineTrackId(np){
   // Fast path: this track is itself a previously-fetched Cosine pick (see
   // buildRelatedCard's extra above) — its Cosine id is already known, no
@@ -2667,22 +2676,30 @@ async function resolveCosineTrackId(np){
   const known=discoveredTracks[np.trackId]?.cosineId;
   if(known){cosineIdMap[np.trackId]=known;saveCosineIdMap(cosineIdMap);return known;}
   const discogsUrl=findTrackAndNode(np.trackId)?.track?.discogsUrl||discoveredTracks[np.trackId]?.discogsUrl||null;
-  const lookupUrl=discogsUrl||(np.videoId?'https://www.youtube.com/watch?v='+np.videoId:null);
-  if(!lookupUrl){
+  const youtubeUrl=np.videoId?'https://www.youtube.com/watch?v='+np.videoId:null;
+  // Try the YouTube link AND the Discogs release link, not just one —
+  // Cosine may have indexed this recording under a different Discogs
+  // pressing/reissue than the exact release WaxTree's own tree points at,
+  // but the YouTube video actually playing is an exact match either way.
+  // Confirmed live: a track's own YouTube link returned real Cosine
+  // results when its Discogs release URL alone came back empty.
+  const candidates=[youtubeUrl,discogsUrl].filter(Boolean);
+  if(!candidates.length){
     // Genuinely nothing to look up with — this one's a real, cacheable no-match.
     cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);
     return false;
   }
-  let json;
-  try{
-    json=await cosineFetch('lookup',{url:lookupUrl});
-  }catch(e){
-    console.warn('WaxTree: Cosine track lookup failed (will retry):',e?.message||e);
-    return undefined;
+  let anyFailed=false;
+  for(const url of candidates){
+    let json;
+    try{json=await cosineFetch('lookup',{url});}
+    catch(e){console.warn('WaxTree: Cosine track lookup failed (will retry):',e?.message||e);anyFailed=true;continue;}
+    const id=json.data?.[0]?.id;
+    if(id){cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);return id;}
   }
-  const id=json.data?.[0]?.id||false;
-  cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);
-  return id;
+  if(anyFailed)return undefined; // at least one attempt errored — don't cache a negative, retry later
+  cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap); // every candidate genuinely came back empty
+  return false;
 }
 async function fetchCosineSimilar(cosineId){
   const ck='cosinesim:'+cosineId;
