@@ -2622,27 +2622,18 @@ async function cosineFetch(action,params){
 // though the same track returns results on cosine.club directly. On a
 // throw, resolveCosineTrackId returns undefined and writes nothing, so
 // the next render's lookup gets a genuine retry instead of a cached lie.
-function loadCosineIdMap(){try{const r=localStorage.getItem('wt-cosine-ids');return r?JSON.parse(r):{};}catch{return{};}}
-function saveCosineIdMap(m){try{localStorage.setItem('wt-cosine-ids',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist Cosine track ids:',e);}}
+// wt-cosine-ids-v2: bumped from wt-cosine-ids (v1) because the text-search
+// fallback that v1 could contain resolved ids through (cosineIdViaSearch,
+// removed below) turned out to sometimes match the wrong track entirely —
+// confirmed live 2026-08-01: a track with no exact-URL match in Cosine's
+// index got matched via fuzzy title/artist search to something unrelated,
+// and its "related tracks" were consequently real Cosine data but for the
+// wrong seed. A v1 entry could be silently wrong in a way no purge of just
+// the false ones would catch, so this starts every id fresh under the
+// URL-only logic below rather than trusting any old resolved id.
+function loadCosineIdMap(){try{const r=localStorage.getItem('wt-cosine-ids-v2');return r?JSON.parse(r):{};}catch{return{};}}
+function saveCosineIdMap(m){try{localStorage.setItem('wt-cosine-ids-v2',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist Cosine track ids:',e);}}
 let cosineIdMap=loadCosineIdMap();
-// One-time remediation for tracks already poisoned by a false negative —
-// bumped each time something that affects a no-match verdict changes, same
-// convention as purgeStaleYtNoMatches below. v2: the artist-attribution
-// fix above (trackArtistName now wins over the browsed node's name) means
-// a track played from a "featuring" artist's own page used to get searched
-// on Cosine under the wrong artist entirely — a previously-cached false
-// deserves a genuine retry under the corrected name, not just entries from
-// the original thrown-lookup bug (v1). Strip every false entry once so
-// those tracks get a fresh attempt instead of staying stuck on "No related
-// tracks found" forever. Real ids are untouched.
-(function purgeStaleCosineNoMatches(){
-  const PURGE_KEY='wt-cosine-false-purge-v2';
-  if(localStorage.getItem(PURGE_KEY))return;
-  let purged=0;
-  Object.keys(cosineIdMap).forEach(k=>{if(cosineIdMap[k]===false){delete cosineIdMap[k];purged++;}});
-  if(purged)saveCosineIdMap(cosineIdMap);
-  try{localStorage.setItem(PURGE_KEY,'1');}catch{}
-})();
 // Same remediation for the resolved-cards cache — a failed resolution pass
 // used to get persisted as a permanent empty array under ct2:cosinecards:*
 // (30-day TTL, so it wouldn't even self-heal soon). Sweeps every ct2: key
@@ -2695,18 +2686,14 @@ async function resolveCosineTrackId(np){
   // Confirmed live: a track's own YouTube link returned real Cosine
   // results when its Discogs release URL alone came back empty.
   const candidates=[youtubeUrl,discogsUrl].filter(Boolean);
-  if(!candidates.length)return await cosineIdViaSearch(np);
+  if(!candidates.length){cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);return false;}
   let anyFailed=false;
   for(const url of candidates){
     let json;
     try{json=await cosineFetch('lookup',{url});}
     catch(e){
       // A 404 here is Cosine's own, real "no match for this exact URL" —
-      // NOT a failure worth retrying. /tracks/lookup's index turned out to
-      // be far narrower than its own text search: confirmed live
-      // (2026-08-01) a track's YouTube AND Discogs URLs both 404'd here
-      // while searching cosine.club by title/artist for that same track
-      // found it immediately — see cosineIdViaSearch's fallback below.
+      // NOT a failure worth retrying, just try the next candidate.
       // Anything else (network blip, 5xx, rate limit) IS worth retrying.
       if(e.status===404)continue;
       console.warn('WaxTree: Cosine track lookup failed (will retry):',e?.message||e);anyFailed=true;continue;
@@ -2715,34 +2702,17 @@ async function resolveCosineTrackId(np){
     if(id){cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);return id;}
   }
   if(anyFailed)return undefined; // at least one attempt errored — don't cache a negative, retry later
-  // Every direct URL lookup came back a clean 404 — fall back to a real
-  // text search before concluding Cosine genuinely has nothing on this track.
-  return await cosineIdViaSearch(np);
-}
-// Verified against title/artist before accepting a hit — /search is a
-// fuzzy text match (unlike the exact-URL lookup above), so the top result
-// isn't automatically the right track. Picking a wrong seed track here
-// would make every one of ITS "related" picks wrong too, the same
-// verify-or-don't-show discipline already applied to each individual pick.
-async function cosineIdViaSearch(np){
-  const title=np.title||'';
-  if(!title){cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);return false;}
-  const artist=np.artistName||'';
-  let json;
-  try{json=await cosineFetch('search',{q:(artist+' '+title).trim()});}
-  catch(e){console.warn('WaxTree: Cosine search fallback failed (will retry):',e?.message||e);return undefined;}
-  const titleNorm=normalizeStr(title);
-  const artistNorm=normalizeStr(artist);
-  const hit=(json.data||[]).find(h=>{
-    const hTitle=normalizeStr(h.track||h.name||'');
-    const hArtist=normalizeStr(h.artist||'');
-    const titleOk=hTitle&&titleNorm&&(hTitle.includes(titleNorm)||titleNorm.includes(hTitle));
-    const artistOk=!artistNorm||!hArtist||hArtist.includes(artistNorm)||artistNorm.includes(hArtist);
-    return titleOk&&artistOk;
-  });
-  const id=hit?.id||false;
-  cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);
-  return id;
+  // Every direct URL lookup came back a clean 404 — genuinely no match.
+  // Deliberately NOT falling back to a fuzzy text search here: tried that
+  // (cosineIdViaSearch) and confirmed live it can match the wrong track
+  // entirely (real Cosine "related tracks" data, but for an unrelated
+  // song), which is worse than no results — matches this project's own
+  // standing rule that an unverifiable suggestion shouldn't be shown at
+  // all rather than shown as a guess. Cosine's own exact-URL lookup is a
+  // much narrower index than its search, but every result through it is
+  // provably the right track.
+  cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);
+  return false;
 }
 async function fetchCosineSimilar(cosineId){
   const ck='cosinesim:'+cosineId;
