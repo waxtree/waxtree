@@ -2625,13 +2625,18 @@ async function cosineFetch(action,params){
 function loadCosineIdMap(){try{const r=localStorage.getItem('wt-cosine-ids');return r?JSON.parse(r):{};}catch{return{};}}
 function saveCosineIdMap(m){try{localStorage.setItem('wt-cosine-ids',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist Cosine track ids:',e);}}
 let cosineIdMap=loadCosineIdMap();
-// One-time remediation for tracks already poisoned by the bug fixed above
-// (a thrown lookup used to get cached as a permanent false, same class of
-// bug as purgeStaleYtNoMatches below) — strip every false entry once so
-// those tracks get a genuine retry instead of staying stuck on "No related
+// One-time remediation for tracks already poisoned by a false negative —
+// bumped each time something that affects a no-match verdict changes, same
+// convention as purgeStaleYtNoMatches below. v2: the artist-attribution
+// fix above (trackArtistName now wins over the browsed node's name) means
+// a track played from a "featuring" artist's own page used to get searched
+// on Cosine under the wrong artist entirely — a previously-cached false
+// deserves a genuine retry under the corrected name, not just entries from
+// the original thrown-lookup bug (v1). Strip every false entry once so
+// those tracks get a fresh attempt instead of staying stuck on "No related
 // tracks found" forever. Real ids are untouched.
 (function purgeStaleCosineNoMatches(){
-  const PURGE_KEY='wt-cosine-false-purge-v1';
+  const PURGE_KEY='wt-cosine-false-purge-v2';
   if(localStorage.getItem(PURGE_KEY))return;
   let purged=0;
   Object.keys(cosineIdMap).forEach(k=>{if(cosineIdMap[k]===false){delete cosineIdMap[k];purged++;}});
@@ -4491,7 +4496,11 @@ function toggleLike(id){
     logEvent('like',{track_id:id,title:tr?.title||null,artist:tr?.trackArtistName||tr?.label||null,genre:tr?.genre||null,year:tr?.year||null,
       node_type:found?.node?.type||null,node_discogs_id:found?.node?.discogsId||null,node_name:found?.node?.name||null});
     if(tr){
-      const artistName=tr.artistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.trackArtistName||tr.label||'';
+      // trackArtistName (the track's own real per-track credit, when
+      // Discogs lists one) now wins over the browsed node's name — same
+      // fix as trackRows' displayArtist above, so a liked/history snapshot
+      // doesn't freeze in the same wrong attribution.
+      const artistName=tr.artistName||tr.trackArtistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.label||'';
       st.likedTracks[id]={id,title:tr.title,artistName,year:tr.year,label:tr.label,labelId:tr.labelId,trackArtistId:tr.trackArtistId,genre:tr.genre,thumbUrl:tr.thumbUrl,videoId:tr.videoId};
     }
   }else{
@@ -4963,7 +4972,19 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
 
   // ── LEFT: one compact row per track, each with its own small play button
   const trackRows=tracks.map(track=>{
-    const displayArtist=isLabel?track.label:nodeName;
+    // track.trackArtistName is the track's own real per-track Discogs
+    // credit — only set when Discogs actually lists one (a featuring
+    // credit, a various-artists-style entry), so it correctly stays unset
+    // for a normal solo track and nodeName (the browsed artist) still
+    // applies. Without preferring it first, EVERY track on a release
+    // showed up credited to whichever artist's page you browsed it from —
+    // confirmed live: opening "Endless" (by Deniro, featuring Steve
+    // O'Sullivan on a different track on the same EP) from Steve
+    // O'Sullivan's own artist page showed "Steve O'Sullivan" as the
+    // playing artist, which then fed a wrong artist into Explore, likes,
+    // and Related Tracks' own Cosine search (searching "Steve O'Sullivan
+    // Endless" instead of "Deniro Endless" — real data, wrong track).
+    const displayArtist=isLabel?track.label:(track.trackArtistName||nodeName);
     const liked=!!st.likes[track.id],badged=!!st.listens[track.id]?.badged;
     const owned=isOwned(track.title,displayArtist);
     // Every track without a Discogs video is a candidate here, not just
@@ -5808,7 +5829,11 @@ function buildApp(){
       const found=findTrackAndNode(id);
       const tr=found?.track||discoveredTracks[id];
       if(!tr){stillResolving++;return;} // not resolvable yet — its node hasn't loaded in this session
-      const artistName=tr.artistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.trackArtistName||tr.label||'';
+      // trackArtistName (the track's own real per-track credit, when
+      // Discogs lists one) now wins over the browsed node's name — same
+      // fix as trackRows' displayArtist above, so a liked/history snapshot
+      // doesn't freeze in the same wrong attribution.
+      const artistName=tr.artistName||tr.trackArtistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.label||'';
       const snap={id,title:tr.title,artistName,year:tr.year,label:tr.label,labelId:tr.labelId,trackArtistId:tr.trackArtistId,genre:tr.genre,thumbUrl:tr.thumbUrl,videoId:tr.videoId};
       st.likedTracks[id]=snap;
       likedTracks.push(snap);
