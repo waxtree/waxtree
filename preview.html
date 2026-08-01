@@ -1656,7 +1656,7 @@ function saveSt(){
     if(e.name==='QuotaExceededError'&&purgeExpiredCache())
       try{localStorage.setItem('wt-discogs-wantlist',JSON.stringify(st.discogsWantlist));}catch{}
   }
-  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,relatedTracksSource:st.relatedTracksSource});
+  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,relatedTracksSource:st.relatedTracksSource,alreadyListened:st.alreadyListened});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -1695,7 +1695,7 @@ async function pushStateToCloud(){
   // it's cheaply re-fetched on selectNode; only the tree structure itself
   // (which artist/label, which branch, pin/tag state) is irreplaceable.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
-  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,avatarDataUrl:getAvatarUrl()};
+  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,avatarDataUrl:getAvatarUrl()};
   try{
     const{error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});
     if(error)throw error;
@@ -1857,6 +1857,7 @@ async function hydrateFromCloud(){
     if(c.discogsWantMasterIds)st.discogsWantMasterIds=c.discogsWantMasterIds;
     if(c.discogsCollSyncedAt)st.discogsCollSyncedAt=c.discogsCollSyncedAt;
     if(c.discogsHeroesSeen)st.discogsHeroesSeen=c.discogsHeroesSeen;
+    if(c.alreadyListened)st.alreadyListened=c.alreadyListened;
     if(c.avatarDataUrl){try{localStorage.setItem(AVATAR_KEY,c.avatarDataUrl);}catch{}}
     saveSt();
     ensureNodeLoaded(st.selectedId);
@@ -1940,6 +1941,10 @@ const st={
   discogsHeroesSeen:saved?.discogsHeroesSeen||false,heroesModal:false,
   searchCount:0,ownedTracks:[],isPremium:false,premiumModal:false,
   history:saved?.history||[],
+  // Release group keys (see groupTracksByRelease) the user manually moved
+  // to the "Already Listened" section — opt-in, not automatic just because
+  // every track happens to be marked played (see releaseCard's own button).
+  alreadyListened:saved?.alreadyListened||[],
 };
 document.documentElement.setAttribute('data-theme',st.theme);
 
@@ -5206,12 +5211,29 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   const digitalOnly=tracks.some(t=>t.digital)&&!tracks.some(t=>t.hasVinyl);
   if(first.discogsUrl&&!digitalOnly)buyBtns.push(el('a',{cls:'buy-btn dg',href:first.discogsUrl,target:'_blank',rel:'noreferrer'},'Discogs ↗'));
 
+  // Opt-in, not automatic — every track showing '✓ played' just means the
+  // option becomes available; the user still has to actually move it, same
+  // as owned-in-collection releases require a real Discogs sync rather than
+  // silently reorganizing the page on their behalf.
+  const allPlayed=tracks.length>0&&tracks.every(t=>st.listens[t.id]?.badged);
+  const isListened=st.alreadyListened.includes(group.key);
+  let listenedBtn=null;
+  if(isListened){
+    listenedBtn=b('esplora-btn',{title:'Move this release back to the normal list',onClick:()=>{
+      st.alreadyListened=st.alreadyListened.filter(k=>k!==group.key);rr();
+    }},'↩ Remove from Already Listened');
+  }else if(allPlayed){
+    listenedBtn=b('esplora-btn',{title:'Move this release to Already Listened, at the end of the page',onClick:()=>{
+      st.alreadyListened=[...st.alreadyListened,group.key];rr();
+    }},'✓ Move to Already Listened');
+  }
+
   return d('rel-card',{},
     art,
     mid,
     d('rel-tracks',{},...trackRows),
     d('t-actions',{},
-      d('t-act-explore',{},...exploreEls),
+      d('t-act-explore',{},...exploreEls,listenedBtn),
       d('t-act-buy',{},...buyBtns),
     ),
   );
@@ -5422,6 +5444,7 @@ function buildContent(){
 
   // Tracks with filter
   let ownedGroups=[];
+  let listenedGroups=[];
   if(dt.tracks?.length){
     const filtered=applyFilters(dt.tracks);
     const hasFilter=st.filterTitle||st.filterFormat!=='all'||st.filterSort!=='default'||st.filterGenres.length>0;
@@ -5431,8 +5454,22 @@ function buildContent(){
     // their own section at the end instead (see ownedGroups' render below,
     // in the same spot Bandcamp uses) — no point paginating past vinyl
     // already owned while digging for something new.
-    const browsableTracks=filtered.filter(t=>!inDiscogsCollection(t));
+    const notOwned=filtered.filter(t=>!inDiscogsCollection(t));
     ownedGroups=groupTracksByRelease(filtered.filter(t=>inDiscogsCollection(t)));
+    // Same idea for releases the user manually marked fully listened to
+    // (see releaseCard's own "Move to Already Listened" button) — grouped
+    // once here so a release's key (not owned) can be checked against
+    // st.alreadyListened, then its tracks excluded from the normal list too.
+    const notOwnedGroups=groupTracksByRelease(notOwned);
+    listenedGroups=notOwnedGroups.filter(g=>st.alreadyListened.includes(g.key));
+    // Includes altIds, not just each merged track's primary id — g.tracks
+    // came out of mergeReleaseVariantTracks (same title, e.g. a vinyl
+    // pressing merged with a digital listing), but notOwned is still the
+    // FLAT, pre-merge list; a raw entry whose id got folded into altIds
+    // during merging would otherwise slip past this filter and show up as
+    // a partial duplicate of an already-excluded release.
+    const listenedTrackIds=new Set(listenedGroups.flatMap(g=>g.tracks.flatMap(t=>[t.id,...(t.altIds||[])])));
+    const browsableTracks=notOwned.filter(t=>!listenedTrackIds.has(t.id));
     // A release search result just resolved to this node — jump straight
     // to whichever page actually contains it (sort/filter stay exactly
     // whatever they already were, only the page changes) so the auto-
@@ -5559,6 +5596,16 @@ function buildContent(){
     ownedSec.appendChild(d('bc-hdr',{},el('p',{cls:'sec-lbl'},'IN YOUR COLLECTION')));
     ownedGroups.forEach(g=>ownedSec.appendChild(releaseCard(g,node.id,isLabel,node.name)));
     panel.appendChild(ownedSec);
+  }
+
+  // ── Already listened — releases the user manually moved here once every
+  // track showed played (see releaseCard's own button); same bottom-of-page
+  // slot/divider treatment as the collection section above.
+  if(listenedGroups.length){
+    const listenedSec=d('bc-section',{});
+    listenedSec.appendChild(d('bc-hdr',{},el('p',{cls:'sec-lbl'},'ALREADY LISTENED')));
+    listenedGroups.forEach(g=>listenedSec.appendChild(releaseCard(g,node.id,isLabel,node.name)));
+    panel.appendChild(listenedSec);
   }
 
   // ── Bandcamp section — built (fetchBandcamp/bcCacheMap still run
