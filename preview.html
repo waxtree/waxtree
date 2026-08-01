@@ -312,10 +312,10 @@ input,select{font:inherit;color:inherit}
    that edge lands at the same X on every card regardless of what's in
    the middle column or the actions column. */
 .rel-mid{flex:0 1 200px;width:200px;min-width:0;padding-top:2px}
-.rel-title-row{display:flex;align-items:center;gap:6px;min-width:0}
-.rel-title{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
-.rel-listened-icon{background:none;border:none;padding:0;cursor:pointer;font-size:13px;line-height:1;flex-shrink:0;color:var(--text-f);transition:color .15s,transform .12s}
-.rel-listened-icon:hover{transform:scale(1.15);color:var(--text-m)}
+.rel-title{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rel-art-col{display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0}
+.rel-listened-icon{background:none;border:none;padding:0;cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;color:var(--text-f);transition:color .15s,transform .12s}
+.rel-listened-icon:hover{transform:scale(1.2);color:var(--text-m)}
 .rel-listened-icon.marked{color:var(--accent)}
 /* Artisti correlati */
 .corr-section{margin-bottom:18px;padding:12px 14px;background:var(--bg-e);border-radius:10px;border:1px solid var(--border)}
@@ -4952,6 +4952,28 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     ?el('img',{cls:'t-art',src:first.thumbUrl,alt:'',loading:'lazy'})
     :d('t-art-ph',{},'♫');
 
+  // Small icon under the artwork, same treatment as a track's own Like
+  // heart — shown once every track in the release is marked '✓ played'
+  // (or already moved). Under the art rather than next to the title: the
+  // title sits directly above the first track row, and a clickable icon
+  // there read as if it belonged to that track instead of the release as
+  // a whole (confirmed live) — the artwork is unambiguously release-level.
+  // Opt-in: reaching "all played" only reveals the icon, it doesn't move
+  // the release on its own.
+  const allPlayed=tracks.length>0&&tracks.every(t=>st.listens[t.id]?.badged);
+  const isListened=st.alreadyListened.includes(group.key);
+  let listenedIcon=null;
+  if(isListened){
+    listenedIcon=b('rel-listened-icon marked',{title:'Click to remove from Already Listened',onClick:()=>{
+      st.alreadyListened=st.alreadyListened.filter(k=>k!==group.key);rr();
+    }},'●');
+  }else if(allPlayed){
+    listenedIcon=b('rel-listened-icon',{title:'Click to move to Already Listened',onClick:()=>{
+      st.alreadyListened=[...st.alreadyListened,group.key];rr();
+    }},'◯');
+  }
+  const artCol=d('rel-art-col',{},art,listenedIcon);
+
   // "Featuring" vs genuine various-artists: on a label node, track.label
   // holds the per-track ARTIST credit (see fetchLabelData). If one artist
   // clearly dominates the group (a strict majority of tracks), that's a
@@ -5081,29 +5103,11 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     );
   });
 
-  // Small icon next to the title, same treatment as a track's own Like
-  // heart — shown once every track in the release is marked '✓ played'
-  // (or already moved), never as one of the pill-style action buttons.
-  // Opt-in: reaching "all played" only reveals the icon, it doesn't move
-  // the release on its own.
-  const allPlayed=tracks.length>0&&tracks.every(t=>st.listens[t.id]?.badged);
-  const isListened=st.alreadyListened.includes(group.key);
-  let listenedIcon=null;
-  if(isListened){
-    listenedIcon=b('rel-listened-icon marked',{title:'Click to remove from Already Listened',onClick:()=>{
-      st.alreadyListened=st.alreadyListened.filter(k=>k!==group.key);rr();
-    }},'☑');
-  }else if(allPlayed){
-    listenedIcon=b('rel-listened-icon',{title:'Click to move to Already Listened',onClick:()=>{
-      st.alreadyListened=[...st.alreadyListened,group.key];rr();
-    }},'☐');
-  }
-
   // ── MIDDLE: release/EP/Album title + year·label + genres (release-level, shown once)
   const yearLabel=[first.year,isVariousArtists?'Various Artists':(primaryArtistLabel||first.label)].filter(Boolean).join(' · ');
   const genres=first.genre?first.genre.split(' · '):[];
   const mid=d('rel-mid',{},
-    d('rel-title-row',{},s('rel-title',first.album||first.title),listenedIcon),
+    s('rel-title',first.album||first.title),
     yearLabel?s('t-meta',yearLabel):null,
     genres.length?d('t-meta-row',{},
       ...genres.map(g=>{const c=genreColor(g);return el('span',{cls:'genre-badge',style:`background:${c}1A;border-color:${c}66;color:${c}`},g);})
@@ -5234,7 +5238,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   if(first.discogsUrl&&!digitalOnly)buyBtns.push(el('a',{cls:'buy-btn dg',href:first.discogsUrl,target:'_blank',rel:'noreferrer'},'Discogs ↗'));
 
   return d('rel-card',{},
-    art,
+    artCol,
     mid,
     d('rel-tracks',{},...trackRows),
     d('t-actions',{},
