@@ -284,6 +284,8 @@ input,select{font:inherit;color:inherit}
 .t-daq{font-size:13px;line-height:1;flex-shrink:0;transition:transform .12s,color .15s;color:var(--text-f)}
 .t-daq.queued{color:var(--accent)}
 .t-daq:hover{transform:scale(1.2)}
+.t-help-btn{background:none;border:1px solid var(--border);border-radius:5px;padding:1px 5px;font-size:10px;line-height:1.4;flex-shrink:0;color:var(--text-f);cursor:pointer;transition:border-color .15s,color .15s}
+.t-help-btn:hover{border-color:var(--accent);color:var(--accent)}
 .t-bpm{font-size:10px;color:var(--text-f);padding:2px 6px;border-radius:8px;background:var(--bg-e);border:1px solid var(--border);flex-shrink:0;white-space:nowrap}
 /* Release card — one row per EP/Album, tracks grouped inside */
 .rel-card{display:flex;align-items:flex-start;gap:12px;padding:10px 14px;background:var(--bg-s);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;transition:border-color .15s}
@@ -1901,6 +1903,10 @@ const st={
   playlists:saved?.playlists||[],
   playlistDropId:null,playlistsModal:false,plRenameId:null,plRenameVal:'',
   exploreDropKey:null,
+  // Transient, not persisted — which track's "no video yet" helper menu
+  // (Mark as Played / Help us with the link) is open, same treatment as
+  // playlistDropId/exploreDropKey above.
+  trackHelpDropId:null,
   profileOpen:false,
   likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,discogsSyncing:false,
   likesGenreOpen:new Set(), // which genre sections are expanded in My Likes — transient, not persisted
@@ -2337,7 +2343,7 @@ function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))
 // once wired up.
 const RELATED_SOURCES=[
   {id:'cosine',label:'Related by Cosine.club',available:true},
-  {id:'youtube',label:'Related by YouTube',available:false},
+  {id:'youtube',label:'Related by YouTube',available:true},
 ];
 let ytMixLoading=new Set();
 let ytVerifyLoading=new Set();
@@ -3256,6 +3262,30 @@ async function fetchSharedYtMatches(trackIds){
 function pushSharedYtMatch(trackId,videoId){
   sb.from('yt_video_matches').upsert({track_id:trackId,video_id:videoId||null},{onConflict:'track_id',ignoreDuplicates:true})
     .then(({error})=>{if(error)console.warn('WaxTree: could not publish shared YouTube match:',error);});
+}
+// A human pasting a real link is strictly better information than an
+// automated verdict, including a previous confirmed no-match — unlike
+// pushSharedYtMatch's own ignoreDuplicates:true (there to let the FIRST of
+// two racing auto-match attempts win, not to protect a stale no-match from
+// ever being corrected), this one is a plain upsert so it actually
+// overwrites whatever's there.
+function pushUserSubmittedYtMatch(trackId,videoId){
+  sb.from('yt_video_matches').upsert({track_id:trackId,video_id:videoId},{onConflict:'track_id'})
+    .then(({error})=>{if(error)console.warn('WaxTree: could not publish user-submitted YouTube match:',error);});
+}
+// More permissive than getYtId() (which only handles the exact ?v= form
+// Discogs' own embedded video URIs use) — a manually pasted link is just
+// as likely to be a youtu.be/ share link, a /shorts/ link, or the bare id.
+function parseYoutubeUrlInput(input){
+  const s=(input||'').trim();
+  let m=s.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+  if(m)return m[1];
+  m=s.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+  if(m)return m[1];
+  m=s.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+  if(m)return m[1];
+  if(/^[a-zA-Z0-9_-]{11}$/.test(s))return s;
+  return null;
 }
 async function fetchSharedYtChannel(nameNorm){
   if(!nameNorm)return null;
@@ -5083,6 +5113,52 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
       setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
     }
 
+    // Only once resolveTrackVideoId (called above) has DEFINITIVELY
+    // concluded there's no video — ytMatches[track.id]===false is the real
+    // "tried and confirmed nothing" signal; !videoOk alone is also true
+    // while that same attempt is still in flight (quota check, the actual
+    // search, a scheduled retry after a burst-window/quota pause), and
+    // showing "help us find it" during that window would invite a manual
+    // submission for a track that was about to resolve on its own. Also
+    // covers a resolved-but-blacklisted id (invalidYtIds) — a confirmed
+    // match that turned out broken is just as much "needs a real link" as
+    // no match at all.
+    let helpWrap=null;
+    const noRealMatch=ytMatches[track.id]===false||(resolvedVideoId&&invalidYtIds.has(resolvedVideoId));
+    if(noRealMatch){
+      const helpKey='help-'+track.id;
+      const isHelpOpen=st.trackHelpDropId===helpKey;
+      const helpBtn=b('t-help-btn',{
+        title:'No video found — mark played manually, or help us find it',
+        onClick:e=>{e.stopPropagation();st.trackHelpDropId=isHelpOpen?null:helpKey;rr();}
+      },'▾');
+      helpWrap=d('pl-wrap',{},helpBtn);
+      if(isHelpOpen){
+        const drop=d('pl-drop',{onClick:e=>e.stopPropagation()});
+        drop.appendChild(b('pl-drop-item',{onClick:()=>{
+          st.listens[track.id]={badged:true};
+          st.trackHelpDropId=null;rr();
+        }},'✓ Mark as Played'));
+        drop.appendChild(b('pl-drop-item',{onClick:()=>{
+          st.trackHelpDropId=null;
+          const input=prompt('Paste the YouTube link for "'+track.title+'":','');
+          if(!input)return;
+          const videoId=parseYoutubeUrlInput(input);
+          if(!videoId){alert('That doesn\'t look like a valid YouTube link.');return;}
+          ytMatches[track.id]=videoId;saveYtMatches(ytMatches);
+          pushUserSubmittedYtMatch(track.id,videoId);
+          const found=findTrackAndNode(track.id);
+          if(found){
+            found.track.videoId=videoId;
+            lsSet((found.node.type==='label'?'l8:':'a7:')+found.node.discogsId,found.node.data);
+          }
+          rr();
+        }},'Help us with the link'));
+        helpWrap.appendChild(drop);
+        setTimeout(()=>{const h=()=>{st.trackHelpDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
+      }
+    }
+
     // Only on a solo release with an occasional guest (primaryArtistLabel
     // set) — the other case (genuine various-artists) already shows every
     // track's own artist via the card-level "Various Artists" subtitle
@@ -5106,6 +5182,7 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
       track.duration?s('t-dur',track.duration):null,
       b('t-like'+(liked?' liked':''),{onClick:()=>toggleLike(track.id)},liked?'♥':'♡'),
       plWrap,
+      helpWrap,
       owned?s('own-badge','In your digital library'):null,
       inDiscogsCollection(track)?s('coll-badge','In collection'):null,
       inDiscogsWantlist(track)?s('want-badge','On Discogs\' Wantlist'):null,
