@@ -1700,6 +1700,26 @@ function scheduleCloudSync(){
   if(stateSyncTimer)clearTimeout(stateSyncTimer);
   stateSyncTimer=setTimeout(pushStateToCloud,4000);
 }
+// Snapshots into user_state_history (see supabase/user_state_history.sql)
+// are append-only from the client — no update/delete policy at all — so
+// nothing a future bug does can ever destroy a past one, unlike
+// user_state's own single mutable row. Throttled to roughly once an hour
+// (persisted so the throttle survives a reload) rather than on every save,
+// since this is insurance, not the primary save path. Confirmed live
+// 2026-08-02: this table didn't exist yet when a wiped local state got
+// auto-synced over a real backup with no way back.
+const USER_STATE_SNAPSHOT_INTERVAL_MS=60*60*1000;
+function maybeSnapshotHistory(payload){
+  if(!wtSession)return;
+  const K='wt-history-snapshot-ts';
+  const last=Number(localStorage.getItem(K)||0);
+  if(Date.now()-last<USER_STATE_SNAPSHOT_INTERVAL_MS)return;
+  try{localStorage.setItem(K,String(Date.now()));}catch{}
+  sb.from('user_state_history').insert({user_id:wtSession.user.id,data:payload}).then(({error})=>{
+    if(error){console.warn('WaxTree: history snapshot failed:',error);return;}
+    sb.rpc('prune_user_state_history').then(({error:pe})=>{if(pe)console.warn('WaxTree: history prune failed:',pe);});
+  });
+}
 async function pushStateToCloud(){
   if(!wtSession)return;
   // Strip the heavy cached Discogs payload (bio, images, full tracklists) —
@@ -1708,8 +1728,26 @@ async function pushStateToCloud(){
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
   const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,avatarDataUrl:getAvatarUrl()};
   try{
+    // Refuse to silently overwrite a real backup with what looks like a
+    // wiped local state — confirmed live 2026-08-02: a localStorage-quota
+    // incident emptied a user's local tree, and the very next auto-save
+    // (this function) overwrote their real cloud backup with that empty
+    // state, permanently destroying it (user_state is a single mutable
+    // row with no history — see user_state_history.sql, added because of
+    // this). Only checked when the new count looks concerning, so this
+    // isn't an extra round trip on every normal save.
+    if(lightNodes.length<3){
+      const{data:existing}=await sb.from('user_state').select('data').eq('user_id',wtSession.user.id).maybeSingle();
+      const existingCount=existing?.data?.nodes?.length||0;
+      if(existingCount>=5){
+        console.warn('WaxTree: refusing to sync — local has only',lightNodes.length,'node(s) but the cloud backup has',existingCount,'; not overwriting a real backup with what looks like wiped local state.');
+        window.Sentry?.captureMessage instanceof Function&&Sentry.captureMessage('Blocked a suspicious cloud-state shrink',{tags:{area:'cloud-backup-guard'},extra:{newNodeCount:lightNodes.length,existingCount}});
+        return; // nothing safe to push right now — also skip the history snapshot and syncNewSchema below
+      }
+    }
     const{error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});
     if(error)throw error;
+    maybeSnapshotHistory(payload);
   }catch(e){
     console.warn('WaxTree: cloud backup failed (will retry on next change):',e);
     window.Sentry?.captureException instanceof Function&&Sentry.captureException(e,{tags:{area:'cloud-backup-push'}});
@@ -1843,8 +1881,19 @@ async function hydrateFromCloud(){
     if(!data){console.info('WaxTree: no cloud backup found yet for this account.');return;}
     const cloudTs=new Date(data.updated_at).getTime();
     const localTs=Number(localStorage.getItem(SK+':ts')||0);
-    if(cloudTs<=localTs)return; // local copy is newer or equal — nothing to recover
     const c=data.data||{};
+    // Timestamp alone isn't reliable — confirmed live 2026-08-02: a wiped
+    // local copy (localStorage quota exhaustion, or a manually cleared
+    // cache) can still carry a "newer" save timestamp than a real cloud
+    // backup from hours earlier, since the timestamp only says WHEN
+    // something was saved, not whether what was saved was actually
+    // complete. If local looks suspiciously empty next to a cloud copy
+    // that clearly has real content, restore from cloud regardless of
+    // which timestamp is newer.
+    const cloudNodeCount=c.nodes?.length||0;
+    const looksWiped=st.nodes.length<3&&cloudNodeCount>=5;
+    if(cloudTs<=localTs&&!looksWiped)return; // local copy is genuinely newer/equal and not suspiciously empty — nothing to recover
+    if(looksWiped)console.warn('WaxTree: local state looks wiped ('+st.nodes.length+' nodes) next to a real cloud backup ('+cloudNodeCount+' nodes) — restoring from cloud despite the local timestamp.');
     if(c.branches?.length)st.branches=c.branches;
     if(c.nodes)st.nodes=c.nodes.map(n=>({...n,pinned:!!n.pinned,tags:n.tags||[],loaded:false,loading:false,error:null,data:null}));
     if(c.selectedId!==undefined)st.selectedId=c.selectedId;
@@ -2676,7 +2725,23 @@ async function cosineFetch(action,params){
 // the false ones would catch, so this starts every id fresh under the
 // URL-only logic below rather than trusting any old resolved id.
 function loadCosineIdMap(){try{const r=localStorage.getItem('wt-cosine-ids-v2');return r?JSON.parse(r):{};}catch{return{};}}
-function saveCosineIdMap(m){try{localStorage.setItem('wt-cosine-ids-v2',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist Cosine track ids:',e);}}
+// Capped, not left to grow forever — a heavy listening session across many
+// tracks/nodes has no natural ceiling otherwise, and unlike the ct2:
+// cache this plain key isn't covered by enforceCacheBudget()'s own 6MB
+// eviction. Contributing to localStorage quota pressure is exactly the
+// class of bug (confirmed live 2026-08-02) that can spontaneously sign a
+// user out and, worse, sync a wiped local state over their real cloud
+// backup — see pushStateToCloud's own new guard against that. Plain
+// objects preserve string-key insertion order, so dropping the first N
+// keys reliably drops the oldest entries.
+const COSINE_ID_MAP_CAP=1000;
+function saveCosineIdMap(m){
+  const keys=Object.keys(m);
+  if(keys.length>COSINE_ID_MAP_CAP){
+    keys.slice(0,keys.length-COSINE_ID_MAP_CAP).forEach(k=>delete m[k]);
+  }
+  try{localStorage.setItem('wt-cosine-ids-v2',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist Cosine track ids:',e);}
+}
 let cosineIdMap=loadCosineIdMap();
 // Same remediation for the resolved-cards cache — a failed resolution pass
 // used to get persisted as a permanent empty array under ct2:cosinecards:*
