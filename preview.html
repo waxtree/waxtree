@@ -2714,10 +2714,15 @@ function relatedOnCooldown(key){const t=relatedRetryFailedAt[key];return!!t&&Dat
 // updateCustomSeekUI), so without this a cooldown's expiry would never
 // itself trigger another attempt and the panel would sit on "Looking up
 // track…"/"Finding related tracks…"/"Verifying…" forever. Confirmed live
-// 2026-08-01.
+// 2026-08-01. renderRelatedTracks() directly, NOT rr() — this only ever
+// needs to update #related-tracks (in the persistent #right-panel, outside
+// #root), and rr()/paint() tearing down and rebuilding the ENTIRE app
+// (including the center tracks column) every 15s just for that was making
+// the center column's own scroll position visibly jump/reset while
+// browsing — confirmed live 2026-08-01.
 function relatedMarkFailed(key){
   relatedRetryFailedAt[key]=Date.now();
-  setTimeout(rr,RELATED_RETRY_COOLDOWN_MS+200);
+  setTimeout(renderRelatedTracks,RELATED_RETRY_COOLDOWN_MS+200);
 }
 async function resolveCosineTrackId(np){
   // Fast path: this track is itself a previously-fetched Cosine pick (see
@@ -2947,7 +2952,7 @@ function renderRelatedTracks(){
             else relatedMarkFailed('ytverify:'+videoId);
           })
           .catch(e=>{console.warn('WaxTree: Related by YouTube verification failed (will retry):',e?.message||e);relatedMarkFailed('ytverify:'+videoId);})
-          .then(()=>{ytVerifyLoading.delete(videoId);rr();});
+          .then(()=>{ytVerifyLoading.delete(videoId);renderRelatedTracks();});
       }
       host.appendChild(s('rp-coming-soon','Verifying…'));
       return;
@@ -2956,7 +2961,7 @@ function renderRelatedTracks(){
       ytMixLoading.add(videoId);
       fetchYoutubeMix(videoId)
         .catch(e=>{console.warn('WaxTree: Related by YouTube failed (will retry):',e?.message||e);relatedMarkFailed('ytmix:'+videoId);return[];})
-        .then(()=>{ytMixLoading.delete(videoId);rr();});
+        .then(()=>{ytMixLoading.delete(videoId);renderRelatedTracks();});
     }
     host.appendChild(s('rp-coming-soon','Loading…'));
     return;
@@ -2970,7 +2975,7 @@ function renderRelatedTracks(){
         resolveCosineTrackId(np)
           .then(id=>{if(id===undefined)relatedMarkFailed('id:'+np.trackId);})
           .catch(()=>{relatedMarkFailed('id:'+np.trackId);})
-          .then(()=>{cosineIdLoading.delete(np.trackId);rr();});
+          .then(()=>{cosineIdLoading.delete(np.trackId);renderRelatedTracks();});
       }
       host.appendChild(s('rp-coming-soon','Looking up track…'));
       return;
@@ -3003,7 +3008,7 @@ function renderRelatedTracks(){
           else relatedMarkFailed('cards:'+cosineId);
         })
         .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed (will retry):',e?.message||e);relatedMarkFailed('cards:'+cosineId);})
-        .then(()=>{cosineResolveLoading.delete(cosineId);rr();});
+        .then(()=>{cosineResolveLoading.delete(cosineId);renderRelatedTracks();});
     }
     host.appendChild(s('rp-coming-soon','Finding related tracks…'));
     return;
