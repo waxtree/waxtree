@@ -2853,7 +2853,14 @@ function renderRelatedTracks(){
       RELATED_SOURCES.forEach(src=>{
         const checked=st.relatedTracksSource===src.id;
         const item=b('pl-drop-item'+(checked?' checked':''),{
-          disabled:!src.available,
+          // el()'s attribute-setting only skips a key when its value is
+          // null/undefined (v==null) — passing false still calls
+          // setAttribute('disabled','false'), and HTML's disabled
+          // attribute is presence-based, so ANY value (even the string
+          // "false") disables the button. YouTube being re-enabled
+          // (available:true) exposed this: disabled:false was silently
+          // still disabling it, so it could never be selected.
+          disabled:src.available?null:true,
           style:src.available?{}:{opacity:.45,cursor:'default'},
           onClick:()=>{
             if(!src.available)return;
