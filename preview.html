@@ -2468,16 +2468,25 @@ function splitCollabNames(name){
 // overlap with what was actually playing (a quieter house/minimal sound)
 // still isn't a "related" pick just because both are "Electronic_music"
 // to YouTube.
+// Returns the resolved {type,discogsId,discogsName,genreSet} object when a
+// real match is found, null when every name/candidate was genuinely
+// checked and none matched, or undefined when a Discogs call itself
+// failed (network blip, or — confirmed live 2026-08-01 — the shared,
+// always-on Discogs proxy every WaxTree user's dReq() call goes through
+// being under load) partway through, since that's NOT the same thing as
+// "checked and confirmed no match" and must never be cached as one (see
+// verifyYtMixItems/the render call site below).
 async function verifyYtCandidate(item,sourceGenreSet){
   const titleArtist=parseYtArtistFromTitle(item.title);
   const channelName=stripYtTopicSuffix(item.channelTitle);
   const rawNames=[titleArtist,channelName].filter(Boolean);
   const nameCandidates=[...new Set(rawNames.flatMap(n=>[n,...splitCollabNames(n)]))];
   const titleNorm=normalizeStr(item.title);
+  let hadError=false;
   for(const name of nameCandidates){
     const nameNorm=normalizeStr(name);
     let results;
-    try{results=await searchDiscogs(name);}catch{continue;}
+    try{results=await searchDiscogs(name);}catch{hadError=true;continue;}
     for(const type of['artist','label']){
       // Discogs appends " (2)", " (3)" etc. to disambiguate same-named
       // artists/labels — that's Discogs' own bookkeeping, not part of the
@@ -2487,44 +2496,60 @@ async function verifyYtCandidate(item,sourceGenreSet){
       // right person).
       const matches=results.filter(r=>r.type===type&&normalizeStr((r.title||'').replace(/\s*\(\d+\)$/,''))===nameNorm);
       for(const c of matches){
+        const path=type==='label'?'/labels/'+c.id+'/releases':'/artists/'+c.id+'/releases';
+        let rd;
+        try{rd=await dReq(path,{per_page:'100'});}catch{hadError=true;continue;}
+        const hitRelease=(rd.releases||[]).find(r=>{
+          const rt=normalizeStr(r.title||'');
+          return rt&&titleNorm&&(titleNorm.includes(rt)||rt.includes(titleNorm));
+        });
+        if(!hitRelease)continue;
+        let genreSet=[];
         try{
-          const path=type==='label'?'/labels/'+c.id+'/releases':'/artists/'+c.id+'/releases';
-          const rd=await dReq(path,{per_page:'100'});
-          const hitRelease=(rd.releases||[]).find(r=>{
-            const rt=normalizeStr(r.title||'');
-            return rt&&titleNorm&&(titleNorm.includes(rt)||rt.includes(titleNorm));
-          });
-          if(!hitRelease)continue;
-          let genreSet=[];
-          try{
-            const relFull=await dReq('/releases/'+hitRelease.id);
-            genreSet=[...(relFull.styles||[]),...(relFull.genres||[])].map(normalizeStr);
-          }catch{}
-          if(sourceGenreSet?.size&&genreSet.length){
-            if(!genreSet.some(g=>sourceGenreSet.has(g)))continue; // real match, wrong scene — not "related"
-          }
-          return{type,discogsId:c.id,discogsName:c.title,genreSet};
-        }catch{}
+          const relFull=await dReq('/releases/'+hitRelease.id);
+          genreSet=[...(relFull.styles||[]),...(relFull.genres||[])].map(normalizeStr);
+        }catch{hadError=true;} // missing genre data doesn't invalidate a real name+release match, just skips the genre gate below
+        if(sourceGenreSet?.size&&genreSet.length){
+          if(!genreSet.some(g=>sourceGenreSet.has(g)))continue; // real match, wrong scene — not "related"
+        }
+        return{type,discogsId:c.id,discogsName:c.title,genreSet};
       }
     }
   }
-  return null;
+  return hadError?undefined:null;
 }
 // Small concurrent batches, not all 20 at once — dReq already throttles
 // itself (45 req/60s) but there's no reason to open that many requests
 // simultaneously against the shared Discogs proxy just because we can.
 const YT_VERIFY_BATCH=4;
+// Stop once there are enough verified picks, same reasoning as Cosine's
+// own COSINE_TARGET_CARDS — each candidate here can cost several Discogs
+// calls (a name search, a full discography fetch, a release-detail fetch,
+// sometimes repeated across multiple name candidates), well more than
+// Cosine's one-call-per-item, so exhausting all 20 Mix candidates every
+// time is both slow and more likely to trip the shared-proxy-load issue
+// this whole fix is about.
+const YT_VERIFY_TARGET=10;
+// Returns {items,complete}. complete:false means at least one candidate's
+// verification hit a real Discogs-call error (not just "couldn't verify")
+// — the caller must NOT persist that result as the final answer, the same
+// discipline resolveCosineCards uses, or a transient failure permanently
+// poisons this video's related tracks as empty even though most of the
+// Mix could very well be genuinely verifiable on a clean run.
 async function verifyYtMixItems(items,sourceGenreSet){
   const out=[];
-  for(let i=0;i<items.length;i+=YT_VERIFY_BATCH){
+  let complete=true;
+  for(let i=0;i<items.length&&out.length<YT_VERIFY_TARGET;i+=YT_VERIFY_BATCH){
     const batch=items.slice(i,i+YT_VERIFY_BATCH);
-    const resolved=await Promise.all(batch.map(async it=>{
-      const r=await verifyYtCandidate(it,sourceGenreSet);
-      return r?{...it,resolved:r}:null;
-    }));
-    out.push(...resolved.filter(Boolean));
+    const settled=await Promise.allSettled(batch.map(async it=>({it,r:await verifyYtCandidate(it,sourceGenreSet)})));
+    settled.forEach(s=>{
+      if(s.status!=='fulfilled'){complete=false;console.warn('WaxTree: YouTube Mix verification failed (will retry):',s.reason?.message||s.reason);return;}
+      const{it,r}=s.value;
+      if(r===undefined){complete=false;return;} // inconclusive — a real dReq error, not a checked no-match
+      if(r)out.push({...it,resolved:r});
+    });
   }
-  return out;
+  return{items:out,complete};
 }
 // Shared by every Related Tracks source (YouTube Mix picks, Cosine.club
 // picks, anything added later) — each source normalizes its own item shape
@@ -2673,22 +2698,26 @@ let cosineIdMap=loadCosineIdMap();
   try{localStorage.setItem(PURGE_KEY,'1');}catch{}
 })();
 // Spacing out retries after a failure, not a permanent cache — same
-// concurrent-request burst that can trip a transient failure would also
-// immediately retrigger it on the very next render if nothing paced that
-// out, since resolveCosineTrackId/resolveCosineCards purposely leave a
-// failed lookup unresolved (see above) so it's retried rather than stuck.
-const COSINE_RETRY_COOLDOWN_MS=15000;
-let cosineRetryFailedAt={};
-function cosineOnCooldown(key){const t=cosineRetryFailedAt[key];return!!t&&Date.now()-t<COSINE_RETRY_COOLDOWN_MS;}
+// concurrent-request burst (or just the shared, always-on Discogs proxy
+// being under load from every other WaxTree user at once — see dReq(),
+// which never actually uses a personal per-user token) that can trip a
+// transient failure would also immediately retrigger it on the very next
+// render if nothing paced that out. Shared by every Related Tracks source
+// (Cosine's id/card resolution, YouTube Mix's own verification below) —
+// same retry-worthy-failure-vs-genuine-no-match problem in both.
+const RELATED_RETRY_COOLDOWN_MS=15000;
+let relatedRetryFailedAt={};
+function relatedOnCooldown(key){const t=relatedRetryFailedAt[key];return!!t&&Date.now()-t<RELATED_RETRY_COOLDOWN_MS;}
 // Marking a failure also has to actually WAKE the panel up to retry —
 // during idle playback nothing else calls rr() (the seek bar updates via
 // its own lightweight DOM write, not a full re-render — see
 // updateCustomSeekUI), so without this a cooldown's expiry would never
 // itself trigger another attempt and the panel would sit on "Looking up
-// track…"/"Finding related tracks…" forever. Confirmed live 2026-08-01.
-function cosineMarkFailed(key){
-  cosineRetryFailedAt[key]=Date.now();
-  setTimeout(rr,COSINE_RETRY_COOLDOWN_MS+200);
+// track…"/"Finding related tracks…"/"Verifying…" forever. Confirmed live
+// 2026-08-01.
+function relatedMarkFailed(key){
+  relatedRetryFailedAt[key]=Date.now();
+  setTimeout(rr,RELATED_RETRY_COOLDOWN_MS+200);
 }
 async function resolveCosineTrackId(np){
   // Fast path: this track is itself a previously-fetched Cosine pick (see
@@ -2889,11 +2918,13 @@ function renderRelatedTracks(){
       // fetch and only computed once per source video, not on every
       // render.
       // Versioned key — bumped whenever verifyYtCandidate's own logic
-      // changes (collab-name splitting, the genre cross-check) so a
-      // previously-cached "only 3 verified" result gets thrown away and
-      // re-checked with the improved logic, instead of sitting there for
-      // its full 30-day TTL.
-      const verifyKey='ytver2:'+videoId;
+      // changes (collab-name splitting, the genre cross-check, and now
+      // v3: a Discogs-call error during verification no longer gets
+      // cached as a confirmed empty result — see verifyYtMixItems above)
+      // so a previously-cached bad result gets thrown away and re-checked
+      // with the improved logic, instead of sitting there for its full
+      // 30-day TTL.
+      const verifyKey='ytver3:'+videoId;
       const verified=lsGet(verifyKey);
       if(verified){
         if(!verified.length){host.appendChild(s('rp-coming-soon','No verified related tracks found'));return;}
@@ -2903,21 +2934,28 @@ function renderRelatedTracks(){
         })));
         return;
       }
-      if(!ytVerifyLoading.has(videoId)){
+      if(!ytVerifyLoading.has(videoId)&&!relatedOnCooldown('ytverify:'+videoId)){
         ytVerifyLoading.add(videoId);
         const items=filterYtMixItems(cached,videoId,st.nowPlaying.artistName);
         verifyYtMixItems(items,getSourceGenreSet())
-          .then(v=>lsSet(verifyKey,v))
-          .catch(e=>{console.warn('WaxTree: Related by YouTube verification failed:',e?.message||e);lsSet(verifyKey,[]);})
+          .then(({items,complete})=>{
+            // Only a CLEAN pass (no Discogs-call errors along the way)
+            // gets persisted — a partial/failed pass just cools down and
+            // retries next render instead of locking in an incomplete
+            // answer as if it were a confirmed "nothing verified".
+            if(complete)lsSet(verifyKey,items);
+            else relatedMarkFailed('ytverify:'+videoId);
+          })
+          .catch(e=>{console.warn('WaxTree: Related by YouTube verification failed (will retry):',e?.message||e);relatedMarkFailed('ytverify:'+videoId);})
           .then(()=>{ytVerifyLoading.delete(videoId);rr();});
       }
       host.appendChild(s('rp-coming-soon','Verifying…'));
       return;
     }
-    if(!ytMixLoading.has(videoId)){
+    if(!ytMixLoading.has(videoId)&&!relatedOnCooldown('ytmix:'+videoId)){
       ytMixLoading.add(videoId);
       fetchYoutubeMix(videoId)
-        .catch(e=>{console.warn('WaxTree: Related by YouTube failed:',e?.message||e);return[];})
+        .catch(e=>{console.warn('WaxTree: Related by YouTube failed (will retry):',e?.message||e);relatedMarkFailed('ytmix:'+videoId);return[];})
         .then(()=>{ytMixLoading.delete(videoId);rr();});
     }
     host.appendChild(s('rp-coming-soon','Loading…'));
@@ -2927,11 +2965,11 @@ function renderRelatedTracks(){
     const np=st.nowPlaying;
     const cachedId=cosineIdMap[np.trackId];
     if(cachedId===undefined){
-      if(!cosineIdLoading.has(np.trackId)&&!cosineOnCooldown('id:'+np.trackId)){
+      if(!cosineIdLoading.has(np.trackId)&&!relatedOnCooldown('id:'+np.trackId)){
         cosineIdLoading.add(np.trackId);
         resolveCosineTrackId(np)
-          .then(id=>{if(id===undefined)cosineMarkFailed('id:'+np.trackId);})
-          .catch(()=>{cosineMarkFailed('id:'+np.trackId);})
+          .then(id=>{if(id===undefined)relatedMarkFailed('id:'+np.trackId);})
+          .catch(()=>{relatedMarkFailed('id:'+np.trackId);})
           .then(()=>{cosineIdLoading.delete(np.trackId);rr();});
       }
       host.appendChild(s('rp-coming-soon','Looking up track…'));
@@ -2953,7 +2991,7 @@ function renderRelatedTracks(){
       })));
       return;
     }
-    if(!cosineResolveLoading.has(cosineId)&&!cosineOnCooldown('cards:'+cosineId)){
+    if(!cosineResolveLoading.has(cosineId)&&!relatedOnCooldown('cards:'+cosineId)){
       cosineResolveLoading.add(cosineId);
       fetchCosineSimilar(cosineId)
         .then(items=>resolveCosineCards(filterCosineItems(items,np)))
@@ -2962,9 +3000,9 @@ function renderRelatedTracks(){
           // persisted — a partial/failed pass just cools down and retries
           // next render instead of locking in an incomplete answer.
           if(complete)lsSet(cardsKey,cards);
-          else cosineMarkFailed('cards:'+cosineId);
+          else relatedMarkFailed('cards:'+cosineId);
         })
-        .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed (will retry):',e?.message||e);cosineMarkFailed('cards:'+cosineId);})
+        .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed (will retry):',e?.message||e);relatedMarkFailed('cards:'+cosineId);})
         .then(()=>{cosineResolveLoading.delete(cosineId);rr();});
     }
     host.appendChild(s('rp-coming-soon','Finding related tracks…'));
