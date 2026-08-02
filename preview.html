@@ -2341,7 +2341,6 @@ const RELATED_SOURCES=[
 ];
 let ytMixLoading=new Set();
 let ytVerifyLoading=new Set();
-function relatedSourceLabel(id){return RELATED_SOURCES.find(s=>s.id===id)?.label||id;}
 // YouTube's own auto-generated "Topic" channels for a music act are named
 // "<Artist> - Topic" — stripping that suffix turns channelTitle back into
 // a real, searchable artist/label name. A personal upload channel (not a
@@ -2832,7 +2831,11 @@ function renderRelatedTracks(){
   if(!host)return;
   host.innerHTML='';
   const hd=d('rp-corr-hd rp-hd-row',{});
-  const srcBtn=b('rp-src-btn',{onClick:e=>{e.stopPropagation();st.relatedSourceMenuOpen=!st.relatedSourceMenuOpen;rr();}},relatedSourceLabel(st.relatedTracksSource)+' ▾');
+  // Header just says "Related Tracks" regardless of which source is
+  // selected — RELATED_SOURCES' own labels (e.g. "Related by Cosine.club")
+  // still show up as the individual options inside the dropdown below, so
+  // the source is still identifiable there, just not branded in the header.
+  const srcBtn=b('rp-src-btn',{onClick:e=>{e.stopPropagation();st.relatedSourceMenuOpen=!st.relatedSourceMenuOpen;rr();}},'Related Tracks ▾');
   hd.appendChild(srcBtn);
   host.appendChild(hd);
   if(st.relatedSourceMenuOpen){
