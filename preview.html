@@ -314,9 +314,14 @@ input,select{font:inherit;color:inherit}
 .rel-mid{flex:0 1 200px;width:200px;min-width:0;padding-top:2px}
 .rel-title{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rel-art-col{display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0}
-.rel-listened-icon{background:none;border:none;padding:0;cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;color:var(--text-f);transition:color .15s,transform .12s}
-.rel-listened-icon:hover{transform:scale(1.2);color:var(--text-m)}
-.rel-listened-icon.marked{color:var(--accent)}
+/* Same checkmark language as a track's own '✓ played' badge (see .t-badge)
+   — a plain outline check when available, filling in to the identical
+   green once marked, so it reads as "played" at a glance instead of an
+   unfamiliar shape. */
+.rel-listened-icon{width:18px;height:18px;display:flex;align-items:center;justify-content:center;background:none;border:1.5px solid var(--border);border-radius:50%;padding:0;cursor:pointer;font-size:11px;line-height:1;flex-shrink:0;color:var(--text-f);transition:color .15s,border-color .15s,background .15s,transform .12s}
+.rel-listened-icon:hover{transform:scale(1.15);border-color:var(--accent);color:var(--accent)}
+.rel-listened-icon.marked{background:var(--accent);border-color:var(--accent);color:#fff}
+.rel-listened-icon.marked:hover{color:#fff;opacity:.85}
 /* Artisti correlati */
 .corr-section{margin-bottom:18px;padding:12px 14px;background:var(--bg-e);border-radius:10px;border:1px solid var(--border)}
 .corr-lbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-f);margin-bottom:8px;display:block}
@@ -4958,6 +4963,9 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   // title sits directly above the first track row, and a clickable icon
   // there read as if it belonged to that track instead of the release as
   // a whole (confirmed live) — the artwork is unambiguously release-level.
+  // Same checkmark used for '✓ played' on each track row below, just as a
+  // small round icon instead of a text badge, so it reads as "played" on
+  // sight instead of an unfamiliar shape (an earlier ◯/● pair didn't).
   // Opt-in: reaching "all played" only reveals the icon, it doesn't move
   // the release on its own.
   const allPlayed=tracks.length>0&&tracks.every(t=>st.listens[t.id]?.badged);
@@ -4966,11 +4974,11 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
   if(isListened){
     listenedIcon=b('rel-listened-icon marked',{title:'Click to remove from Already Listened',onClick:()=>{
       st.alreadyListened=st.alreadyListened.filter(k=>k!==group.key);rr();
-    }},'●');
+    }},'✓');
   }else if(allPlayed){
     listenedIcon=b('rel-listened-icon',{title:'Click to move to Already Listened',onClick:()=>{
       st.alreadyListened=[...st.alreadyListened,group.key];rr();
-    }},'◯');
+    }},'✓');
   }
   const artCol=d('rel-art-col',{},art,listenedIcon);
 

@@ -70,6 +70,11 @@ const root=document.getElementById('root');
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmtDate(s){if(!s)return '—';return new Date(s).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});}
+// Last active moves on real usage (state syncs, tracked events), not just
+// a login — showing the time alongside the date matters more here than
+// for Joined, since "today" alone doesn't say whether that was 5 minutes
+// or 11 hours ago.
+function fmtDateTime(s){if(!s)return '—';const d=new Date(s);return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}
 
 async function authedFetch(path,opts={}){
   const {data:{session}}=await sb.auth.getSession();
@@ -134,7 +139,7 @@ function userRow(u){
       <td><button class="expand-btn" data-action="expand">▸</button></td>
       <td class="email">${esc(u.email)}</td>
       <td>${fmtDate(u.created_at)}</td>
-      <td>${fmtDate(u.last_sign_in_at)}</td>
+      <td>${fmtDateTime(u.last_active)}</td>
       <td>${u.library_track_count??'—'}</td>
       <td>${u.search_count??0}</td>
       <td>${u.nodes_count??0}</td>
@@ -152,7 +157,7 @@ function renderUsers(users){
   return `
     <section>
       <h2>Users</h2>
-      <table><thead><tr><th></th><th>Email</th><th>Joined</th><th>Last sign-in</th><th>Library tracks</th><th>Searches</th><th>Nodes opened</th><th>Tier</th><th></th></tr></thead>
+      <table><thead><tr><th></th><th>Email</th><th>Joined</th><th>Last active</th><th>Library tracks</th><th>Searches</th><th>Nodes opened</th><th>Tier</th><th></th></tr></thead>
       <tbody>${users.map(userRow).join('')}</tbody></table>
     </section>
   `;

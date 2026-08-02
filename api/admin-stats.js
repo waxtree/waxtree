@@ -31,8 +31,6 @@ export default async function handler(req, res) {
     const now = Date.now()
     const cutoff7d = now - 7 * 24 * 60 * 60 * 1000
     const cutoff30d = now - 30 * 24 * 60 * 60 * 1000
-    const active7d = users.filter(u => u.last_sign_in_at && new Date(u.last_sign_in_at).getTime() >= cutoff7d).length
-    const active30d = users.filter(u => u.last_sign_in_at && new Date(u.last_sign_in_at).getTime() >= cutoff30d).length
 
     // Signups per day for the last 30 days, zero-filled so a quiet day
     // still shows as a real 0 bar rather than being absent entirely.
@@ -48,16 +46,18 @@ export default async function handler(req, res) {
     // digging_events is small enough today (see supabase/digging_events.sql's
     // own note) to just fetch and count by type in JS. Move this to a
     // Postgres view/RPC once it's grown past a few thousand rows.
-    const eventsRes = await sbAdmin('/rest/v1/digging_events?select=event,payload,created_at&order=created_at.desc&limit=5000')
+    const eventsRes = await sbAdmin('/rest/v1/digging_events?select=user_id,event,payload,created_at&order=created_at.desc&limit=5000')
     const events = eventsRes.ok ? await eventsRes.json() : []
     const eventsByType = {}
     let events7d = 0
     // 'play' events carry the real Discogs genre/style string of whatever
     // was playing (see preview.html's tryBadge -> logEvent('play',...)).
     const genreCounts = {}
+    const lastEventById = {}
     for (const e of events) {
       eventsByType[e.event] = (eventsByType[e.event] || 0) + 1
       if (new Date(e.created_at).getTime() >= cutoff7d) events7d++
+      if (!lastEventById[e.user_id]) lastEventById[e.user_id] = e.created_at // first hit per user is the newest — already ordered desc
       if (e.event === 'play' && e.payload?.genre) {
         String(e.payload.genre).split('·').forEach(g => {
           g = g.trim()
@@ -66,6 +66,22 @@ export default async function handler(req, res) {
       }
     }
     const topGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([genre, count]) => ({ genre, count }))
+
+    // "Active" here means "Last active" per admin-users.js's own definition
+    // (max of last real sign-in, last state sync, last tracked event) — a
+    // user who's stayed signed in for weeks without a fresh login shouldn't
+    // read as inactive just because GoTrue's own last_sign_in_at is stale.
+    const stateRes = await sbAdmin('/rest/v1/user_state?select=user_id,updated_at')
+    const states = stateRes.ok ? await stateRes.json() : []
+    const stateUpdatedById = Object.fromEntries(states.map(s => [s.user_id, s.updated_at]))
+    let active7d = 0, active30d = 0
+    for (const u of users) {
+      const candidates = [u.last_sign_in_at, stateUpdatedById[u.id], lastEventById[u.id]].filter(Boolean)
+      if (!candidates.length) continue
+      const lastActiveMs = Math.max(...candidates.map(c => new Date(c).getTime()))
+      if (lastActiveMs >= cutoff7d) active7d++
+      if (lastActiveMs >= cutoff30d) active30d++
+    }
 
     const [discogsCache, ytMatched, ytNoMatch, ytChannels, sessions, trees, nodes] = await Promise.all([
       countRows('discogs_node_cache'),
