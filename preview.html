@@ -3784,12 +3784,25 @@ function buildYtHdr(np){
   // picks (see discoveredTracks) so genre/year/label are available here too.
   const fullTrack=findTrack(np.trackId);
   // Explore prefers the node the track was actually opened from (matches
-  // what selecting that node from the sidebar would show) and only falls
-  // back to the track's own artist/label id — the only thing available at
-  // all for a Related Tracks pick, which never belonged to an open node.
+  // what selecting that node from the sidebar would show), then the
+  // track's own artist/label id (a real tree track has trackArtistId/
+  // labelId directly). A Related Tracks pick (Cosine or YouTube Mix) has
+  // neither — it never belonged to an open node, and findTrack() resolves
+  // it via discoveredTracks, whose shape is {..., resolved:{type,
+  // discogsId,discogsName}} instead (see buildRelatedCard) — the same
+  // verified artist/label each pick's own per-card Explore button already
+  // uses. Without this fallback the mini player's Explore button silently
+  // disappeared for exactly the case it matters most: exploring further
+  // from whatever a Related Tracks pick turned out to be. Confirmed live
+  // 2026-08-03.
   const foundNode=findTrackAndNode(np.trackId)?.node;
-  const exploreArtist=foundNode?.type==='artist'?{id:foundNode.discogsId,name:foundNode.name}:(fullTrack?.trackArtistId?{id:fullTrack.trackArtistId,name:np.artistName}:null);
-  const exploreLabel=foundNode?.type==='label'?{id:foundNode.discogsId,name:foundNode.name}:(fullTrack?.labelId?{id:fullTrack.labelId,name:fullTrack.label}:null);
+  const dtResolved=discoveredTracks[np.trackId]?.resolved;
+  const exploreArtist=foundNode?.type==='artist'?{id:foundNode.discogsId,name:foundNode.name}
+    :(fullTrack?.trackArtistId?{id:fullTrack.trackArtistId,name:np.artistName}
+    :(dtResolved?.type==='artist'?{id:dtResolved.discogsId,name:dtResolved.discogsName}:null));
+  const exploreLabel=foundNode?.type==='label'?{id:foundNode.discogsId,name:foundNode.name}
+    :(fullTrack?.labelId?{id:fullTrack.labelId,name:fullTrack.label}
+    :(dtResolved?.type==='label'?{id:dtResolved.discogsId,name:dtResolved.discogsName}:null));
   const liked=!!st.likes[np.trackId];
   const likeBtn=b('t-like'+(liked?' liked':''),{title:'Like',onClick:()=>toggleLike(np.trackId)},liked?'♥':'♡');
   const trackForQueue={id:np.trackId,title:np.title,artistName:np.artistName,videoId:np.videoId,year:fullTrack?.year,label:fullTrack?.label,genre:fullTrack?.genre,thumbUrl:fullTrack?.thumbUrl};
