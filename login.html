@@ -189,6 +189,33 @@ sb.auth.getSession().then(({data:{session}})=>{
   if(session)window.location.href=getRedirectTarget();
 });
 
+// Confirmed live 2026-08-03: a full-to-quota localStorage origin makes
+// Supabase's own session-token write fail silently right when
+// signInWithPassword() runs, producing an unrecoverable sign-in → bounced-
+// to-login loop with no error on either side (login.html sees a resolved
+// promise, preview.html's fresh JS context just never finds a session).
+// preview.html's own ct2: tree cache is the dominant, purely-disposable
+// consumer of that space (safely regenerable from Discogs/the shared cache
+// on next load) — clearing it here, right before the write that actually
+// needs the room, is cheap insurance this page can do on its own without
+// duplicating preview.html's cache internals.
+function freeRoomForSessionWrite(){
+  try{
+    let total=0;
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      total+=k.length+(localStorage.getItem(k)||'').length;
+    }
+    if(total<3*1024*1024)return; // plenty of headroom already
+    const toRemove=[];
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith('ct2:'))toRemove.push(k);
+    }
+    toRemove.forEach(k=>localStorage.removeItem(k));
+  }catch(e){/* best effort — never block sign-in over this */}
+}
+
 // Eye toggle
 const eyeBtn=document.getElementById('eyeBtn');
 const passInput=document.getElementById('password');
@@ -220,6 +247,8 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
   else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){showFieldErr('emailErr','Invalid email');ok=false;}
   if(!pass){showFieldErr('passErr','Enter your password');ok=false;}
   if(!ok)return;
+
+  freeRoomForSessionWrite();
 
   const btn=document.getElementById('submitBtn');
   btn.disabled=true;

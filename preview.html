@@ -4185,26 +4185,39 @@ function purgeExpiredCache(){
 // with 111 Discogs releases already approaches that on its own): it was
 // evicting entries that didn't need to go, just to be safe, which produced
 // the exact "reload right after login" symptom this exists to prevent, for
-// a different reason than the original bug. Chrome's real per-origin quota
-// is commonly 10MB+; 6MB leaves solid headroom for Supabase's session
-// token and everything else while giving a real tree far more room.
-const CT2_BUDGET_BYTES=6*1024*1024;
+// a different reason than the original bug. Raised to a flat 6MB on the
+// assumption Chrome's real per-origin quota is commonly 10MB+ — WRONG,
+// confirmed live 2026-08-03: a user's real browser threw QuotaExceededError
+// on a plain 10KB write with total origin usage sitting at only 5.00MB, and
+// that failure silently ate their Supabase session-token write, producing
+// an unrecoverable sign-in → bounced-to-login loop. A flat guess can't be
+// safe for every browser/profile/disk-space combination, so this is now
+// dynamic: ct2:'s budget is whatever's left of ORIGIN_SAFE_TOTAL_BYTES
+// after accounting for everything else already on this origin (Discogs
+// mirrors, YT match cache, avatar, Supabase's own session key). Still
+// floors at a minimum so one oversized "other" key can't zero out the
+// tree cache entirely.
+const ORIGIN_SAFE_TOTAL_BYTES=4*1024*1024; // stay under the confirmed ~5MB real-world failure point
+const CT2_BUDGET_MIN_BYTES=1*1024*1024;
+const CT2_BUDGET_MAX_BYTES=6*1024*1024;
 function enforceCacheBudget(protectKey){
   const entries=[];
-  let total=0;
+  let total=0,otherBytes=0;
   for(let i=0;i<localStorage.length;i++){
     const k=localStorage.key(i);
-    if(!k||!k.startsWith('ct2:'))continue;
+    if(!k)continue;
     const v=localStorage.getItem(k)||'';
     const size=k.length+v.length;
+    if(!k.startsWith('ct2:')){otherBytes+=size;continue;}
     total+=size;
     let t=0;try{t=JSON.parse(v).t||0;}catch{}
     entries.push({k,size,t});
   }
-  if(total<=CT2_BUDGET_BYTES)return;
+  const ct2Budget=Math.max(CT2_BUDGET_MIN_BYTES,Math.min(CT2_BUDGET_MAX_BYTES,ORIGIN_SAFE_TOTAL_BYTES-otherBytes));
+  if(total<=ct2Budget)return;
   entries.sort((a,b)=>a.t-b.t); // oldest first
   for(const e of entries){
-    if(total<=CT2_BUDGET_BYTES)break;
+    if(total<=ct2Budget)break;
     // Evicting the node the user is about to land on defeats the point —
     // they'd hit the exact "reload right after login" churn this exists
     // to prevent, just for a different reason (budget instead of quota).
