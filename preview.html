@@ -5228,19 +5228,21 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
       setTimeout(()=>{const h=()=>{st.playlistDropId=null;rr();document.removeEventListener('click',h);};document.addEventListener('click',h);},0);
     }
 
-    // Only once resolveTrackVideoId (called above) has DEFINITIVELY
-    // concluded there's no video — ytMatches[track.id]===false is the real
-    // "tried and confirmed nothing" signal; !videoOk alone is also true
-    // while that same attempt is still in flight (quota check, the actual
-    // search, a scheduled retry after a burst-window/quota pause), and
-    // showing "help us find it" during that window would invite a manual
-    // submission for a track that was about to resolve on its own. Also
-    // covers a resolved-but-blacklisted id (invalidYtIds) — a confirmed
-    // match that turned out broken is just as much "needs a real link" as
-    // no match at all.
+    // Whenever the track has no playable video right now — !videoOk, the
+    // same condition the play button itself uses. Originally gated on
+    // ytMatches[track.id]===false specifically (a DEFINITIVE "tried and
+    // confirmed nothing"), to avoid inviting a manual submission while a
+    // real attempt might still be in flight — but with YouTube's own
+    // search quota this tight (100/day) and the retry-burst scheduling
+    // that can leave a track "pending" for a long time, that definitive
+    // verdict often never arrives at all, so the menu could stay hidden
+    // indefinitely for tracks that genuinely need it. Confirmed live
+    // 2026-08-03 the user wants it available any time the row's own play
+    // button isn't, full stop — showing it a little early (right as an
+    // attempt is still resolving) is a much smaller cost than it silently
+    // never showing up.
     let helpWrap=null;
-    const noRealMatch=ytMatches[track.id]===false||(resolvedVideoId&&invalidYtIds.has(resolvedVideoId));
-    if(noRealMatch){
+    if(!videoOk){
       const helpKey='help-'+track.id;
       const isHelpOpen=st.trackHelpDropId===helpKey;
       const helpBtn=b('t-help-btn',{
