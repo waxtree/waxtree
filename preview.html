@@ -2845,10 +2845,20 @@ async function fetchCosineSimilar(cosineId){
 // the pick. Anything missing the fields a card actually needs (a playable
 // video, a real Discogs release to Explore to) is dropped before spending
 // a Discogs call resolving it.
+//
+// COSINE_MIN_SCORE: Cosine's own similarity score (0-1) on each result was
+// never actually checked before — confirmed live 2026-08-03 via their
+// OpenAPI spec that this field exists and is meant to be used as a real
+// confidence signal, not just metadata. A weak match (unrelated genre/vibe
+// slipping through, e.g. the Brazilian-jazz-under-a-techno-track case
+// reported live) is exactly the kind of thing a low score should catch
+// before it ever reaches Discogs verification, let alone the user.
+const COSINE_MIN_SCORE=0.75;
 function filterCosineItems(items,np){
   const sourceArtistNorm=normalizeStr(np?.artistName||'');
   return items.filter(it=>{
     if(!it.video_id||!it.external_link)return false;
+    if(typeof it.score==='number'&&it.score<COSINE_MIN_SCORE)return false;
     if(!sourceArtistNorm)return true;
     return normalizeStr(it.artist||'')!==sourceArtistNorm;
   });

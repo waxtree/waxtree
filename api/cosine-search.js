@@ -37,7 +37,15 @@ export default async function handler(req, res) {
     }
     if (action === 'similar') {
       if (!params.id) return res.status(400).json({ error: 'Missing id' })
-      const data = await cosineFetch(`/tracks/${encodeURIComponent(params.id)}/similar`, { limit: params.limit || 20 })
+      // min_have (minimum Discogs collectors) biases toward releases that
+      // are genuinely cataloged and owned by real diggers, not obscure or
+      // digital-only stragglers — matches WaxTree's own vinyl-first focus.
+      // Defaults to 3 (documented in Cosine's OpenAPI spec but unused
+      // until now) rather than 0/unset, but the client can override.
+      const data = await cosineFetch(`/tracks/${encodeURIComponent(params.id)}/similar`, {
+        limit: params.limit || 20,
+        min_have: params.min_have ?? 3,
+      })
       return res.status(200).json(data)
     }
     if (action === 'search') {
