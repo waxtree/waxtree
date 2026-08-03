@@ -233,10 +233,34 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
       ?'Incorrect email or password. Try again.'
       :error.message;
     showFormErr(msg);
-  } else {
-    localStorage.setItem('wt-theme',html.dataset.theme);
-    window.location.href=getRedirectTarget();
+    return;
   }
+
+  localStorage.setItem('wt-theme',html.dataset.theme);
+
+  // signInWithPassword() resolving does NOT guarantee the session actually
+  // landed in localStorage — confirmed live 2026-08-03: the next page
+  // (preview.html, a fresh JS context with no in-memory session) reads
+  // getSession() straight from storage on boot, found nothing, and bounced
+  // straight back here, producing an instant "sign in → sign out" loop
+  // with zero errors anywhere (a failed localStorage write doesn't throw
+  // in a way either side surfaces). Re-checking getSession() here — same
+  // storage the next page will read — catches that gap before handing off,
+  // with a couple of short retries in case it's just a persistence-timing
+  // race rather than a hard failure (e.g. quota).
+  let verified=null;
+  for(let attempt=0;attempt<3 && !verified;attempt++){
+    if(attempt>0)await new Promise(r=>setTimeout(r,250));
+    const{data}=await sb.auth.getSession();
+    verified=data.session;
+  }
+  if(!verified){
+    btn.disabled=false;
+    btn.textContent='Sign in';
+    showFormErr('Signed in, but your browser couldn\'t save the session (storage may be full). Try clearing some space or a different browser.');
+    return;
+  }
+  window.location.href=getRedirectTarget();
 });
 </script>
 </body>

@@ -6997,7 +6997,19 @@ purgeExpiredCache();
     '(ct2:',(ct2Bytes/1024/1024).toFixed(2),'MB + other',(otherBytes/1024/1024).toFixed(2),'MB) | biggest other keys:',topOther);
 }
 
-sb.auth.getSession().then(({data:{session}})=>{
+(async()=>{
+  // A single null getSession() here isn't proof there's no session — confirmed
+  // live 2026-08-03: right after a successful sign-in, a fresh page load can
+  // read localStorage a beat before the just-created session has actually
+  // landed there, producing an instant sign-in → bounced-back-to-login loop
+  // with no error anywhere. login.html now verifies before handing off (see
+  // its own comment), but this retries independently too, since preview.html
+  // can also be reached other ways (bookmark, back button).
+  let session=(await sb.auth.getSession()).data.session;
+  for(let attempt=0;attempt<3 && !session;attempt++){
+    await new Promise(r=>setTimeout(r,250));
+    session=(await sb.auth.getSession()).data.session;
+  }
   if(!session){window.location.href='login.html';return;}
   wtSession=session;
   st.searchCount=wtSession.user.user_metadata?.search_count||0;
@@ -7042,7 +7054,7 @@ sb.auth.getSession().then(({data:{session}})=>{
     const totalArtistsNow=new Set(st.ownedTracks.map(t=>t.artistNorm).filter(Boolean)).size;
     if(checkedNow.size>0&&checkedNow.size<totalArtistsNow)matchLibraryWithDiscogs();
   }
-});
+})();
 
 </script>
 </body>
