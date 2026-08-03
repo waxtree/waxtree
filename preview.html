@@ -6546,7 +6546,14 @@ function buildApp(){
   if(st.heroesModal){
     const heroes=computeDiggingHeroes(true);
     const overlay=d('overlay',{onClick:()=>{st.heroesModal=false;rr();}});
-    const modal=d('modal heroes-modal',{onClick:e=>e.stopPropagation()});
+    // data-sc: this modal scrolls internally (see .heroes-modal's own
+    // overflow-y:auto) — without this key, paint()'s scroll-restore logic
+    // (which only tracks elements marked with data-sc, same as .content/
+    // .sb-nodes) has nothing to preserve, so clicking Follow on any row
+    // (which triggers a full rr()/paint() rebuild) snapped the whole list
+    // back to the top instead of staying where the user was scrolled to.
+    // Confirmed live 2026-08-03.
+    const modal=d('modal heroes-modal',{onClick:e=>e.stopPropagation(),'data-sc':'heroes'});
     modal.appendChild(d('modal-row',{style:{justifyContent:'space-between',marginBottom:'4px'}},
       el('h2',{cls:'modal-title'},'🌲 Follow Your Heroes'),
       b('btn-sec',{onClick:()=>{st.heroesModal=false;rr();}},'×')
