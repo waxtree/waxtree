@@ -3299,7 +3299,22 @@ async function fetchChannelUploads(channelId){
 // checked is pure waste against a quota this tight. Plain non-expiring
 // localStorage, same treatment as wt-digital-matches/wt-owned elsewhere.
 function loadYtMatches(){try{const r=localStorage.getItem('wt-yt-matches');return r?JSON.parse(r):{};}catch{return{};}}
-function saveYtMatches(m){try{localStorage.setItem('wt-yt-matches',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist YouTube matches:',e);}}
+// Capped, not left to grow forever — this has no ceiling otherwise: one
+// entry per track ID EVER encountered across every node opened, in every
+// session, indefinitely (unlike the ct2: cache, which enforceCacheBudget()
+// already keeps under a hard byte budget). For a heavy long-term user this
+// is a real, unbounded contributor to overall localStorage pressure —
+// exactly the class of thing that can leave no room for Supabase's own
+// session-token write and trigger a spontaneous sign-out. Same treatment
+// as wt-cosine-ids-v2 got for the same reason.
+const YT_MATCHES_CAP=4000;
+function saveYtMatches(m){
+  const keys=Object.keys(m);
+  if(keys.length>YT_MATCHES_CAP){
+    keys.slice(0,keys.length-YT_MATCHES_CAP).forEach(k=>delete m[k]);
+  }
+  try{localStorage.setItem('wt-yt-matches',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist YouTube matches:',e);}
+}
 let ytMatches=loadYtMatches();
 // One-time remediation, bumped each time something that affects a "no
 // match" verdict changes (budget-exhaustion bug, then matching-criteria
@@ -6854,6 +6869,33 @@ purgeExpiredCache();
     '| total ct2: cache =',(ct2Bytes/1024/1024).toFixed(2),'MB across',ct2Count,'entries');
   enforceCacheBudget(selKey);
   console.info('[WaxTree Debug] boot: present in ct2: AFTER budget enforcement =',selKey?!!localStorage.getItem('ct2:'+selKey):'n/a');
+
+  // Extended diagnostic (2026-08-03) — CT2_BUDGET_BYTES only bounds the
+  // ct2: cache specifically, but the actual sign-out failure mode (a
+  // failed localStorage write for Supabase's own session token, which
+  // GoTrue then treats as an invalid session) depends on TOTAL usage
+  // across every key this origin holds, not just that one. Several other
+  // keys (the Discogs collection/wantlist mirror, the local library index
+  // and its match results, the YouTube video-match cache, the profile
+  // photo) have no budget at all and can add up to real size for a long-
+  // term/heavy user. Logging the full breakdown here so the next time a
+  // spontaneous sign-out is reported, the real numbers are already in the
+  // console instead of having to reproduce it live first.
+  let otherBytes=0,totalBytes=0;
+  const otherByPrefix={};
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);if(!k)continue;
+    const size=k.length+(localStorage.getItem(k)||'').length;
+    totalBytes+=size;
+    if(k.startsWith('ct2:'))continue;
+    otherBytes+=size;
+    const label=k.startsWith('sb-')?'supabase-auth':k;
+    otherByPrefix[label]=(otherByPrefix[label]||0)+size;
+  }
+  const topOther=Object.entries(otherByPrefix).sort((a,b)=>b[1]-a[1]).slice(0,8)
+    .map(([k,v])=>k+':'+(v/1024).toFixed(0)+'KB').join(', ');
+  console.info('[WaxTree Debug] boot: TOTAL localStorage =',(totalBytes/1024/1024).toFixed(2),'MB',
+    '(ct2:',(ct2Bytes/1024/1024).toFixed(2),'MB + other',(otherBytes/1024/1024).toFixed(2),'MB) | biggest other keys:',topOther);
 }
 
 sb.auth.getSession().then(({data:{session}})=>{
