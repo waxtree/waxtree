@@ -1632,7 +1632,7 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=9; // bumped: fixes various-artists releases splitting into one card per credited artist
+const TRACK_DATA_VERSION=10; // bumped: buildTrackEntries now carries master_id as an altId (see its own comment) — a shared/local cache entry from before this fix never had that field, so ownership badges silently kept missing color/pressing variants no matter how many times a user cleared their own local cache, since the shared cross-user cache (getSharedNodeCache) was still serving the pre-fix shape
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:3693,name:'Larry Heard',
