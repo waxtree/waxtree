@@ -46,7 +46,10 @@ export default async function handler(req, res) {
       const plUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
       plUrl.searchParams.set('part', 'snippet')
       plUrl.searchParams.set('playlistId', playlistId)
-      plUrl.searchParams.set('maxResults', '25')
+      // 50 is playlistItems.list's own per-call max, and unlike search.list
+      // the cost is flat (~1 unit) regardless of how many items come back —
+      // more raw candidates before any client-side filtering runs is free.
+      plUrl.searchParams.set('maxResults', '50')
       plUrl.searchParams.set('key', YT_API_KEY)
       const pd = await ytFetch(plUrl)
       // For a playlistItems entry, snippet.channelTitle is the PLAYLIST's
