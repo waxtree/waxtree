@@ -499,8 +499,7 @@ input,select{font:inherit;color:inherit}
 #rp-np-empty{padding:18px 12px;font-size:12px;color:var(--text-f);text-align:center;line-height:1.5;display:none}
 .rp-corr-hd{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:8px;display:block}
 .rp-hd-row{display:flex;align-items:center;justify-content:space-between}
-.rp-src-btn{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f);background:none;border:none;cursor:pointer;font-family:inherit;padding:0;transition:color .15s}
-.rp-src-btn:hover{color:var(--text-m)}
+.rp-src-btn{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-f)}
 .rp-coming-soon{display:block;text-align:center;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-f);opacity:.45;margin-top:24px}
 .rp-rel-row{display:flex;align-items:center;gap:10px;padding:7px 4px;border-radius:8px;cursor:pointer;transition:background .1s}
 .rp-rel-row:hover{background:var(--bg-h)}
@@ -1685,7 +1684,7 @@ function saveSt(){
     if(e.name==='QuotaExceededError'&&purgeExpiredCache())
       try{localStorage.setItem('wt-discogs-wantlist',JSON.stringify(st.discogsWantlist));}catch{}
   }
-  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,relatedTracksSource:st.relatedTracksSource,alreadyListened:st.alreadyListened});
+  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -2057,13 +2056,6 @@ const st={
   // flags a release the FIRST time it's ever seen, on any device.
   followScanKnownIds:saved?.followScanKnownIds||{},
   newReleasesModal:false,newReleasesFound:[],
-  // Which algorithm powers the Related Tracks panel — persisted locally
-  // since it's a stable preference, not something that needs cloud sync.
-  // relatedSourceMenuOpen is pure UI state, never persisted.
-  // 'youtube' is paused (see RELATED_SOURCES below) — anyone whose saved
-  // state still has it selected from before falls back to 'cosine'
-  // automatically instead of silently rendering an unselectable source.
-  relatedTracksSource:(saved?.relatedTracksSource&&saved.relatedTracksSource!=='youtube')?saved.relatedTracksSource:'cosine',relatedSourceMenuOpen:false,
   // client-id (branch.id / node.id / a synthetic 'tree:'+rootId key) ->
   // Supabase uuid, for syncNewSchema() below. Cloud-synced (not just
   // local) so a second device maps the SAME client entity to the SAME
@@ -2466,288 +2458,30 @@ function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))
 // explicit request (2026-07-21) — quality still wasn't good enough after
 // several rounds of real, verified fixes (see
 // [[project_waxtree_related_tracks_stalemate]] in memory). Deliberately
-// NOT deleted, just never called from here. "Related Tracks" now instead
-// defaults to "Related by YouTube" (fetchYoutubeMix, below) — YouTube's
-// own auto-generated Mix playlist for whatever's currently playing, which
-// is the real recommendation engine's output rather than a from-scratch
-// scoring model. The header's dropdown is designed to hold more than one
-// source (a second, "Related by Cosine.club", is coming once that site's
-// API key is available) rather than being tied to a single algorithm.
-// YouTube's own Mix stayed too unreliable after several rounds of real
-// fixes (genre tags too broad, verification too strict, quality still
-// dropping the deeper you clicked) — paused rather than kept iterating
-// blind, same call as the earlier Discogs-correlation pause (see
-// [[project_waxtree_related_tracks_stalemate]]). Cosine.club is a
-// purpose-built similarity API (has its own /tracks/{id}/similar and a
-// /tracks/lookup by Discogs/YouTube URL) rather than something being
-// reverse-engineered out of a consumer product, so it's the new default
-// once wired up.
-const RELATED_SOURCES=[
-  {id:'cosine',label:'Related by Cosine.club',available:true},
-  {id:'youtube',label:'Related by YouTube',available:true},
-];
-let ytMixLoading=new Set();
-let ytVerifyLoading=new Set();
-// YouTube's own auto-generated "Topic" channels for a music act are named
-// "<Artist> - Topic" — stripping that suffix turns channelTitle back into
-// a real, searchable artist/label name. A personal upload channel (not a
-// Topic channel) keeps its name as-is; it may or may not resolve to
-// anything on Discogs, same risk as typing that name into the normal
-// search bar.
-function stripYtTopicSuffix(name){return (name||'').replace(/\s*-\s*Topic$/i,'').trim();}
-// topicCategories are Wikipedia-URL tags (".../wiki/House_music") — only
-// the last path segment matters for comparison, and the generic "Music"
-// tag is dropped since it's on nearly everything and says nothing about
-// genre specifically.
-function ytTopicSet(topics){
-  return new Set((topics||[]).map(t=>(t.split('/').pop()||'')).filter(t=>t&&t!=='Music'));
-}
-function filterYtMixItems(items,excludeVideoId,sourceArtistName){
-  const sourceItem=items.find(it=>it.id===excludeVideoId);
-  const sourceTopics=ytTopicSet(sourceItem?.topics);
-  const sourceArtistNorm=normalizeStr(sourceArtistName||'');
-  return items
-    .filter(it=>it.id!==excludeVideoId)
-    // Same artist already lives in the center column as its own node — no
-    // reason to duplicate them inside "Related Tracks". Checks both the
-    // channel name AND whether the video title itself leads with the
-    // artist's name ("Schatrax - Track", "Schatrax: Track"): confirmed
-    // live that a Mix frequently includes the same artist re-uploaded by
-    // an unrelated fan channel (channelTitle wouldn't say "Schatrax" at
-    // all in that case, only the title does).
-    .filter(it=>{
-      if(!sourceArtistNorm)return true;
-      if(normalizeStr(stripYtTopicSuffix(it.channelTitle))===sourceArtistNorm)return false;
-      const titleNorm=normalizeStr(it.title);
-      return !titleNorm.startsWith(sourceArtistNorm);
-    })
-    .filter(it=>it.durationSec>=60&&it.durationSec<=900) // drop obvious outliers (ads, full-mix uploads, broken lookups) rather than trust every entry
-    // Genre-consistency: only enforced when the currently-playing video
-    // actually has topic tags to compare against (no baseline = no
-    // filter, rather than accidentally rejecting everything). A candidate
-    // with no topic tags of its own is kept — YouTube not having tagged it
-    // isn't evidence it's a bad match, just missing data. Confirmed live
-    // this has a real ceiling: YouTube's topicCategories are broad genre
-    // buckets, not scenes — an underground house track and a mass-produced
-    // "AFRO HOUSE 2025 🌴" upload both land under plain "Electronic_music",
-    // so this alone can't tell them apart. The emoji/all-caps filter below
-    // is what actually catches that case.
-    .filter(it=>{
-      if(!sourceTopics.size)return true;
-      const itTopics=ytTopicSet(it.topics);
-      if(!itTopics.size)return true;
-      for(const t of itTopics)if(sourceTopics.has(t))return true;
-      return false;
-    })
-    // A genuine label/artist upload (or a YouTube auto-"Topic" channel
-    // entry) never has emoji in its title — that's specifically an SEO/
-    // content-farm upload pattern ("RETURN LYRICS- (AFRO HOUSE 2025
-    // 🌴 Sunset Glow...)" was the confirmed live example). Same story for
-    // a title that's mostly uppercase with a self-declared genre+year in
-    // parentheses/brackets, e.g. "(AFRO HOUSE 2025)" — a real release
-    // title doesn't announce its own genre and a release year inline like
-    // an ad does.
-    .filter(it=>{
-      const t=it.title||'';
-      if(/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u.test(t))return false;
-      if(/[([][^)\]]*\b(19|20)\d{2}\b[^)\]]*[)\]]/.test(t)){
-        const letters=t.replace(/[^a-zA-Z]/g,'');
-        const upper=t.replace(/[^A-Z]/g,'');
-        if(letters.length>0&&upper.length/letters.length>0.6)return false;
-      }
-      return true;
-    })
-    .slice(0,40); // API now caps at 50 (yt-search.js maxResults) — leave room for the filters above to trim some
-}
-// Track titles in this scene consistently follow "Artist - Title [Label
-// CATNO]", the same shape Discogs listings themselves use — far more
-// reliable for finding the real artist than channelTitle, which is
-// frequently a label's promo channel, a compiler, or an unrelated fan
-// reupload. Confirmed live: "Janeret - Dawn [RORA013]" uploaded by a
-// channel called "CMYK" — Explore was searching Discogs for "CMYK" and
-// finding nothing to do with Janeret, exactly the wrong-guess risk
-// verification below exists to catch, but better to try the right name
-// first than lean entirely on verification rejecting the wrong one.
-// Real titles in this scene go well beyond a plain "Artist - Title" shape —
-// confirmed live 2026-08-03, the previous single-strategy parse was the
-// dominant cause of "verified, no match" for tracks that DO exist on
-// Discogs (by far the most complete release database there is — a real
-// no-match there almost always means WaxTree guessed the wrong name to
-// search, not that Discogs is missing it). This tries every plausible
-// reading instead of committing to one:
-//  - blog/label "premiere" posts prefix a whole credit line ("PREMIERE:
-//    Artist - Title [Label]", "Exclusive Video Premiere: ...") — stripped
-//    first so the patterns below see the real credit underneath.
-//  - "Artist - Title" with any dash variant (-, en dash, em dash), not
-//    just a plain hyphen.
-//  - "Title by Artist", a real alternate convention on some channels.
-//  - a remix/edit/rework credit sitting in the title's own parentheses
-//    ("Title (Remixer Remix)") names a second, different real Discogs
-//    artist the dash-split alone never sees — added as an extra candidate,
-//    not a replacement, since the original artist is still often right too.
-function extractYtNameCandidates(title,channelTitle){
-  const t=(title||'').replace(/^\s*[\[(]?\s*(?:(?:world|exclusive|official|video|track|audio)\s+)*premiere\s*[\])]?\s*(?:[:\-–—]\s*)?/i,'').trim();
-  const names=new Set();
-  const dash=t.match(/^(.+?)\s+[-–—]\s+(.+)$/);
-  if(dash)names.add(dash[1].trim());
-  const by=t.match(/\bby\s+([^([]+?)\s*(?:[([]|$)/i);
-  if(by)names.add(by[1].trim());
-  const credit=t.match(/[([]([^()[\]]+?)\s+(?:remix|edit|rework|version|flip|bootleg|vip|dub)\b[^()[\]]*[)\]]/i);
-  if(credit&&!/^original$/i.test(credit[1].trim()))names.add(credit[1].trim());
-  const ch=stripYtTopicSuffix(channelTitle);
-  if(ch)names.add(ch);
-  return[...names].filter(Boolean);
-}
-// A collab credit ("Adam Beyer & Coco Francavilla - Silent Mapping") was
-// being searched as one combined string, which essentially never matches
-// a single Discogs artist entity — confirmed live this was the biggest
-// cause of otherwise-legitimate picks failing verification. Splitting on
-// the usual collab separators means each individual name gets its own
-// shot; a genuine collab only needs ONE half to have a matching Discogs
-// profile to verify.
-function splitCollabNames(name){
-  if(!name)return[];
-  return name.split(/\s+(?:&|,|vs\.?|feat\.?|ft\.?|and|x)\s+/i).map(n=>n.trim()).filter(Boolean);
-}
-// Verification, not just on Explore-click anymore — a track that can't be
-// confidently traced back to a real Discogs artist/label doesn't get
-// shown as a "Related" pick at all now, rather than showing up with a
-// Explore button that's a coin flip. Tries every name extractYtNameCandidates
-// found (title-parsed artist, "by" credit, remix credit, channel name), then
-// each of those split into individual names for a collab credit — some
-// picks are only correctly named one way or the other (a YouTube "Topic"
-// channel IS the real artist profile with no artist name in the title at
-// all, e.g. "Injection (Original Mix)" by "Malin Genie - Topic"; other
-// times, per the Bandcamp-redirect lesson, the channel is an unrelated
-// uploader and only the title says who it's really by). Checks both
-// artist and label for each name, and — same as before — a name match
-// alone isn't proof: that artist/label's own discography has to actually
-// contain something matching the video's title before it counts as
-// verified.
-//
-// sourceGenreSet, when given, is one more gate AFTER a real Discogs match
-// is found: the matched release's own genres/styles (Discogs' real,
-// scene-level tags — Deep House, Tech House, Minimal Techno etc., far
-// more specific than YouTube's own topicCategories, which only bucket as
-// broad as "Electronic_music") have to share something with it. Confirmed
-// live this is necessary even post-verification: Amelie Lens is a real,
-// correctly-verified artist, but straight techno sharing zero style
-// overlap with what was actually playing (a quieter house/minimal sound)
-// still isn't a "related" pick just because both are "Electronic_music"
-// to YouTube.
-// Returns the resolved {type,discogsId,discogsName,genreSet} object when a
-// real match is found, null when every name/candidate was genuinely
-// checked and none matched, or undefined when a Discogs call itself
-// failed (network blip, or — confirmed live 2026-08-01 — the shared,
-// always-on Discogs proxy every WaxTree user's dReq() call goes through
-// being under load) partway through, since that's NOT the same thing as
-// "checked and confirmed no match" and must never be cached as one (see
-// verifyYtMixItems/the render call site below).
-// A prolific artist/label's discography can run well past one page —
-// confirmed live 2026-08-03 with a 233-release artist appearing in this
-// exact feature's own test data: the discography sweep below only ever
-// requested page 1 (100 releases), so a genuinely correct name match could
-// still report "no matching release" purely because the real release sat
-// past release #100. Sorted newest-first (a YouTube "Premiere" upload is
-// almost always for a recent/upcoming release, not something from decades
-// back) so a capped page count still checks the releases most likely to be
-// the right one first.
-const YT_VERIFY_MAX_PAGES=3;
-async function verifyYtCandidate(item,sourceGenreSet){
-  const rawNames=extractYtNameCandidates(item.title,item.channelTitle);
-  const nameCandidates=[...new Set(rawNames.flatMap(n=>[n,...splitCollabNames(n)]))];
-  const titleNorm=normalizeStr(item.title);
-  let hadError=false;
-  for(const name of nameCandidates){
-    const nameNorm=normalizeStr(name);
-    let results;
-    try{results=await searchDiscogs(name);}catch{hadError=true;continue;}
-    for(const type of['artist','label']){
-      // Discogs appends " (2)", " (3)" etc. to disambiguate same-named
-      // artists/labels — that's Discogs' own bookkeeping, not part of the
-      // real name, so it has to come off before an exact-match comparison
-      // means anything (confirmed live: "Francesco D'amico (2)" would
-      // never match "Francesco D'Amico" otherwise, even when it's the
-      // right person).
-      const matches=results.filter(r=>r.type===type&&normalizeStr((r.title||'').replace(/\s*\(\d+\)$/,''))===nameNorm);
-      for(const c of matches){
-        const basePath=type==='label'?'/labels/'+c.id+'/releases':'/artists/'+c.id+'/releases';
-        let hitRelease=null,pageErr=false;
-        for(let page=1;page<=YT_VERIFY_MAX_PAGES;page++){
-          let rd;
-          try{rd=await dReq(basePath,{per_page:'100',page:String(page),sort:'year',sort_order:'desc'});}
-          catch{pageErr=true;break;}
-          hitRelease=(rd.releases||[]).find(r=>{
-            const rt=normalizeStr(r.title||'');
-            return rt&&titleNorm&&(titleNorm.includes(rt)||rt.includes(titleNorm));
-          });
-          if(hitRelease)break;
-          if((rd.pagination?.pages||1)<=page)break; // no more pages to check
-        }
-        if(pageErr){hadError=true;continue;}
-        if(!hitRelease)continue;
-        let genreSet=[];
-        try{
-          const relFull=await dReq('/releases/'+hitRelease.id);
-          genreSet=[...(relFull.styles||[]),...(relFull.genres||[])].map(normalizeStr);
-        }catch{hadError=true;} // missing genre data doesn't invalidate a real name+release match, just skips the genre gate below
-        if(sourceGenreSet?.size&&genreSet.length){
-          if(!genreSet.some(g=>sourceGenreSet.has(g)))continue; // real match, wrong scene — not "related"
-        }
-        return{type,discogsId:c.id,discogsName:c.title,genreSet};
-      }
-    }
-  }
-  return hadError?undefined:null;
-}
-// Small concurrent batches, not all 20 at once — dReq already throttles
-// itself (45 req/60s) but there's no reason to open that many requests
-// simultaneously against the shared Discogs proxy just because we can.
-const YT_VERIFY_BATCH=4;
-// Stop once there are enough verified picks, same reasoning as Cosine's
-// own COSINE_TARGET_CARDS — each candidate here can cost several Discogs
-// calls (a name search, a full discography fetch, a release-detail fetch,
-// sometimes repeated across multiple name candidates), well more than
-// Cosine's one-call-per-item, so exhausting all 20 Mix candidates every
-// time is both slow and more likely to trip the shared-proxy-load issue
-// this whole fix is about.
-const YT_VERIFY_TARGET=10;
-// Returns {items,complete}. complete:false means at least one candidate's
-// verification hit a real Discogs-call error (not just "couldn't verify")
-// — the caller must NOT persist that result as the final answer, the same
-// discipline resolveCosineCards uses, or a transient failure permanently
-// poisons this video's related tracks as empty even though most of the
-// Mix could very well be genuinely verifiable on a clean run.
-async function verifyYtMixItems(items,sourceGenreSet){
-  const out=[];
-  let complete=true;
-  for(let i=0;i<items.length&&out.length<YT_VERIFY_TARGET;i+=YT_VERIFY_BATCH){
-    const batch=items.slice(i,i+YT_VERIFY_BATCH);
-    const settled=await Promise.allSettled(batch.map(async it=>({it,r:await verifyYtCandidate(it,sourceGenreSet)})));
-    settled.forEach(s=>{
-      if(s.status!=='fulfilled'){complete=false;console.warn('WaxTree: YouTube Mix verification failed (will retry):',s.reason?.message||s.reason);return;}
-      const{it,r}=s.value;
-      if(r===undefined){complete=false;return;} // inconclusive — a real dReq error, not a checked no-match
-      if(r)out.push({...it,resolved:r});
-    });
-  }
-  return{items:out,complete};
-}
-// Shared by every Related Tracks source (YouTube Mix picks, Cosine.club
-// picks, anything added later) — each source normalizes its own item shape
-// into {playId,videoId,title,subtitle,thumbUrl,duration,resolved,extra}
-// first, so the card UI (like/playlist/Explore) is written once instead of
-// once per source.
+// NOT deleted, just never called from here. "Related Tracks" then tried
+// YouTube's own auto-generated Mix playlist next (fetchYoutubeMix,
+// verifyYtCandidate, and the rest of that pipeline — removed 2026-08-04,
+// not just paused this time). Several real rounds of fixes (genre tags too
+// broad, verification too strict, then a richer multi-strategy name parser
+// and discography pagination) still left verification sitting on
+// "Verifying…" indefinitely for most tracks — the per-candidate Discogs
+// identity check was fundamentally too expensive to ever feel responsive
+// against the shared, unauthenticated proxy every user's lookups go
+// through. Cosine.club (a purpose-built similarity API, not something
+// reverse-engineered out of a consumer product) is now the sole source —
+// same call as the earlier Discogs-correlation pause (see
+// [[project_waxtree_related_tracks_stalemate]]).
+// Normalizes a Related Tracks pick (Cosine.club today, kept general in case
+// another source is added later) into {playId,videoId,title,subtitle,
+// thumbUrl,duration,resolved,extra} so the card UI (like/playlist/Explore)
+// is written once rather than once per source.
 function buildRelatedCard(entry){
   const{playId,videoId,title,subtitle,thumbUrl,duration,resolved,extra}=entry;
   // Registered exactly like the New Releases modal registers its own
   // externally-sourced picks — nothing else in the tree knows this track,
-  // so toggleLike/playlist/doPlay all need to find it here.
-  // resolved (with its genreSet, when the source has one) rides along so
-  // that if THIS pick gets played next, its own real Discogs data becomes
-  // available to whatever the next hop's source needs — otherwise every
-  // hop past the first would lose that context, exactly the "gets worse
-  // the deeper you click" drift that was reported for YouTube Mix.
+  // so toggleLike/playlist/doPlay all need to find it here. resolved rides
+  // along so that if THIS pick gets played next, its own real Discogs data
+  // is already available for whatever the next hop needs.
   discoveredTracks[playId]={id:playId,videoId,title,trackArtistName:subtitle,thumbUrl,duration:duration||null,resolved:resolved||null,...(extra||{})};
   const liked=!!st.likes[playId];
   const card=d('follows-item rp-yt-card',{onClick:()=>doPlay(playId,videoId,title,subtitle)});
@@ -2989,11 +2723,11 @@ async function fetchCosineSimilar(cosineId){
   lsSet(ck,results);
   return results;
 }
-// Same artist already lives in the center column as its own node (see
-// filterYtMixItems above) — still true regardless of which source found
-// the pick. Anything missing the fields a card actually needs (a playable
-// video, a real Discogs release to Explore to) is dropped before spending
-// a Discogs call resolving it.
+// Same artist already lives in the center column as its own node, so it's
+// filtered out here rather than shown as a duplicate "related" pick.
+// Anything missing the fields a card actually needs (a playable video, a
+// real Discogs release to Explore to) is dropped before spending a Discogs
+// call resolving it.
 //
 // COSINE_MIN_SCORE: Cosine's own similarity score (0-1) on each result was
 // never actually checked before — confirmed live 2026-08-03 via their
@@ -3025,10 +2759,10 @@ const COSINE_RESOLVE_BATCH=4;
 const COSINE_TARGET_CARDS=8;
 // external_link is Cosine's own claimed Discogs release for this pick —
 // fetching that release directly gives its REAL artist credit, no name
-// matching or discography search involved (that's what made the YouTube
-// path both expensive and error-prone — see verifyYtCandidate above). A
-// Various Artists release still needs the per-track credit though, same
-// as buildTrackEntries does for the tree itself.
+// matching or discography search involved (that's what made the removed
+// YouTube Mix path both expensive and error-prone). A Various Artists
+// release still needs the per-track credit though, same as
+// buildTrackEntries does for the tree itself.
 // Lets a genuine dReq failure (network blip, the shared Discogs throttle
 // queue, a burst of concurrent lookups from switching tracks quickly)
 // THROW rather than swallowing it into the same "null" a genuinely
@@ -3071,66 +2805,9 @@ async function resolveCosineCards(items){
 }
 let cosineIdLoading=new Set();
 let cosineResolveLoading=new Set();
-// Real Discogs genres/styles for whatever's currently playing, used to
-// filter candidates in verifyYtCandidate(). Two sources: a track actually
-// opened from a tree node has its own .genre (a " · "-joined style list,
-// see buildTrackEntries()); a track playing because it was itself a
-// verified "Related by YouTube" pick carries its resolved.genreSet from
-// when IT was verified (see buildRelatedCard) — keeps genre continuity
-// across multiple hops instead of resetting to no baseline after the
-// first click.
-function getSourceGenreSet(){
-  const np=st.nowPlaying;
-  if(!np)return new Set();
-  if(np.fromDiscogs){
-    const genreStr=findTrackAndNode(np.trackId)?.track?.genre;
-    if(genreStr)return new Set(genreStr.split(' · ').map(normalizeStr));
-  }
-  const dt=discoveredTracks[np.trackId];
-  if(dt?.resolved?.genreSet?.length)return new Set(dt.resolved.genreSet);
-  return new Set();
-}
-// Kicks off the YouTube Mix fetch+verify chain for the given now-playing
-// track if it isn't already cached, in flight, or on cooldown. Called
-// unconditionally for every now-playing track regardless of which source
-// is currently SELECTED — confirmed live 2026-08-04: switching the
-// dropdown used to start this whole chain cold at the moment of switching,
-// so a switch always felt like waiting from zero even though the other
-// source had had the entire time-since-play to work in the background.
-// Both sources now run independently and concurrently; switching just
-// changes which cache renderRelatedTracks() below reads from to display.
-function ensureYtRelatedLoading(np){
-  const videoId=np.videoId;
-  if(!videoId)return;
-  const cached=lsGet('ytmix:'+videoId);
-  if(cached){
-    const verifyKey='ytver3:'+videoId;
-    if(lsGet(verifyKey))return; // already verified
-    if(relatedGaveUp('ytverify:'+videoId))return;
-    if(!ytVerifyLoading.has(videoId)&&!relatedOnCooldown('ytverify:'+videoId)){
-      ytVerifyLoading.add(videoId);
-      const items=filterYtMixItems(cached,videoId,np.artistName);
-      verifyYtMixItems(items,getSourceGenreSet())
-        .then(({items,complete})=>{
-          if(complete){lsSet(verifyKey,items);relatedResetRetries('ytverify:'+videoId);}
-          else relatedMarkFailed('ytverify:'+videoId);
-        })
-        .catch(e=>{console.warn('WaxTree: Related by YouTube verification failed (will retry):',e?.message||e);relatedMarkFailed('ytverify:'+videoId);})
-        .then(()=>{ytVerifyLoading.delete(videoId);renderRelatedTracks();});
-    }
-    return;
-  }
-  if(relatedGaveUp('ytmix:'+videoId))return;
-  if(!ytMixLoading.has(videoId)&&!relatedOnCooldown('ytmix:'+videoId)){
-    ytMixLoading.add(videoId);
-    fetchYoutubeMix(videoId)
-      .then(()=>relatedResetRetries('ytmix:'+videoId))
-      .catch(e=>{console.warn('WaxTree: Related by YouTube failed (will retry):',e?.message||e);relatedMarkFailed('ytmix:'+videoId);return[];})
-      .then(()=>{ytMixLoading.delete(videoId);renderRelatedTracks();});
-  }
-}
-// Same idea as ensureYtRelatedLoading, for Cosine.club's own two-stage
-// pipeline (track-id lookup, then similar-tracks resolve).
+// Kicks off Cosine.club's own two-stage pipeline (track-id lookup, then
+// similar-tracks resolve) for the given now-playing track if it isn't
+// already cached, in flight, or on cooldown.
 function ensureCosineRelatedLoading(np){
   const cachedId=cosineIdMap[np.trackId];
   if(cachedId===undefined){
@@ -3165,128 +2842,48 @@ function renderRelatedTracks(){
   const host=document.getElementById('related-tracks');
   if(!host)return;
   host.innerHTML='';
+  // Plain static header, no dropdown — Cosine.club is the only source
+  // (see ensureCosineRelatedLoading's own comment for why YouTube's Mix
+  // pipeline was removed rather than kept as a second option).
   const hd=d('rp-corr-hd rp-hd-row',{});
-  // Header just says "Related Tracks" regardless of which source is
-  // selected — RELATED_SOURCES' own labels (e.g. "Related by Cosine.club")
-  // still show up as the individual options inside the dropdown below, so
-  // the source is still identifiable there, just not branded in the header.
-  const srcBtn=b('rp-src-btn',{onClick:e=>{e.stopPropagation();st.relatedSourceMenuOpen=!st.relatedSourceMenuOpen;rr();}},'Related Tracks ▾');
-  hd.appendChild(srcBtn);
+  hd.appendChild(s('rp-src-btn','Related Tracks'));
   host.appendChild(hd);
-  if(st.relatedSourceMenuOpen){
-    // document.body-portal dropdown, same helper the mini-player's
-    // playlist/explore menus use — a normal position:absolute child here
-    // was already found not to stack correctly against #right-panel's
-    // fixed-position layout (see attachFloatingDropdown's own comment).
-    attachFloatingDropdown(srcBtn,()=>{st.relatedSourceMenuOpen=false;rr();},drop=>{
-      RELATED_SOURCES.forEach(src=>{
-        const checked=st.relatedTracksSource===src.id;
-        const item=b('pl-drop-item'+(checked?' checked':''),{
-          // el()'s attribute-setting only skips a key when its value is
-          // null/undefined (v==null) — passing false still calls
-          // setAttribute('disabled','false'), and HTML's disabled
-          // attribute is presence-based, so ANY value (even the string
-          // "false") disables the button. YouTube being re-enabled
-          // (available:true) exposed this: disabled:false was silently
-          // still disabling it, so it could never be selected.
-          disabled:src.available?null:true,
-          style:src.available?{}:{opacity:.45,cursor:'default'},
-          onClick:()=>{
-            if(!src.available)return;
-            st.relatedTracksSource=src.id;st.relatedSourceMenuOpen=false;rr();
-          },
-        },(checked?'✓ ':'')+src.label+(src.available?'':' (soon)'));
-        drop.appendChild(item);
-      });
-    });
-  }
 
   if(!st.nowPlaying){
     host.appendChild(s('rp-coming-soon','Play something to see picks'));
     return;
   }
-  // Both sources search independently, regardless of which one is
-  // currently selected below — see ensureYtRelatedLoading's own comment.
-  ensureYtRelatedLoading(st.nowPlaying);
   ensureCosineRelatedLoading(st.nowPlaying);
-  if(st.relatedTracksSource==='youtube'){
-    const videoId=st.nowPlaying.videoId;
-    if(!videoId){
-      host.appendChild(s('rp-coming-soon','Resolving video…'));
-      return;
-    }
-    const cached=lsGet('ytmix:'+videoId);
-    if(cached){
-      // Verification (verifyYtMixItems) costs real Discogs calls per
-      // candidate, so its result is cached separately from the raw Mix
-      // fetch and only computed once per source video, not on every
-      // render.
-      // Versioned key — bumped whenever verifyYtCandidate's own logic
-      // changes (collab-name splitting, the genre cross-check, and now
-      // v3: a Discogs-call error during verification no longer gets
-      // cached as a confirmed empty result — see verifyYtMixItems above)
-      // so a previously-cached bad result gets thrown away and re-checked
-      // with the improved logic, instead of sitting there for its full
-      // 30-day TTL.
-      const verified=lsGet('ytver3:'+videoId);
-      if(verified){
-        if(!verified.length){host.appendChild(s('rp-coming-soon','No verified related tracks found'));return;}
-        verified.forEach(item=>host.appendChild(buildRelatedCard({
-          playId:'yt:'+item.id,videoId:item.id,title:item.title,subtitle:item.channelTitle,
-          thumbUrl:'https://i.ytimg.com/vi/'+item.id+'/mqdefault.jpg',duration:item.durationSec||null,resolved:item.resolved,
-        })));
-        return;
-      }
-      if(relatedGaveUp('ytverify:'+videoId)){
-        host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
-        return;
-      }
-      host.appendChild(s('rp-coming-soon','Verifying…'));
-      return;
-    }
-    if(relatedGaveUp('ytmix:'+videoId)){
+  const np=st.nowPlaying;
+  const cachedId=cosineIdMap[np.trackId];
+  if(cachedId===undefined){
+    if(relatedGaveUp('id:'+np.trackId)){
       host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
       return;
     }
-    host.appendChild(s('rp-coming-soon','Loading…'));
+    host.appendChild(s('rp-coming-soon','Looking up track…'));
     return;
   }
-  if(st.relatedTracksSource==='cosine'){
-    const np=st.nowPlaying;
-    const cachedId=cosineIdMap[np.trackId];
-    if(cachedId===undefined){
-      if(relatedGaveUp('id:'+np.trackId)){
-        host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
-        return;
-      }
-      host.appendChild(s('rp-coming-soon','Looking up track…'));
-      return;
-    }
-    if(cachedId===false){
-      host.appendChild(s('rp-coming-soon','No related tracks found'));
-      return;
-    }
-    const cosineId=cachedId;
-    const cards=lsGet('cosinecards:'+cosineId);
-    if(cards){
-      if(!cards.length){host.appendChild(s('rp-coming-soon','No related tracks found'));return;}
-      cards.forEach(item=>host.appendChild(buildRelatedCard({
-        playId:'cosine:'+item.video_id,videoId:item.video_id,title:item.track||item.name,subtitle:item.artist,
-        thumbUrl:'https://i.ytimg.com/vi/'+item.video_id+'/mqdefault.jpg',duration:null,resolved:item.resolved,
-        extra:{discogsUrl:item.external_link,cosineId:item.id},
-      })));
-      return;
-    }
-    if(relatedGaveUp('cards:'+cosineId)){
-      host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
-      return;
-    }
-    host.appendChild(s('rp-coming-soon','Finding related tracks…'));
+  if(cachedId===false){
+    host.appendChild(s('rp-coming-soon','No related tracks found'));
     return;
   }
-  // Any other source id currently has available:false in RELATED_SOURCES
-  // (the menu itself prevents selecting it), so this is unreached today.
-  host.appendChild(s('rp-coming-soon','Coming soon'));
+  const cosineId=cachedId;
+  const cards=lsGet('cosinecards:'+cosineId);
+  if(cards){
+    if(!cards.length){host.appendChild(s('rp-coming-soon','No related tracks found'));return;}
+    cards.forEach(item=>host.appendChild(buildRelatedCard({
+      playId:'cosine:'+item.video_id,videoId:item.video_id,title:item.track||item.name,subtitle:item.artist,
+      thumbUrl:'https://i.ytimg.com/vi/'+item.video_id+'/mqdefault.jpg',duration:null,resolved:item.resolved,
+      extra:{discogsUrl:item.external_link,cosineId:item.id},
+    })));
+    return;
+  }
+  if(relatedGaveUp('cards:'+cosineId)){
+    host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
+    return;
+  }
+  host.appendChild(s('rp-coming-soon','Finding related tracks…'));
 }
 
 function positionYtHost(){
@@ -3400,20 +2997,7 @@ async function searchYouTubeApi(q){
 // result — versus 100+ units for every single search.list call. Once
 // ytChannelMap below has an artist's/label's channel on file, every later
 // track by them can be checked here first instead of paying for a search.
-// Powers "Related by YouTube" in the Related Tracks panel — YouTube's own
-// auto-generated "Mix" playlist for the currently-playing video (see
-// api/yt-search.js's playlistId branch). Same lsGet/lsSet local cache
-// pattern as searchYouTubeApi/fetchChannelUploads above.
-async function fetchYoutubeMix(videoId){
-  const ck='ytmix:'+videoId;
-  const c=lsGet(ck);if(c)return c;
-  const res=await fetch('/api/yt-search?playlistId=RD'+encodeURIComponent(videoId));
-  const json=await res.json().catch(()=>({}));
-  if(!res.ok||json.error)throw new Error(json.error||'YouTube Mix lookup failed ('+res.status+')');
-  const results=json.results||[];
-  lsSet(ck,results);
-  return results;
-}
+// Same lsGet/lsSet local cache pattern as searchYouTubeApi above.
 async function fetchChannelUploads(channelId){
   const ck='ytch:'+channelId;
   const c=lsGet(ck);if(c)return c;
