@@ -3451,6 +3451,23 @@ function pauseYtQuota(hours){
 // to resolve for free moments later.
 const ytSharedBatchDispatched=new Set();
 const ytSharedChecked=new Set();
+// Coalesces the re-render each individually-resolving track would
+// otherwise trigger on its own — resolveTrackVideoId() below calls this
+// on completion, and up to a page's worth of tracks (PAGE=50) can resolve
+// within a few seconds of each other, especially anything past the very
+// first page of a big discography (earlier pages are far more likely to
+// already have been resolved by someone at some point; later ones are
+// often brand new). Each one calling rr() directly meant the center
+// column could fully tear down and rebuild many times in quick
+// succession — confirmed live 2026-08-04 as the "regenerates and slides
+// back up" symptom while scrolling, specifically worse on page 2+.
+// Grouping completions into one re-render per ~400ms window instead fixes
+// that without losing responsiveness in any way a user would notice.
+let ytResolveRerenderTimer=null;
+function scheduleYtResolveRerender(){
+  if(ytResolveRerenderTimer)return;
+  ytResolveRerenderTimer=setTimeout(()=>{ytResolveRerenderTimer=null;rr();},400);
+}
 async function fetchSharedYtMatches(trackIds){
   if(!trackIds.length)return;
   try{
@@ -3461,7 +3478,7 @@ async function fetchSharedYtMatches(trackIds){
     data.forEach(row=>{
       if(!(row.track_id in ytMatches)){ytMatches[row.track_id]=row.video_id||false;changed=true;}
     });
-    if(changed){saveYtMatches(ytMatches);rr();}
+    if(changed){saveYtMatches(ytMatches);scheduleYtResolveRerender();}
   }catch(e){console.warn('WaxTree: shared YouTube cache lookup failed:',e);}
 }
 function pushSharedYtMatch(trackId,videoId){
@@ -3673,9 +3690,14 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
         found.track.videoId=result;
         lsSet((found.node.type==='label'?'l8:':'a7:')+found.node.discogsId,found.node.data);
       }
-      if(st.nowPlaying?.trackId===trackId)st.nowPlaying.videoId=result;
+      if(st.nowPlaying?.trackId===trackId){
+        // The user is actively watching THIS one resolve (it's what's
+        // currently playing) — worth an immediate render rather than
+        // waiting out the debounce window everything else uses below.
+        st.nowPlaying.videoId=result;rr();return;
+      }
     }
-    rr();
+    scheduleYtResolveRerender();
   })();
   return undefined;
 }
