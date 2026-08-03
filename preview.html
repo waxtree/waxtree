@@ -2771,8 +2771,23 @@ let cosineIdMap=loadCosineIdMap();
 // (Cosine's id/card resolution, YouTube Mix's own verification below) —
 // same retry-worthy-failure-vs-genuine-no-match problem in both.
 const RELATED_RETRY_COOLDOWN_MS=15000;
+// Bounds the worst case — a persistent (not transient) failure retrying
+// every 15s for as long as a track keeps playing, across every user's
+// session, turned out to be a real, meaningful contributor to Vercel's
+// edge-request usage (confirmed live 2026-08-03, an unrelated-looking
+// usage-alert email was the actual first sign of this). After this many
+// attempts for the same key, stop scheduling further retries automatically
+// — see relatedGaveUp below, checked at every call site before starting a
+// new attempt.
+const RELATED_MAX_RETRIES=5;
 let relatedRetryFailedAt={};
+let relatedRetryCounts={};
 function relatedOnCooldown(key){const t=relatedRetryFailedAt[key];return!!t&&Date.now()-t<RELATED_RETRY_COOLDOWN_MS;}
+function relatedGaveUp(key){return(relatedRetryCounts[key]||0)>=RELATED_MAX_RETRIES;}
+// A genuine success (or a definitive, correctly-cached negative) should
+// let a later attempt start with a clean slate rather than staying
+// permanently given-up from an earlier unrelated failure streak.
+function relatedResetRetries(key){delete relatedRetryCounts[key];delete relatedRetryFailedAt[key];}
 // Marking a failure also has to actually WAKE the panel up to retry —
 // during idle playback nothing else calls rr() (the seek bar updates via
 // its own lightweight DOM write, not a full re-render — see
@@ -2787,7 +2802,8 @@ function relatedOnCooldown(key){const t=relatedRetryFailedAt[key];return!!t&&Dat
 // browsing — confirmed live 2026-08-01.
 function relatedMarkFailed(key){
   relatedRetryFailedAt[key]=Date.now();
-  setTimeout(renderRelatedTracks,RELATED_RETRY_COOLDOWN_MS+200);
+  relatedRetryCounts[key]=(relatedRetryCounts[key]||0)+1;
+  if(relatedRetryCounts[key]<RELATED_MAX_RETRIES)setTimeout(renderRelatedTracks,RELATED_RETRY_COOLDOWN_MS+200);
 }
 async function resolveCosineTrackId(np){
   // Fast path: this track is itself a previously-fetched Cosine pick (see
@@ -3014,6 +3030,10 @@ function renderRelatedTracks(){
         })));
         return;
       }
+      if(relatedGaveUp('ytverify:'+videoId)){
+        host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
+        return;
+      }
       if(!ytVerifyLoading.has(videoId)&&!relatedOnCooldown('ytverify:'+videoId)){
         ytVerifyLoading.add(videoId);
         const items=filterYtMixItems(cached,videoId,st.nowPlaying.artistName);
@@ -3023,7 +3043,7 @@ function renderRelatedTracks(){
             // gets persisted — a partial/failed pass just cools down and
             // retries next render instead of locking in an incomplete
             // answer as if it were a confirmed "nothing verified".
-            if(complete)lsSet(verifyKey,items);
+            if(complete){lsSet(verifyKey,items);relatedResetRetries('ytverify:'+videoId);}
             else relatedMarkFailed('ytverify:'+videoId);
           })
           .catch(e=>{console.warn('WaxTree: Related by YouTube verification failed (will retry):',e?.message||e);relatedMarkFailed('ytverify:'+videoId);})
@@ -3032,9 +3052,14 @@ function renderRelatedTracks(){
       host.appendChild(s('rp-coming-soon','Verifying…'));
       return;
     }
+    if(relatedGaveUp('ytmix:'+videoId)){
+      host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
+      return;
+    }
     if(!ytMixLoading.has(videoId)&&!relatedOnCooldown('ytmix:'+videoId)){
       ytMixLoading.add(videoId);
       fetchYoutubeMix(videoId)
+        .then(()=>relatedResetRetries('ytmix:'+videoId))
         .catch(e=>{console.warn('WaxTree: Related by YouTube failed (will retry):',e?.message||e);relatedMarkFailed('ytmix:'+videoId);return[];})
         .then(()=>{ytMixLoading.delete(videoId);renderRelatedTracks();});
     }
@@ -3045,10 +3070,14 @@ function renderRelatedTracks(){
     const np=st.nowPlaying;
     const cachedId=cosineIdMap[np.trackId];
     if(cachedId===undefined){
+      if(relatedGaveUp('id:'+np.trackId)){
+        host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
+        return;
+      }
       if(!cosineIdLoading.has(np.trackId)&&!relatedOnCooldown('id:'+np.trackId)){
         cosineIdLoading.add(np.trackId);
         resolveCosineTrackId(np)
-          .then(id=>{if(id===undefined)relatedMarkFailed('id:'+np.trackId);})
+          .then(id=>{if(id===undefined)relatedMarkFailed('id:'+np.trackId);else relatedResetRetries('id:'+np.trackId);})
           .catch(()=>{relatedMarkFailed('id:'+np.trackId);})
           .then(()=>{cosineIdLoading.delete(np.trackId);renderRelatedTracks();});
       }
@@ -3071,6 +3100,10 @@ function renderRelatedTracks(){
       })));
       return;
     }
+    if(relatedGaveUp('cards:'+cosineId)){
+      host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
+      return;
+    }
     if(!cosineResolveLoading.has(cosineId)&&!relatedOnCooldown('cards:'+cosineId)){
       cosineResolveLoading.add(cosineId);
       fetchCosineSimilar(cosineId)
@@ -3079,7 +3112,7 @@ function renderRelatedTracks(){
           // Only a CLEAN pass (no request errors along the way) gets
           // persisted — a partial/failed pass just cools down and retries
           // next render instead of locking in an incomplete answer.
-          if(complete)lsSet(cardsKey,cards);
+          if(complete){lsSet(cardsKey,cards);relatedResetRetries('cards:'+cosineId);}
           else relatedMarkFailed('cards:'+cosineId);
         })
         .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed (will retry):',e?.message||e);relatedMarkFailed('cards:'+cosineId);})
