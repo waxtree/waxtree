@@ -5293,9 +5293,32 @@ function releaseCard(group,parentNodeId,isLabel,nodeName){
     }
   },'Bandcamp ↗');
 
-  const buyBtns=[bcBtn,
-    el('a',{cls:'buy-btn bp',href:`https://www.beatport.com/search?q=${encodeURIComponent(releaseTitle)}`,target:'_blank',rel:'noreferrer'},'Beatport ↗'),
-  ];
+  // Same click-time search+redirect shape as the Bandcamp button above,
+  // via its own bp-search edge function — Beatport itself sits behind a
+  // Cloudflare bot challenge for any server-side fetch, so unlike Bandcamp
+  // there's no way to independently re-verify a candidate page before
+  // redirecting (see bp-search's own comment). Falls back to today's plain
+  // title search when nothing comes back, same as before.
+  const bpBtn=b('buy-btn bp',{
+    title:'Search on Beatport',
+    onClick:async(e)=>{
+      const win=window.open('about:blank','_blank');
+      const btn=e.currentTarget;
+      btn.textContent='…';btn.style.opacity='0.55';
+      const bpArtist=isLabel?(first.label||''):nodeName;
+      const bpLabel=isLabel?nodeName:(first.label||'');
+      let finalUrl=`https://www.beatport.com/search?q=${encodeURIComponent(releaseTitle)}`;
+      try{
+        const{data}=await sb.functions.invoke('bp-search',{body:{artist:bpArtist,label:bpLabel,title:releaseTitle,release:releaseTitle}});
+        if(data?.tracks?.[0]?.url)finalUrl=data.tracks[0].url;
+      }catch(err){console.error('[BP error]',err?.message||err);}
+      btn.textContent='Beatport ↗';btn.style.opacity='';
+      if(win&&!win.closed)win.location.href=finalUrl;
+      else window.open(finalUrl,'_blank','noreferrer');
+    }
+  },'Beatport ↗');
+
+  const buyBtns=[bcBtn,bpBtn];
   // Discogs is a crate-digger's marketplace/database for physical media —
   // a release with no vinyl pressing at all (digital-only) has nothing to
   // redirect to there. A release bundling both digital and vinyl formats
