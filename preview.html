@@ -4185,15 +4185,9 @@ function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
 function getCachedNodeData(type,discogsId){
   const key=(type==='label'?'l8:':'a7:')+discogsId;
   const c=lsGet(key);
-  // Temporary diagnostic (2026-07-17) — three rounds of fixes for the
-  // reload-after-login report haven't stuck; this pins down which of the
-  // possible causes (never cached, expired, version mismatch, evicted) is
-  // actually happening instead of guessing a fourth time. Remove once
-  // confirmed fixed — see memory/project_waxtree_localstorage_quota.
-  if(!c){console.info('[WaxTree Debug] cache MISS (no entry at all) for',key);return null;}
-  if(c._v!==TRACK_DATA_VERSION){console.info('[WaxTree Debug] cache MISS (version mismatch) for',key,'cached _v=',c._v,'current TRACK_DATA_VERSION=',TRACK_DATA_VERSION);return null;}
-  if(type==='artist'&&!c.tracks?.length){console.info('[WaxTree Debug] cache MISS (no tracks in cached entry) for',key);return null;}
-  console.info('[WaxTree Debug] cache HIT for',key);
+  if(!c)return null;
+  if(c._v!==TRACK_DATA_VERSION)return null;
+  if(type==='artist'&&!c.tracks?.length)return null;
   return c;
 }
 
@@ -6644,41 +6638,7 @@ purgeExpiredCache();
   // is known before ensureNodeLoaded(st.selectedId) runs further down.
   const selNode=getNode(st.selectedId);
   const selKey=selNode?(selNode.type==='label'?'l8:':'a7:')+selNode.discogsId:null;
-  // Temporary diagnostic (2026-07-17) — see getCachedNodeData()'s comment.
-  let ct2Bytes=0,ct2Count=0;
-  for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('ct2:')){ct2Bytes+=k.length+(localStorage.getItem(k)||'').length;ct2Count++;}}
-  console.info('[WaxTree Debug] boot: selectedId=',st.selectedId,'selNode=',selNode?.name,selNode?.type,selNode?.discogsId,
-    '| selKey=',selKey,'| present in ct2: BEFORE budget enforcement =',selKey?!!localStorage.getItem('ct2:'+selKey):'n/a',
-    '| total ct2: cache =',(ct2Bytes/1024/1024).toFixed(2),'MB across',ct2Count,'entries');
   enforceCacheBudget(selKey);
-  console.info('[WaxTree Debug] boot: present in ct2: AFTER budget enforcement =',selKey?!!localStorage.getItem('ct2:'+selKey):'n/a');
-
-  // Extended diagnostic (2026-08-03) — CT2_BUDGET_BYTES only bounds the
-  // ct2: cache specifically, but the actual sign-out failure mode (a
-  // failed localStorage write for Supabase's own session token, which
-  // GoTrue then treats as an invalid session) depends on TOTAL usage
-  // across every key this origin holds, not just that one. Several other
-  // keys (the Discogs collection/wantlist mirror, the local library index
-  // and its match results, the YouTube video-match cache, the profile
-  // photo) have no budget at all and can add up to real size for a long-
-  // term/heavy user. Logging the full breakdown here so the next time a
-  // spontaneous sign-out is reported, the real numbers are already in the
-  // console instead of having to reproduce it live first.
-  let otherBytes=0,totalBytes=0;
-  const otherByPrefix={};
-  for(let i=0;i<localStorage.length;i++){
-    const k=localStorage.key(i);if(!k)continue;
-    const size=k.length+(localStorage.getItem(k)||'').length;
-    totalBytes+=size;
-    if(k.startsWith('ct2:'))continue;
-    otherBytes+=size;
-    const label=k.startsWith('sb-')?'supabase-auth':k;
-    otherByPrefix[label]=(otherByPrefix[label]||0)+size;
-  }
-  const topOther=Object.entries(otherByPrefix).sort((a,b)=>b[1]-a[1]).slice(0,8)
-    .map(([k,v])=>k+':'+(v/1024).toFixed(0)+'KB').join(', ');
-  console.info('[WaxTree Debug] boot: TOTAL localStorage =',(totalBytes/1024/1024).toFixed(2),'MB',
-    '(ct2:',(ct2Bytes/1024/1024).toFixed(2),'MB + other',(otherBytes/1024/1024).toFixed(2),'MB) | biggest other keys:',topOther);
 }
 
 (async()=>{
