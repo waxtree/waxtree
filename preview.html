@@ -1567,6 +1567,24 @@ const SB_KEY='sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ';
 const sb=createClient(SB_URL,SB_KEY);
 let wtSession=null;
 
+// supabase-js's default autoRefreshToken relies on a plain setTimeout to
+// wake up shortly before the access token expires — browsers heavily
+// throttle timers in backgrounded/inactive tabs (this is standard browser
+// power-saving behavior, not a bug), so a tab left open-but-unfocused for
+// a while can miss its scheduled refresh entirely and silently sit on an
+// expired token with no error logged anywhere. The user then returns,
+// interacts (or hard-refreshes), and gets bounced to login with a "lost
+// everything since last save" experience and zero console evidence — this
+// matches the recurring spontaneous-sign-out reports exactly. This is
+// Supabase's own documented fix: explicitly pause the refresh loop while
+// hidden and force an immediate refresh check the instant the tab becomes
+// visible again, instead of trusting a background timer that may never
+// fire in time. https://supabase.com/docs/reference/javascript/auth-startautorefresh
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible')sb.auth.startAutoRefresh();
+  else sb.auth.stopAutoRefresh();
+});
+
 // ── Digging events (Phase 0 of the taste engine) ───────────
 // Append-only behavioral log (see supabase/digging_events.sql). The
 // exploration edges — which artist/label a digger jumped to and from
@@ -6908,7 +6926,24 @@ function buildApp(){
 }
 
 sb.auth.onAuthStateChange((event)=>{
-  if(event==='SIGNED_OUT')window.location.href='login.html';
+  if(event!=='SIGNED_OUT')return;
+  // SIGNED_OUT fires both for a real, explicit sign-out AND as a side
+  // effect of a failed background refresh attempt (e.g. a transient
+  // network blip right as a backgrounded tab wakes up) — the SDK can't
+  // tell those apart, so neither can this handler at face value. Rather
+  // than trust the event blindly and redirect (which is exactly the
+  // "everything I was doing just vanished" failure the user keeps
+  // reporting), ask Supabase directly for a fresh session first: a real
+  // sign-out has nothing to recover and this resolves near-instantly, but
+  // a spurious event tied to a momentary refresh failure often has a
+  // valid stored refresh token that a second attempt succeeds with. Only
+  // redirect if that check also comes back empty.
+  console.warn('[WaxTree] SIGNED_OUT event received — verifying before redirecting to login');
+  sb.auth.getSession().then(({data:{session}})=>{
+    if(session){console.warn('[WaxTree] SIGNED_OUT was spurious — session recovered, staying put');wtSession=session;return;}
+    console.warn('[WaxTree] SIGNED_OUT confirmed — no recoverable session, redirecting to login');
+    window.location.href='login.html';
+  });
 });
 
 window.addEventListener('resize',positionYtHost);
