@@ -4057,6 +4057,16 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
   // (same catalog, matching title) that IS vinyl before concluding there's
   // no vinyl pressing at all.
   const hasVinyl=(rd.formats||[]).some(f=>/vinyl/i.test(f.name))||!!vinylTitles?.has(normalizeStr(rd.title||''));
+  // Discogs groups every pressing of the same release (different vinyl
+  // colors, a digital reissue, etc.) under one master_id — confirmed live
+  // 2026-08-04: a user owned the "Limited Edition Blue" vinyl of an EP, but
+  // the artist page happened to surface a DIFFERENT release id for the
+  // same EP, so inDiscogsCollection()'s plain release-id check never
+  // matched even though it's genuinely the same record. Only present on a
+  // real per-release fetch (rd.master_id references a DIFFERENT id); a
+  // master object fetched directly via fetchId='m'+id has no such field on
+  // itself, so this naturally does nothing extra in that case.
+  const masterAltId=rd.master_id?'m'+rd.master_id:null;
   const labelId=rd.labels?.[0]?.id||null;
   const labelName=rd.labels?.[0]?.name||relLabelHint||'';
   // Discogs lists a release's artists in billing order — the first entry
@@ -4119,6 +4129,7 @@ function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='
     year,label:labelName,labelId,genre,thumbUrl,bpm,album:rd.title||'',
     digital:isDigital,hasVinyl,discogsUrl:releaseUrl,videoId:matchVideo(i),catno:'',
     fromLabel:false,trackArtistName,trackArtistId,trackArtists,releaseArtistName,releaseArtistId,
+    altIds:masterAltId?[masterAltId]:[],
     exploreId:null,exploreName:null,exploreType:null,exploreLabel:null
   };});
 }
@@ -4912,8 +4923,13 @@ function mergeReleaseVariantTracks(tracks){
   tracks.forEach(t=>{
     const key=normalizeStr(t.title);
     const existing=byTitle.get(key);
-    if(!existing){byTitle.set(key,{...t,altIds:[]});return;}
+    // Preserve whatever altIds the row already carries (e.g. a master_id
+    // entry from buildTrackEntries — see its own comment) rather than
+    // resetting to empty; a track with only one title-row on this page
+    // still needs its own altIds checked, not just merged duplicates.
+    if(!existing){byTitle.set(key,{...t,altIds:[...(t.altIds||[])]});return;}
     if(t.id!==existing.id)existing.altIds.push(t.id);
+    if(t.altIds?.length)existing.altIds.push(...t.altIds);
     if(!existing.duration&&t.duration)existing.duration=t.duration;
     if(!existing.videoId&&t.videoId)existing.videoId=t.videoId;
     if(!existing.bpm&&t.bpm)existing.bpm=t.bpm;
