@@ -3090,6 +3090,77 @@ function getSourceGenreSet(){
   if(dt?.resolved?.genreSet?.length)return new Set(dt.resolved.genreSet);
   return new Set();
 }
+// Kicks off the YouTube Mix fetch+verify chain for the given now-playing
+// track if it isn't already cached, in flight, or on cooldown. Called
+// unconditionally for every now-playing track regardless of which source
+// is currently SELECTED — confirmed live 2026-08-04: switching the
+// dropdown used to start this whole chain cold at the moment of switching,
+// so a switch always felt like waiting from zero even though the other
+// source had had the entire time-since-play to work in the background.
+// Both sources now run independently and concurrently; switching just
+// changes which cache renderRelatedTracks() below reads from to display.
+function ensureYtRelatedLoading(np){
+  const videoId=np.videoId;
+  if(!videoId)return;
+  const cached=lsGet('ytmix:'+videoId);
+  if(cached){
+    const verifyKey='ytver3:'+videoId;
+    if(lsGet(verifyKey))return; // already verified
+    if(relatedGaveUp('ytverify:'+videoId))return;
+    if(!ytVerifyLoading.has(videoId)&&!relatedOnCooldown('ytverify:'+videoId)){
+      ytVerifyLoading.add(videoId);
+      const items=filterYtMixItems(cached,videoId,np.artistName);
+      verifyYtMixItems(items,getSourceGenreSet())
+        .then(({items,complete})=>{
+          if(complete){lsSet(verifyKey,items);relatedResetRetries('ytverify:'+videoId);}
+          else relatedMarkFailed('ytverify:'+videoId);
+        })
+        .catch(e=>{console.warn('WaxTree: Related by YouTube verification failed (will retry):',e?.message||e);relatedMarkFailed('ytverify:'+videoId);})
+        .then(()=>{ytVerifyLoading.delete(videoId);renderRelatedTracks();});
+    }
+    return;
+  }
+  if(relatedGaveUp('ytmix:'+videoId))return;
+  if(!ytMixLoading.has(videoId)&&!relatedOnCooldown('ytmix:'+videoId)){
+    ytMixLoading.add(videoId);
+    fetchYoutubeMix(videoId)
+      .then(()=>relatedResetRetries('ytmix:'+videoId))
+      .catch(e=>{console.warn('WaxTree: Related by YouTube failed (will retry):',e?.message||e);relatedMarkFailed('ytmix:'+videoId);return[];})
+      .then(()=>{ytMixLoading.delete(videoId);renderRelatedTracks();});
+  }
+}
+// Same idea as ensureYtRelatedLoading, for Cosine.club's own two-stage
+// pipeline (track-id lookup, then similar-tracks resolve).
+function ensureCosineRelatedLoading(np){
+  const cachedId=cosineIdMap[np.trackId];
+  if(cachedId===undefined){
+    if(relatedGaveUp('id:'+np.trackId))return;
+    if(!cosineIdLoading.has(np.trackId)&&!relatedOnCooldown('id:'+np.trackId)){
+      cosineIdLoading.add(np.trackId);
+      resolveCosineTrackId(np)
+        .then(id=>{if(id===undefined)relatedMarkFailed('id:'+np.trackId);else relatedResetRetries('id:'+np.trackId);})
+        .catch(()=>{relatedMarkFailed('id:'+np.trackId);})
+        .then(()=>{cosineIdLoading.delete(np.trackId);renderRelatedTracks();});
+    }
+    return;
+  }
+  if(cachedId===false)return; // confirmed: no Cosine entry for this track
+  const cosineId=cachedId;
+  const cardsKey='cosinecards:'+cosineId;
+  if(lsGet(cardsKey))return;
+  if(relatedGaveUp('cards:'+cosineId))return;
+  if(!cosineResolveLoading.has(cosineId)&&!relatedOnCooldown('cards:'+cosineId)){
+    cosineResolveLoading.add(cosineId);
+    fetchCosineSimilar(cosineId)
+      .then(items=>resolveCosineCards(filterCosineItems(items,np)))
+      .then(({cards,complete})=>{
+        if(complete){lsSet(cardsKey,cards);relatedResetRetries('cards:'+cosineId);}
+        else relatedMarkFailed('cards:'+cosineId);
+      })
+      .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed (will retry):',e?.message||e);relatedMarkFailed('cards:'+cosineId);})
+      .then(()=>{cosineResolveLoading.delete(cosineId);renderRelatedTracks();});
+  }
+}
 function renderRelatedTracks(){
   const host=document.getElementById('related-tracks');
   if(!host)return;
@@ -3134,6 +3205,10 @@ function renderRelatedTracks(){
     host.appendChild(s('rp-coming-soon','Play something to see picks'));
     return;
   }
+  // Both sources search independently, regardless of which one is
+  // currently selected below — see ensureYtRelatedLoading's own comment.
+  ensureYtRelatedLoading(st.nowPlaying);
+  ensureCosineRelatedLoading(st.nowPlaying);
   if(st.relatedTracksSource==='youtube'){
     const videoId=st.nowPlaying.videoId;
     if(!videoId){
@@ -3153,8 +3228,7 @@ function renderRelatedTracks(){
       // so a previously-cached bad result gets thrown away and re-checked
       // with the improved logic, instead of sitting there for its full
       // 30-day TTL.
-      const verifyKey='ytver3:'+videoId;
-      const verified=lsGet(verifyKey);
+      const verified=lsGet('ytver3:'+videoId);
       if(verified){
         if(!verified.length){host.appendChild(s('rp-coming-soon','No verified related tracks found'));return;}
         verified.forEach(item=>host.appendChild(buildRelatedCard({
@@ -3167,34 +3241,12 @@ function renderRelatedTracks(){
         host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
         return;
       }
-      if(!ytVerifyLoading.has(videoId)&&!relatedOnCooldown('ytverify:'+videoId)){
-        ytVerifyLoading.add(videoId);
-        const items=filterYtMixItems(cached,videoId,st.nowPlaying.artistName);
-        verifyYtMixItems(items,getSourceGenreSet())
-          .then(({items,complete})=>{
-            // Only a CLEAN pass (no Discogs-call errors along the way)
-            // gets persisted — a partial/failed pass just cools down and
-            // retries next render instead of locking in an incomplete
-            // answer as if it were a confirmed "nothing verified".
-            if(complete){lsSet(verifyKey,items);relatedResetRetries('ytverify:'+videoId);}
-            else relatedMarkFailed('ytverify:'+videoId);
-          })
-          .catch(e=>{console.warn('WaxTree: Related by YouTube verification failed (will retry):',e?.message||e);relatedMarkFailed('ytverify:'+videoId);})
-          .then(()=>{ytVerifyLoading.delete(videoId);renderRelatedTracks();});
-      }
       host.appendChild(s('rp-coming-soon','Verifying…'));
       return;
     }
     if(relatedGaveUp('ytmix:'+videoId)){
       host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
       return;
-    }
-    if(!ytMixLoading.has(videoId)&&!relatedOnCooldown('ytmix:'+videoId)){
-      ytMixLoading.add(videoId);
-      fetchYoutubeMix(videoId)
-        .then(()=>relatedResetRetries('ytmix:'+videoId))
-        .catch(e=>{console.warn('WaxTree: Related by YouTube failed (will retry):',e?.message||e);relatedMarkFailed('ytmix:'+videoId);return[];})
-        .then(()=>{ytMixLoading.delete(videoId);renderRelatedTracks();});
     }
     host.appendChild(s('rp-coming-soon','Loading…'));
     return;
@@ -3207,13 +3259,6 @@ function renderRelatedTracks(){
         host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
         return;
       }
-      if(!cosineIdLoading.has(np.trackId)&&!relatedOnCooldown('id:'+np.trackId)){
-        cosineIdLoading.add(np.trackId);
-        resolveCosineTrackId(np)
-          .then(id=>{if(id===undefined)relatedMarkFailed('id:'+np.trackId);else relatedResetRetries('id:'+np.trackId);})
-          .catch(()=>{relatedMarkFailed('id:'+np.trackId);})
-          .then(()=>{cosineIdLoading.delete(np.trackId);renderRelatedTracks();});
-      }
       host.appendChild(s('rp-coming-soon','Looking up track…'));
       return;
     }
@@ -3222,8 +3267,7 @@ function renderRelatedTracks(){
       return;
     }
     const cosineId=cachedId;
-    const cardsKey='cosinecards:'+cosineId;
-    const cards=lsGet(cardsKey);
+    const cards=lsGet('cosinecards:'+cosineId);
     if(cards){
       if(!cards.length){host.appendChild(s('rp-coming-soon','No related tracks found'));return;}
       cards.forEach(item=>host.appendChild(buildRelatedCard({
@@ -3236,20 +3280,6 @@ function renderRelatedTracks(){
     if(relatedGaveUp('cards:'+cosineId)){
       host.appendChild(s('rp-coming-soon','Couldn\'t load related tracks — try again later'));
       return;
-    }
-    if(!cosineResolveLoading.has(cosineId)&&!relatedOnCooldown('cards:'+cosineId)){
-      cosineResolveLoading.add(cosineId);
-      fetchCosineSimilar(cosineId)
-        .then(items=>resolveCosineCards(filterCosineItems(items,np)))
-        .then(({cards,complete})=>{
-          // Only a CLEAN pass (no request errors along the way) gets
-          // persisted — a partial/failed pass just cools down and retries
-          // next render instead of locking in an incomplete answer.
-          if(complete){lsSet(cardsKey,cards);relatedResetRetries('cards:'+cosineId);}
-          else relatedMarkFailed('cards:'+cosineId);
-        })
-        .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed (will retry):',e?.message||e);relatedMarkFailed('cards:'+cosineId);})
-        .then(()=>{cosineResolveLoading.delete(cosineId);renderRelatedTracks();});
     }
     host.appendChild(s('rp-coming-soon','Finding related tracks…'));
     return;
