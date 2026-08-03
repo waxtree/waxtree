@@ -1694,12 +1694,40 @@ function saveSt(){
 // localStorage alone is one "clear site data" click away from wiping every
 // wood, node, playlist and like a user has. Mirror the same payload to a
 // Supabase table (RLS-scoped to the user) so it survives that.
+//
+// 1000ms, not the original 4000ms — confirmed live 2026-08-04: a sign-out
+// (same underlying recurring bug) landing inside that debounce window
+// meant whatever the user did in roughly the last 4 seconds beforehand
+// had never actually reached the cloud yet, so it wasn't there to restore
+// even though the LOCAL save itself (saveSt(), called synchronously on
+// every single rr()) was already correct. Shortened rather than removed —
+// still coalesces genuinely rapid changes (e.g. typing in a search box)
+// into one write instead of one per keystroke.
 let stateSyncTimer=null;
 function scheduleCloudSync(){
   if(!wtSession)return;
   if(stateSyncTimer)clearTimeout(stateSyncTimer);
-  stateSyncTimer=setTimeout(pushStateToCloud,4000);
+  stateSyncTimer=setTimeout(pushStateToCloud,1000);
 }
+// Best-effort last line of defense for the tiny window scheduleCloudSync's
+// own debounce still leaves — if the tab is about to close, refresh, or
+// navigate away with a sync still pending, fire it immediately instead of
+// letting it evaporate unsent. Not a guarantee (a fetch started here can
+// still be cut off if the browser tears the page down before it
+// completes), but Chrome/Firefox generally give an in-flight request
+// launched from a visibilitychange/pagehide handler a real chance to
+// finish, unlike one merely scheduled for later. pagehide (fires
+// reliably, including on mobile Safari, unlike beforeunload) and
+// visibilitychange (covers switching tabs/apps, not just closing) are
+// both wired for the same reason: no single one of these events is
+// consistently supported everywhere.
+function flushPendingCloudSync(){
+  if(!stateSyncTimer)return;
+  clearTimeout(stateSyncTimer);stateSyncTimer=null;
+  pushStateToCloud();
+}
+window.addEventListener('pagehide',flushPendingCloudSync);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')flushPendingCloudSync();});
 // Snapshots into user_state_history (see supabase/user_state_history.sql)
 // are append-only from the client — no update/delete policy at all — so
 // nothing a future bug does can ever destroy a past one, unlike
@@ -1923,8 +1951,22 @@ async function hydrateFromCloud(){
     // nodes-only check would have missed entirely. If local looks
     // suspiciously wiped next to a cloud copy that clearly has real
     // content, restore from cloud regardless of which timestamp is newer.
+    //
+    // TIMESTAMP_GRACE_MS: localTs is recorded client-side the instant an
+    // action happens; cloudTs (updated_at) is set server-side once that
+    // same save's network round trip actually lands — always somewhat
+    // LATER in wall-clock time even when it's syncing the exact same
+    // action, purely from latency. Without slack here, a cloud save that
+    // finished syncing moments before a sign-out could look "newer" than
+    // local by a couple hundred ms even though there's nothing new in it
+    // — confirmed live 2026-08-04 as recent local activity (new nodes,
+    // played tracks) getting quietly overwritten by a cloud copy that
+    // wasn't actually more complete, just timestamped later purely from
+    // network timing. Cloud has to be newer by more than ordinary sync
+    // latency to count as a real reason to prefer it over local.
+    const TIMESTAMP_GRACE_MS=5000;
     const looksWiped=looksLikeDataWipe(st,c);
-    if(cloudTs<=localTs&&!looksWiped)return; // local copy is genuinely newer/equal and not suspiciously wiped — nothing to recover
+    if(cloudTs<=localTs+TIMESTAMP_GRACE_MS&&!looksWiped)return; // local copy is at least as current (within normal sync latency) and not suspiciously wiped — nothing to recover
     if(looksWiped)console.warn('WaxTree: local state looks wiped next to a real cloud backup — restoring from cloud despite the local timestamp.');
     if(c.branches?.length)st.branches=c.branches;
     if(c.nodes)st.nodes=c.nodes.map(n=>({...n,pinned:!!n.pinned,tags:n.tags||[],loaded:false,loading:false,error:null,data:null}));
