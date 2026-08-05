@@ -111,6 +111,7 @@ input,select{font:inherit;color:inherit}
 .sb-pin-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);flex-shrink:0;display:none}
 .sb-item.pinned .sb-pin-dot{display:block}
 .sb-name{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.sb-explored-badge{font-size:9px;font-weight:600;padding:1px 6px;border-radius:20px;background:rgba(94,196,123,.14);color:var(--accent);white-space:nowrap;flex-shrink:0}
 .sb-tags{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
 .sb-tag{font-size:10px;padding:1px 6px;border-radius:20px;background:rgba(94,196,123,.12);color:var(--accent);display:flex;align-items:center;gap:3px}
 .sb-tag-rm{font-size:9px;opacity:.6;cursor:pointer;line-height:1}
@@ -4986,6 +4987,31 @@ function mergeReleaseVariantTracks(tracks){
   });
   return[...byTitle.values()];
 }
+// A node counts as fully explored when nothing is left in its normal
+// browsable list — mirrors exactly what buildNodePanel already computes to
+// decide what shows there (owned-in-collection releases pulled into their
+// own section, "Already Listened" releases excluded too — see its own
+// notOwned/listenedGroups/browsableTracks), just run against the node's
+// full unfiltered track list instead of whatever filter happens to be
+// active, so the sidebar badge doesn't depend on transient UI filter state.
+// Deliberately binary, NOT a percentage/coverage metric — that was tried
+// and reverted before (2026-07-18, see memory/
+// project_waxtree_track_playability_gap): YouTube's video-matching quota
+// caps playability well under 100% independent of actual listening
+// behavior, so a raw "% of catalog" figure would be structurally
+// misleading rather than a genuine progress signal. This only ever fires
+// when there's truly nothing left to dig through right now.
+function nodeFullyExplored(node){
+  const tracks=node.data?.tracks;
+  if(!tracks?.length)return false;
+  const notOwned=tracks.filter(t=>!inDiscogsCollection(t));
+  if(!notOwned.length)return true; // everything already owned
+  if(!st.alreadyListened.length)return false; // nothing owned and nothing ever marked listened — definitely not done, skip the grouping work below
+  const notOwnedGroups=groupTracksByRelease(notOwned);
+  const listenedGroups=notOwnedGroups.filter(g=>st.alreadyListened.includes(g.key));
+  const listenedTrackIds=new Set(listenedGroups.flatMap(g=>g.tracks.flatMap(t=>[t.id,...(t.altIds||[])])));
+  return notOwned.every(t=>listenedTrackIds.has(t.id));
+}
 function groupTracksByRelease(tracks){
   const groups=[];
   const byKey=new Map();
@@ -5464,7 +5490,9 @@ function buildSidebar(){
     const iw=d('sb-iw',{});iw.appendChild(node.type==='label'?svgLabel():svgArtist());item.appendChild(iw);
     const main=d('sb-main',{});const top=d('sb-top',{});
     if(isPinned)top.appendChild(s('sb-pin-dot',''));
-    top.appendChild(s('sb-name',node.name));main.appendChild(top);
+    top.appendChild(s('sb-name',node.name));
+    if(node.loaded&&nodeFullyExplored(node))top.appendChild(s('sb-explored-badge','✓ All Explored'));
+    main.appendChild(top);
     if(node.tags?.length){const tr=d('sb-tags',{});node.tags.forEach(tag=>tr.appendChild(d('sb-tag',{},'#'+tag,b('sb-tag-rm',{title:'Remove',onClick:e=>{e.stopPropagation();removeTag(node.id,tag);}},'×'))));main.appendChild(tr);}
     item.appendChild(main);
     const btns=d('sb-btns',{});
