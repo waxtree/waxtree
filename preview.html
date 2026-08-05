@@ -6654,12 +6654,24 @@ function buildApp(){
       b('btn-sec',{onClick:()=>{if(confirm('Clear listen history?')){st.history=[];st.listens={};rr();}}},'Clear')
     ));
     body.appendChild(d('st-row',{},
-      d('',{},s('st-lbl','Mini-player position'),s('st-sub','Reset to default bottom-right corner')),
-      b('btn-sec',{onClick:()=>{ytPos=null;localStorage.removeItem('wt-player-pos');rr();}},'Reset')
-    ));
-    body.appendChild(d('st-row',{},
-      d('',{},s('st-lbl st-danger','⚠ Reset all data'),s('st-sub','Erase all branches, nodes, likes and history')),
-      b('btn-sec',{style:{borderColor:'#F47B5E',color:'#F47B5E'},onClick:()=>{if(confirm('Erase all data? This cannot be undone.')){localStorage.removeItem(SK);location.reload();}}},'Reset')
+      d('',{},s('st-lbl st-danger','⚠ Delete account'),s('st-sub','Permanently delete your account and all data — cannot be undone')),
+      b('btn-sec',{style:{borderColor:'#F47B5E',color:'#F47B5E'},onClick:async(e)=>{
+        const typed=prompt('This permanently deletes your account and everything in it — branches, nodes, likes, playlists, listen history, and your synced Discogs/library links. There is no way to undo this.\n\nType DELETE to confirm:');
+        if(typed!=='DELETE')return;
+        const btn=e.currentTarget;btn.disabled=true;btn.textContent='Deleting…';
+        try{
+          const{data:{session}}=await sb.auth.getSession();
+          const res=await fetch('/api/delete-account',{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});
+          const json=await res.json().catch(()=>({}));
+          if(!res.ok||json.error)throw new Error(json.error||'Delete failed ('+res.status+')');
+          USER_SCOPED_KEYS.forEach(k=>{try{localStorage.removeItem(k);}catch{}});
+          await sb.auth.signOut();
+          window.location.href='login.html';
+        }catch(err){
+          alert('Failed to delete account: '+(err.message||err));
+          btn.disabled=false;btn.textContent='Delete';
+        }
+      }},'Delete')
     ));
 
     modal.appendChild(body);
