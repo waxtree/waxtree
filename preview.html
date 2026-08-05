@@ -1566,6 +1566,21 @@ const SB_KEY='sb_publishable_9_iPPYEKpklE07sQ1dmBow_wecQPqqZ';
 const sb=createClient(SB_URL,SB_KEY);
 let wtSession=null;
 
+// Supabase's own session-persistence layer writes its token to localStorage
+// synchronously as part of signing in, well before sb.auth.getSession()'s
+// own promise resolves — reading it straight back out here gives a reliable
+// "who's actually signed in right now" answer without waiting on that
+// async check, which matters for the account-switch guard below (it has to
+// run and clear stale data BEFORE anything gets rendered with it, not after
+// an awaited call resolves).
+function currentSessionUserId(){
+  try{
+    const raw=localStorage.getItem('sb-'+new URL(SB_URL).hostname.split('.')[0]+'-auth-token');
+    if(!raw)return null;
+    return JSON.parse(raw)?.user?.id||null;
+  }catch{return null;}
+}
+
 // supabase-js's default autoRefreshToken relies on a plain setTimeout to
 // wake up shortly before the access token expires — browsers heavily
 // throttle timers in backgrounded/inactive tabs (this is standard browser
@@ -1684,7 +1699,11 @@ function saveSt(){
     if(e.name==='QuotaExceededError'&&purgeExpiredCache())
       try{localStorage.setItem('wt-discogs-wantlist',JSON.stringify(st.discogsWantlist));}catch{}
   }
-  const corePayload=JSON.stringify({branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened});
+  // ownerId tags this blob with whoever's actually signed in when it's
+  // saved — guardAccountSwitch() (near st's own definition) reads it back
+  // on the next boot to tell "my own data" apart from "a different
+  // account's leftovers on this same browser". See its own comment.
+  const corePayload=JSON.stringify({ownerId:currentSessionUserId(),branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -2018,6 +2037,40 @@ async function hydrateFromCloud(){
     window.Sentry?.captureException instanceof Function&&Sentry.captureException(e,{tags:{area:'cloud-backup-pull'}});
   }
 }
+
+// Confirmed live 2026-08-04: signing out and signing into a DIFFERENT
+// account on the SAME browser showed the previous account's nodes,
+// playlists, and profile photo under the new account's name/session — only
+// the username itself was actually different. localStorage is scoped to
+// the browser origin, not to which Supabase user is currently signed in,
+// so the previous user's blob just sits there and gets loaded into st
+// below regardless of who's actually logged in now. Worse, for a brand
+// new account the cloud row is genuinely empty (nothing to restore yet),
+// and hydrateFromCloud()'s own looksLikeDataWipe guard (added earlier this
+// session to stop a real same-user data-loss bug) can't tell "my data was
+// wiped" apart from "this is someone else's leftover data" — it would
+// actively defend the wrong user's stale local blob against being
+// replaced by the new account's correct, empty one.
+// Every key here is genuinely user-identity-scoped data (collection,
+// library match state, profile photo, the core app-state blob itself);
+// ct2:/wt-yt-*/wt-cosine-* etc. are deliberately excluded — those are
+// shared, disposable, non-identifying caches (Discogs catalog data, video-
+// match lookups), safe and useful to keep across an account switch.
+// 'wt-avatar' is AVATAR_KEY's value — that const is declared much further
+// down the file (temporal dead zone), so it's inlined here rather than
+// referenced, since this whole block has to run before st (and everything
+// after it) exists.
+const USER_SCOPED_KEYS=[SK,SK+':ts','wt-discogs-collection','wt-discogs-wantlist','wt-owned','wt-digital-matches','wt-digital-matches-checked','wt-avatar','wt-player-pos','discogs_token'];
+(function guardAccountSwitch(){
+  const sessionUid=currentSessionUserId();
+  if(!sessionUid)return; // nothing to compare against yet
+  let savedOwner=null;
+  try{savedOwner=JSON.parse(localStorage.getItem(SK)||'null')?.ownerId||null;}catch{}
+  if(savedOwner&&savedOwner!==sessionUid){
+    console.warn('[WaxTree] Different account signed in on this browser — clearing previous account\'s local data to prevent a cross-account leak');
+    USER_SCOPED_KEYS.forEach(k=>{try{localStorage.removeItem(k);}catch{}});
+  }
+})();
 
 const saved=loadSt();
 const st={
