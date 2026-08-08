@@ -2,11 +2,14 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { legacyRouteMap } from './lib/routes';
 import { AdminPage } from './pages/AdminPage';
 import { AppPage } from './pages/AppPage';
-import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from './pages/AuthPages';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { LandingPage } from './pages/LandingPage';
+import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { RegisterPage } from './pages/RegisterPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 
-export default function App() {
+const App = () => {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
@@ -22,4 +25,6 @@ export default function App() {
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
-}
+};
+
+export default App;

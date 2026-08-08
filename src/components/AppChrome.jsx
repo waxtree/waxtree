@@ -38,6 +38,11 @@ export function useTheme() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    // shadcn/Tailwind's dark: variant (see index.css's @custom-variant)
+    // triggers off a `.dark` ancestor class, not data-theme — toggled
+    // alongside it so shadcn components (Button, Card, Input, ...) follow
+    // the same theme switch as the rest of the app.
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('wt-theme', theme);
   }, [theme]);
 
