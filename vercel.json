@@ -1,13 +1,22 @@
 {
-  "framework": null,
-  "buildCommand": "",
-  "outputDirectory": ".",
-  "installCommand": "",
+  "framework": "vite",
+  "buildCommand": "pnpm run build",
+  "outputDirectory": "dist",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "rewrites": [
+    { "source": "/login.html", "destination": "/login" },
+    { "source": "/register.html", "destination": "/register" },
+    { "source": "/forgot-password.html", "destination": "/forgot-password" },
+    { "source": "/reset-password.html", "destination": "/reset-password" },
+    { "source": "/preview.html", "destination": "/app" },
+    { "source": "/admin.html", "destination": "/admin" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
   "headers": [
     {
-      "source": "/(.*).html",
+      "source": "/assets/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "no-store, must-revalidate" }
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {

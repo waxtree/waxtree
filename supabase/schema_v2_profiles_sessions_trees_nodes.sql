@@ -13,8 +13,8 @@
 -- persists everything through the single `user_state` JSONB blob
 -- (see supabase/user_state.sql), not this relational shape.
 --
--- IMPORTANT — this schema is NOT wired into the app yet. preview.html
--- only ever reads/writes user_state, digging_events, follows, and
+-- IMPORTANT — this schema is NOT the app's primary read model yet. The
+-- React client still reads/writes user_state, digging_events, follows, and
 -- yt_video_matches/yt_channel_matches. Creating these tables makes
 -- them available but changes nothing about how WaxTree behaves until
 -- the client is rewritten to actually use them instead of (or

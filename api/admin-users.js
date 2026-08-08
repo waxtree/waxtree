@@ -1,7 +1,7 @@
 import { requireAdmin, sbAdmin, setCors } from './_admin.js'
 
 // GET /api/admin-users — every registered user, with the REAL premium flag
-// (user_metadata.premium, not profiles.tier — see admin.html/plan notes on
+// (user_metadata.premium, not profiles.tier — see the admin route notes on
 // why) plus profiles.tier alongside it as a cross-check: a mismatch flags a
 // user whose syncNewSchema() dual-write never caught up.
 export default async function handler(req, res) {
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     const tierById = Object.fromEntries(profiles.map(p => [p.id, p.tier]))
 
     // user_state.data.nodes is each user's actual saved tree (see
-    // preview.html's saveSt/pushStateToCloud) — counting it directly is
+    // the React app's save/sync flow — counting it directly is
     // more reliable than tallying 'explore' digging_events, since a node
     // stays counted here even if it was added before digging_events
     // shipped, or its own logEvent batch got dropped client-side.

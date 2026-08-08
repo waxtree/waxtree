@@ -2,10 +2,10 @@ import { requireAdmin, sbAdmin, setCors } from './_admin.js'
 
 // POST /api/admin-set-premium  { user_id, premium }
 //
-// The app's real premium flag is user_metadata.premium (see preview.html's
+// The app's real premium flag is user_metadata.premium (see the React app's
 // own st.isPremium = wtSession.user.user_metadata?.premium===true) — NOT
 // public.profiles.tier, which a different in-progress migration mirrors
-// but which preview.html's own comment says is "not authoritative". GoTrue's
+// dual-write path: profiles.tier is mirrored but not authoritative. GoTrue's
 // admin update REPLACES user_metadata wholesale, not a deep merge — that
 // field also carries owned_tracks/library_track_count/search_count/username,
 // so this always fetches the current object and spreads over it rather than

@@ -1,10 +1,6 @@
 #!/usr/bin/env node
-// Standalone-HTML syntax gate. WaxTree ships as plain HTML files with
-// inline <script> blocks and no build step, so nothing (tsc, webpack,
-// eslint) ever parses this JS before it reaches production — a stray
-// unbalanced brace or bad edit only surfaces when a real browser loads the
-// live page. This mirrors the manual `node --check` verification already
-// done before every commit and runs it automatically in CI instead.
+// Lightweight syntax gate for any remaining inline scripts and Vercel API
+// handlers. The React app itself is covered by `pnpm run build`.
 import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

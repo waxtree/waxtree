@@ -51,7 +51,7 @@ export default async function handler(req, res) {
     const eventsByType = {}
     let events7d = 0
     // 'play' events carry the real Discogs genre/style string of whatever
-    // was playing (see preview.html's tryBadge -> logEvent('play',...)).
+    // was playing.
     const genreCounts = {}
     const lastEventById = {}
     for (const e of events) {

@@ -15,7 +15,7 @@ function allowlist() {
 }
 
 // Verifies the caller's own Supabase session JWT (sent as a normal
-// Authorization: Bearer header by admin.html, exactly like the app already
+// Authorization: Bearer header by the React admin route, exactly like the app
 // does everywhere else) and checks the resulting user id against the
 // allowlist. Returns the verified user object on success; on failure it
 // sends the error response itself and returns null, so every handler can

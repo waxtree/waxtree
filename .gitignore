@@ -3,8 +3,6 @@
 .AppleDouble
 .LSOverride
 
-# Local dev config (Claude Code, paths locali)
-.claude/
 
 # Dipendenze
 node_modules/
