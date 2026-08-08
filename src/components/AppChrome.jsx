@@ -78,7 +78,7 @@ export function Brand({ subtitle }) {
   return (
     <div className="mb-8 text-center">
       <img className="mx-auto mb-[18px] size-[92px] object-contain" src="/logo.svg" alt="" />
-      <div className="text-[26px] font-bold text-[#3DAE79]">WaxTree</div>
+      <div className="text-[26px] font-bold text-primary">WaxTree</div>
       <div className="mt-1.5 text-[13px] text-[var(--wt-muted)]">{subtitle}</div>
     </div>
   );
