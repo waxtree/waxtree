@@ -34,6 +34,15 @@ interface Store {
 
   likeTrack: (trackId: string) => void;
   tickListen: (trackId: string) => void;
+  restoreSnapshot: (snapshot: Partial<StoreSnapshot>) => void;
+}
+
+export interface StoreSnapshot {
+  theme: Theme;
+  branches: Branch[];
+  activeBranchId: string;
+  likes: Record<string, boolean>;
+  listens: Record<string, ListenState>;
 }
 
 const mkBranch = (name: string): Branch => ({
@@ -62,6 +71,7 @@ function patchBranch(branches: Branch[], branchId: string, fn: (b: Branch) => Br
 }
 
 function patchNode(b: Branch, nodeId: string, fn: (n: TreeNode) => TreeNode): Branch {
+  if (!b.nodes[nodeId]) return b;
   return { ...b, nodes: { ...b.nodes, [nodeId]: fn(b.nodes[nodeId]) } };
 }
 
@@ -76,8 +86,37 @@ function patchRelease(b: Branch, nodeId: string, releaseId: number, fn: (r: Rele
 
 const firstBranch = mkBranch('Ramo 1');
 
+function stripHeavyNodeData(node: TreeNode): TreeNode {
+  return {
+    ...node,
+    data: undefined,
+    loaded: false,
+    loading: false,
+    error: undefined,
+  };
+}
+
+function stripHeavyBranchData(branch: Branch): Branch {
+  return {
+    ...branch,
+    nodes: Object.fromEntries(
+      Object.entries(branch.nodes).map(([id, node]) => [id, stripHeavyNodeData(node)]),
+    ),
+  };
+}
+
+export function snapshotFromState(state: Pick<Store, 'theme' | 'branches' | 'activeBranchId' | 'likes' | 'listens'>): StoreSnapshot {
+  return {
+    theme: state.theme,
+    branches: state.branches.map(stripHeavyBranchData),
+    activeBranchId: state.activeBranchId,
+    likes: state.likes,
+    listens: state.listens,
+  };
+}
+
 export const useStore = create<Store>()(
-  persist(
+  persist<Store, [], [], StoreSnapshot>(
     (set) => ({
       theme: 'dark',
       branches: [firstBranch],
@@ -177,9 +216,26 @@ export const useStore = create<Store>()(
           const badged = prev.badged || seconds >= 60;
           return { listens: { ...s.listens, [trackId]: { seconds, badged } } };
         }),
+      restoreSnapshot: (snapshot) =>
+        set(s => {
+          const branches = Array.isArray(snapshot.branches) && snapshot.branches.length > 0
+            ? snapshot.branches.map(stripHeavyBranchData)
+            : s.branches;
+          const activeBranchId = snapshot.activeBranchId && branches.some(branch => branch.id === snapshot.activeBranchId)
+            ? snapshot.activeBranchId
+            : branches[0]?.id ?? s.activeBranchId;
+          return {
+            theme: snapshot.theme === 'light' || snapshot.theme === 'dark' ? snapshot.theme : s.theme,
+            branches,
+            activeBranchId,
+            likes: snapshot.likes ?? s.likes,
+            listens: snapshot.listens ?? s.listens,
+          };
+        }),
     }),
     {
-      name: 'crate-tree-v1',
+      name: 'waxtree-v2',
+      partialize: snapshotFromState,
       onRehydrateStorage: () => (state) => {
         if (state) {
           document.documentElement.setAttribute('data-theme', state.theme);

@@ -1,8 +1,5 @@
 import type { ArtistData, DiscogsSearchResult, Release, Track } from '../types';
 
-const BASE = 'https://api.discogs.com';
-const TOKEN = import.meta.env.VITE_DISCOGS_TOKEN as string;
-
 let reqCount = 0;
 let windowStart = Date.now();
 
@@ -15,18 +12,17 @@ async function req<T>(path: string, params: Record<string, string> = {}): Promis
   }
   reqCount++;
 
-  const url = new URL(`${BASE}${path}`);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-
-  const res = await fetch(url.toString(), {
+  const res = await fetch('/api/discogs-oauth', {
+    method: 'POST',
     headers: {
-      Authorization: `Discogs token=${TOKEN}`,
-      'User-Agent': 'CrateTree/1.0 +https://github.com/cratetree',
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({ action: 'search', path, params }),
   });
-  if (res.status === 429) throw new Error('Rate limit raggiunto — riprova tra qualche secondo');
-  if (!res.ok) throw new Error(`Discogs API ${res.status}`);
-  return res.json() as Promise<T>;
+  const body = await res.json().catch(() => null);
+  if (res.status === 429) throw new Error('Discogs is busy. Try again in a moment.');
+  if (!res.ok) throw new Error(body?.error ?? `Discogs API ${res.status}`);
+  return body as T;
 }
 
 function lsGet<T>(key: string): T | null {

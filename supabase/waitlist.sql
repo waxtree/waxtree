@@ -5,7 +5,7 @@
 -- Captures interest from the landing page's "Join the Waitlist" form.
 -- No account is created at signup time — this is intentionally just
 -- a lead list. Approve people manually (create their account the
--- normal way, e.g. via register.html or the Supabase dashboard) when
+-- normal way, e.g. via the /register route or the Supabase dashboard) when
 -- you're ready to onboard them, then email them their access details.
 -- ============================================================
 

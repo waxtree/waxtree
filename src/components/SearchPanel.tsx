@@ -19,6 +19,14 @@ export function SearchPanel({ branchId, onNodeAdded }: Props) {
 
   const addRootNode = useStore(s => s.addRootNode);
 
+  const pick = useCallback((r: DiscogsSearchResult) => {
+    const nodeId = addRootNode(branchId, 'artist', r.id, r.title);
+    setQuery('');
+    setResults([]);
+    setDisambig(false);
+    onNodeAdded(nodeId);
+  }, [addRootNode, branchId, onNodeAdded]);
+
   const doSearch = useCallback(async (q: string) => {
     if (!q.trim()) { setResults([]); return; }
     setLoading(true); setError('');
@@ -35,7 +43,7 @@ export function SearchPanel({ branchId, onNodeAdded }: Props) {
     } finally {
       setLoading(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pick]);
 
   useEffect(() => {
     clearTimeout(timerRef.current);
@@ -43,14 +51,6 @@ export function SearchPanel({ branchId, onNodeAdded }: Props) {
     timerRef.current = setTimeout(() => doSearch(query), 400);
     return () => clearTimeout(timerRef.current);
   }, [query, doSearch]);
-
-  const pick = (r: DiscogsSearchResult) => {
-    const nodeId = addRootNode(branchId, 'artist', r.id, r.title);
-    setQuery(''); setResults([]); setDisambig(false);
-    onNodeAdded(nodeId);
-  };
-
-  const token = import.meta.env.VITE_DISCOGS_TOKEN as string;
 
   return (
     <>
@@ -60,11 +60,10 @@ export function SearchPanel({ branchId, onNodeAdded }: Props) {
           <input
             ref={inputRef}
             className="search-bar__input"
-            placeholder={token ? 'Cerca artista o label…' : '⚠ Aggiungi VITE_DISCOGS_TOKEN nel file .env'}
+            placeholder="Search artist or label"
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => e.key === 'Escape' && setQuery('')}
-            disabled={!token}
           />
           {query && <button className="search-bar__clear" onClick={() => { setQuery(''); setResults([]); inputRef.current?.focus(); }}>✕</button>}
         </div>
@@ -77,7 +76,7 @@ export function SearchPanel({ branchId, onNodeAdded }: Props) {
               <div key={r.id} className="search-result" onClick={() => pick(r)}>
                 {r.thumb
                   ? <img className="search-result__img" src={r.thumb} alt="" />
-                  : <div className="search-result__img-ph">🎵</div>}
+                  : <div className="search-result__img-ph">WT</div>}
                 <div>
                   <div className="search-result__name">{r.title}</div>
                   <div className="search-result__type">{r.type}</div>
@@ -108,14 +107,14 @@ function DisambiguationDialog({
     <div className="overlay" onClick={onClose}>
       <div className="dialog" onClick={e => e.stopPropagation()}>
         <div className="dialog__header">
-          <span className="dialog__title">Scegli l'artista</span>
-          <button className="dialog__close" onClick={onClose}>✕</button>
+          <span className="dialog__title">Choose artist</span>
+          <button className="dialog__close" onClick={onClose}>x</button>
         </div>
         {results.map(r => (
           <div key={r.id} className="dialog__item" onClick={() => onPick(r)}>
             {r.thumb
               ? <img className="dialog__img" src={r.thumb} alt="" />
-              : <div className="dialog__img" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🎵</div>}
+              : <div className="dialog__img" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>WT</div>}
             <div>
               <div className="dialog__name">{r.title}</div>
               {r.uri && <div className="dialog__sub">discogs.com{r.uri}</div>}

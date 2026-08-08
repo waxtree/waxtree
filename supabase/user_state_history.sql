@@ -15,7 +15,7 @@
 -- This table is INSERT-only from the client (see policy below — no
 -- update/delete policy at all, same discipline digging_events.sql
 -- already uses) so nothing the client does can ever destroy a past
--- snapshot. preview.html writes one roughly once an hour (see
+-- snapshot. The React app writes one roughly once an hour (see
 -- pushStateToCloud's own throttle) — enough to bound any future data
 -- loss to "at most about an hour old" instead of "gone forever", without
 -- writing a full snapshot on every single save.
