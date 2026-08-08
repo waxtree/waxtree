@@ -244,7 +244,7 @@ function NodeDetails({ node, data, isLabel, state, actions, page, setPage }) {
         <>
           <div className="flex items-center justify-between"><p className="text-[11px] font-bold uppercase tracking-[.06em] text-[var(--wt-faint)]">{isLabel ? 'RELEASES' : 'TRACKS'} ({data.trackCount} Discogs, {filtered.length} loaded)</p><button onClick={() => actions.mutateState(value => { value.filterOpen = !value.filterOpen; })} className={`rounded-full border px-3 py-1 text-xs ${state.filterOpen || hasFilter ? 'border-[var(--wt-accent)] text-[var(--wt-accent)]' : 'border-[var(--wt-border)] text-[var(--wt-muted)]'}`}>⚙ Filter{hasFilter ? ' •' : ''}</button></div>
           {state.filterOpen && <Filters state={state} genres={genres} resultCount={filtered.length} actions={actions} onResetPage={() => setPage(0)} />}
-          <div className="mt-3 flex flex-col gap-2.5">{visibleGroups.length ? visibleGroups.map(group => <ReleaseCard key={group.key} group={group} node={node} isLabel={isLabel} state={state} actions={actions} />) : <div className="py-8 text-center text-xs text-[var(--wt-faint)]">No tracks match the filters.</div>}</div>
+          <div className="mt-3 flex flex-col gap-[6px]">{visibleGroups.length ? visibleGroups.map(group => <ReleaseCard key={group.key} group={group} node={node} isLabel={isLabel} state={state} actions={actions} />) : <div className="py-8 text-center text-xs text-[var(--wt-faint)]">No tracks match the filters.</div>}</div>
           {totalPages > 1 && <div className="mt-5 flex items-center justify-center gap-3"><button disabled={safePage === 0} onClick={() => setPage(value => value - 1)} className={`${buttonSecondary} disabled:opacity-30`}>← Prev</button><span className="text-xs text-[var(--wt-muted)]">Page {safePage + 1} / {totalPages}</span><button disabled={safePage >= totalPages - 1} onClick={() => setPage(value => value + 1)} className={`${buttonSecondary} disabled:opacity-30`}>Next →</button></div>}
         </>
       )}
@@ -269,7 +269,7 @@ function Filters({ state, genres, resultCount, actions, onResetPage }) {
 
 function ReleaseSection({ title, groups, ...props }) {
   if (!groups.length) return null;
-  return <section className="mt-8 border-t border-[var(--wt-border)] pt-4"><p className="mb-3 text-[11px] font-bold uppercase tracking-[.06em] text-[var(--wt-faint)]">{title}</p><div className="flex flex-col gap-2.5">{groups.map(group => <ReleaseCard key={group.key} group={group} {...props} />)}</div></section>;
+  return <section className="mt-8 border-t border-[var(--wt-border)] pt-4"><p className="mb-3 text-[11px] font-bold uppercase tracking-[.06em] text-[var(--wt-faint)]">{title}</p><div className="flex flex-col gap-[6px]">{groups.map(group => <ReleaseCard key={group.key} group={group} {...props} />)}</div></section>;
 }
 
 function ReleaseCard({ group, node, isLabel, state, actions }) {
@@ -293,10 +293,10 @@ function ReleaseCard({ group, node, isLabel, state, actions }) {
   const yearLabel = [first.year, isLabel ? (variousArtists ? 'Various Artists' : primaryArtist) : first.label].filter(Boolean).join(' · ');
   const genres = first.genre ? first.genre.split(' · ') : [];
   const explore = [];
-  if (first.label && !first.fromLabel) explore.push({ label: `Explore label: ${first.label}`, type: 'label', id: first.labelId, name: first.label });
+  if (first.label && !first.fromLabel) explore.push({ label: `Explore label: ${first.label}`, type: 'label', id: first.labelId, name: first.label, highlighted: true });
   tracks.forEach(track => {
     const credits = track.trackArtists?.length ? track.trackArtists : track.exploreName ? [{ id: track.exploreId, name: track.exploreName }] : [];
-    credits.forEach(credit => { if (credit.name && !explore.some(item => item.id === credit.id && item.name === credit.name)) explore.push({ label: `${track.exploreLabel || 'Explore'}: ${credit.name}`, type: 'artist', id: credit.id, name: credit.name }); });
+    credits.forEach(credit => { if (credit.name && !explore.some(item => item.id === credit.id && item.name === credit.name)) explore.push({ label: `${track.exploreLabel || 'Explore'}: ${credit.name}`, type: 'artist', id: credit.id, name: credit.name, highlighted: !!track.fromLabel }); });
   });
   const baseCounts = tracks.reduce((result, track) => {
     const key = actions.baseTitleKey(track.title);
@@ -318,17 +318,26 @@ function ReleaseCard({ group, node, isLabel, state, actions }) {
     setExploreOpen(false);
   };
 
+  const actionButton = 'inline-flex shrink-0 items-center whitespace-nowrap rounded-[20px] border-[1.5px] px-[11px] py-[5px] text-[11px] text-[var(--wt-muted)] transition-colors';
+  const exploreHighlighted = 'border-[rgba(94,196,123,.5)] bg-[rgba(94,196,123,.08)] font-bold text-[var(--wt-accent)] hover:border-[var(--wt-accent)] hover:bg-[rgba(94,196,123,.18)]';
+  const exploreDefault = 'border-[var(--wt-border)] hover:border-[var(--wt-accent)] hover:text-[var(--wt-accent)]';
+  const highlightedExplore = explore.some(item => item.highlighted);
+
   return (
-    <article data-release-key={group.key} className="grid grid-cols-[62px_minmax(130px,190px)_minmax(260px,1fr)_auto] gap-3 rounded-[10px] border border-[var(--wt-border)] bg-[var(--wt-surface)] p-3 shadow-sm max-[1100px]:grid-cols-[54px_minmax(120px,170px)_1fr]">
-      <div className="flex flex-col items-center gap-2">{first.thumbUrl ? <img className="size-[54px] rounded-lg border border-[var(--wt-border)] object-cover" src={first.thumbUrl} alt="" loading="lazy" /> : <div className="flex size-[54px] items-center justify-center rounded-lg bg-[var(--wt-elevated)] text-xl text-[var(--wt-faint)]">♫</div>}{(listened || allPlayed) && <button title={listened ? 'Remove from Already Listened' : 'Move to Already Listened'} onClick={() => actions.mutateState(value => { value.alreadyListened = listened ? value.alreadyListened.filter(key => key !== group.key) : [...value.alreadyListened, group.key]; })} className={`flex size-6 items-center justify-center rounded-full border text-xs ${listened ? 'border-[var(--wt-accent)] bg-[var(--wt-accent)] text-white' : 'border-[var(--wt-border)] text-[var(--wt-accent)]'}`}>✓</button>}</div>
-      <div className="min-w-0"><h3 className="truncate text-[13px] font-semibold">{releaseTitle}</h3>{yearLabel && <p className="mt-1 text-[11px] text-[var(--wt-muted)]">{yearLabel}</p>}{genres.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{genres.map(genre => <span key={genre} className="rounded border border-[var(--wt-accent)]/30 bg-[var(--wt-accent)]/10 px-1.5 py-0.5 text-[9px] text-[var(--wt-accent)]">{genre}</span>)}</div>}</div>
-      <div className="min-w-0 divide-y divide-[var(--wt-border)]">{tracks.map(track => <TrackRow key={track.id} track={track} node={node} isLabel={isLabel} primaryArtist={primaryArtist} state={state} actions={actions} playlistOpen={openPlaylist === track.id} setPlaylistOpen={open => setOpenPlaylist(open ? track.id : null)} />)}</div>
-      <div className="flex min-w-[118px] flex-col items-stretch gap-1.5 max-[1100px]:col-span-3 max-[1100px]:flex-row max-[1100px]:justify-end">
-        {explore.length === 1 && <button onClick={() => exploreItem(explore[0])} className="rounded-full border border-[var(--wt-accent)] px-2.5 py-1 text-[10px] text-[var(--wt-accent)]">{explore[0].label} ›</button>}
-        {explore.length > 1 && <div className="relative"><button onClick={() => setExploreOpen(value => !value)} className="w-full rounded-full border border-[var(--wt-accent)] px-2.5 py-1 text-[10px] text-[var(--wt-accent)]">Explore {exploreOpen ? '▴' : '▾'}</button>{exploreOpen && <div className="absolute right-0 top-[calc(100%+4px)] z-50 min-w-[190px] overflow-hidden rounded-[10px] border border-[var(--wt-border)] bg-[var(--wt-surface)] shadow-[var(--wt-shadow)]">{explore.map(item => <button key={`${item.type}-${item.id}-${item.name}`} onClick={() => exploreItem(item)} className="block w-full px-3 py-2 text-left text-xs hover:bg-[var(--wt-hover)]">{item.label}</button>)}</div>}</div>}
-        <StoreButton source="bc" directUrl={bandcampDirect} releaseTitle={releaseTitle} artist={isLabel ? first.label : node.name} label={isLabel ? node.name : first.label} isLabel={isLabel} actions={actions} />
-        <StoreButton source="bp" releaseTitle={releaseTitle} artist={isLabel ? first.label : node.name} label={isLabel ? node.name : first.label} isLabel={isLabel} actions={actions} />
-        {first.discogsUrl && !digitalOnly && <a href={first.discogsUrl} target="_blank" rel="noreferrer" className="rounded-full border border-[var(--wt-border)] px-2.5 py-1 text-center text-[10px] text-[var(--wt-muted)]">Discogs ↗</a>}
+    <article data-release-key={group.key} className="flex items-start gap-3 rounded-[10px] border border-[var(--wt-border)] bg-[var(--wt-surface)] px-[14px] py-[10px] transition-colors hover:border-[color-mix(in_srgb,var(--wt-accent)_35%,var(--wt-border))]">
+      <div className="flex shrink-0 flex-col items-center gap-[6px]">{first.thumbUrl ? <img className="size-10 rounded-[6px] border border-[var(--wt-border)] object-cover" src={first.thumbUrl} alt="" loading="lazy" /> : <div className="flex size-10 items-center justify-center rounded-[6px] border border-[var(--wt-border)] bg-[var(--wt-elevated)] text-[17px] text-[var(--wt-faint)]">♫</div>}{(listened || allPlayed) && <button title={listened ? 'Remove from Already Listened' : 'Move to Already Listened'} onClick={() => actions.mutateState(value => { value.alreadyListened = listened ? value.alreadyListened.filter(key => key !== group.key) : [...value.alreadyListened, group.key]; })} className={`flex size-[18px] items-center justify-center rounded-full border-[1.5px] text-[11px] leading-none transition hover:scale-110 ${listened ? 'border-[var(--wt-accent)] bg-[var(--wt-accent)] text-white' : 'border-[var(--wt-border)] text-[var(--wt-faint)] hover:border-[var(--wt-accent)] hover:text-[var(--wt-accent)]'}`}>✓</button>}</div>
+      <div className="w-[200px] min-w-0 flex-[0_1_200px] pt-0.5"><h3 className="truncate text-sm font-bold">{releaseTitle}</h3>{yearLabel && <p className="mt-0.5 truncate text-[11px] text-[var(--wt-muted)]">{yearLabel}</p>}{genres.length > 0 && <div className="mt-0.5 flex flex-wrap items-center gap-1">{genres.map(genre => { const color = actions.genreColor(genre); return <span key={genre} style={{ backgroundColor: `${color}1A`, borderColor: `${color}66`, color }} className="inline-block shrink-0 whitespace-nowrap rounded-[10px] border px-[7px] py-px text-[10px] font-bold leading-[1.6]">{genre}</span>; })}</div>}</div>
+      <div className="flex min-w-0 flex-1 flex-col gap-[5px]">{tracks.map(track => <TrackRow key={track.id} track={track} node={node} isLabel={isLabel} primaryArtist={primaryArtist} state={state} actions={actions} playlistOpen={openPlaylist === track.id} setPlaylistOpen={open => setOpenPlaylist(open ? track.id : null)} />)}</div>
+      <div className="flex max-w-[370px] shrink-0 flex-col items-end gap-[5px]">
+        {explore.length > 0 && <div className="flex flex-wrap items-center justify-end gap-[5px]">
+          {explore.length === 1 && <button onClick={() => exploreItem(explore[0])} className={`${actionButton} ${explore[0].highlighted ? exploreHighlighted : exploreDefault}`}>{explore[0].label} ›</button>}
+          {explore.length > 1 && <div className="relative shrink-0"><button onClick={() => setExploreOpen(value => !value)} className={`${actionButton} ${highlightedExplore ? exploreHighlighted : exploreDefault}`}>Explore {exploreOpen ? '▴' : '▾'}</button>{exploreOpen && <div className="absolute right-0 top-[calc(100%+4px)] z-50 min-w-[190px] overflow-hidden rounded-[10px] border border-[var(--wt-border)] bg-[var(--wt-surface)] shadow-[var(--wt-shadow)]">{explore.map(item => <button key={`${item.type}-${item.id}-${item.name}`} onClick={() => exploreItem(item)} className="block w-full px-3 py-2 text-left text-xs hover:bg-[var(--wt-hover)]">{item.label}</button>)}</div>}</div>}
+        </div>}
+        <div className="flex items-center justify-end gap-[5px]">
+          <StoreButton source="bc" directUrl={bandcampDirect} releaseTitle={releaseTitle} artist={isLabel ? first.label : node.name} label={isLabel ? node.name : first.label} isLabel={isLabel} actions={actions} />
+          <StoreButton source="bp" releaseTitle={releaseTitle} artist={isLabel ? first.label : node.name} label={isLabel ? node.name : first.label} isLabel={isLabel} actions={actions} />
+          {first.discogsUrl && !digitalOnly && <a href={first.discogsUrl} target="_blank" rel="noreferrer" className={`${actionButton} border-[var(--wt-border)] hover:border-[var(--wt-accent)] hover:text-[var(--wt-accent)]`}>Discogs ↗</a>}
+        </div>
       </div>
     </article>
   );
@@ -346,7 +355,10 @@ function StoreButton({ source, directUrl, releaseTitle, artist, label, isLabel, 
     if (nextTab && !nextTab.closed) nextTab.location.href = url;
     else window.open(url, '_blank', 'noreferrer');
   };
-  return <button disabled={loading} onClick={open} className={`rounded-full border px-2.5 py-1 text-center text-[10px] disabled:opacity-50 ${isBandcamp ? 'border-[#1DA0C3] text-[#1DA0C3]' : 'border-[#94D500] text-[#78B000]'}`}>{loading ? '…' : `${isBandcamp ? 'Bandcamp' : 'Beatport'} ↗`}</button>;
+  const sourceStyle = isBandcamp
+    ? directUrl ? 'border-[rgba(29,160,195,.5)] text-[#1DA0C3] hover:border-[#1DA0C3] hover:bg-[rgba(29,160,195,.12)]' : 'border-[var(--wt-border)] hover:border-[#1DA0C3] hover:text-[#1DA0C3]'
+    : 'border-[var(--wt-border)] hover:border-[#01E47C] hover:text-[#01E47C]';
+  return <button disabled={loading} onClick={open} className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-[20px] border-[1.5px] px-[11px] py-[5px] text-[11px] text-[var(--wt-muted)] transition-colors disabled:opacity-50 ${sourceStyle}`}>{loading ? '…' : `${isBandcamp ? 'Bandcamp' : 'Beatport'} ↗`}</button>;
 }
 
 function TrackRow({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen }) {
@@ -364,19 +376,19 @@ function TrackRow({ track, node, isLabel, primaryArtist, state, actions, playlis
     : [];
 
   return (
-    <div className="relative flex min-h-8 items-center gap-2 py-1.5 text-xs">
-      <button onClick={() => actions.doPlay(track.id, resolvedVideo, track.title, artist)} title={resolvedVideo ? 'Play' : 'Search on YouTube'} className={`flex size-6 shrink-0 items-center justify-center rounded-full border ${resolvedVideo ? 'border-[var(--wt-accent)] text-[var(--wt-accent)]' : 'border-[var(--wt-border)] text-[var(--wt-faint)]'}`}>▶</button>
-      <span className="min-w-0 flex-1 truncate">{track.title}</span>
-      {featuring.length > 0 && <span className="max-w-28 truncate text-[10px] text-[var(--wt-muted)]">with {featuring.join(', ')}</span>}
-      {track.duration && <span className="text-[10px] text-[var(--wt-muted)]">{track.duration}</span>}
-      <button onClick={() => actions.toggleLike(track.id)} className={`text-base ${liked ? 'text-[#F47B5E]' : 'text-[var(--wt-faint)]'}`}>{liked ? '♥' : '♡'}</button>
-      <div className="relative"><button onClick={() => setPlaylistOpen(!playlistOpen)} className={queued ? 'text-[var(--wt-accent)]' : 'text-[var(--wt-faint)]'}>🏷️</button>{playlistOpen && <PlaylistDrop track={trackWithArtist} node={node} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}</div>
-      {!resolvedVideo && <div className="relative"><button onClick={() => setHelpOpen(value => !value)} className="text-[var(--wt-faint)]">▾</button>{helpOpen && <div className="absolute right-0 top-full z-50 min-w-[180px] overflow-hidden rounded-[10px] border border-[var(--wt-border)] bg-[var(--wt-surface)] shadow-[var(--wt-shadow)]"><button onClick={() => { actions.mutateState(value => { value.listens[track.id] = { badged: true }; }); setHelpOpen(false); }} className="block w-full px-3 py-2 text-left hover:bg-[var(--wt-hover)]">✓ Mark as Listened</button><button onClick={() => { const input = prompt(`Paste the YouTube link for "${track.title}":`, ''); const id = actions.parseYoutubeUrlInput(input); if (!id) { if (input) alert("That doesn't look like a valid YouTube link."); return; } actions.submitYoutubeLink(track.id, id); setHelpOpen(false); }} className="block w-full px-3 py-2 text-left hover:bg-[var(--wt-hover)]">Help us with the link</button></div>}</div>}
-      {owned && <span className="rounded border border-[#9B6BFF]/40 bg-[#9B6BFF]/10 px-1.5 py-0.5 text-[8px] font-bold uppercase text-[#9B6BFF]">In your digital library</span>}
-      {actions.inDiscogsCollection(track) && <span className="rounded border border-[#E8A04A]/40 bg-[#E8A04A]/10 px-1.5 py-0.5 text-[8px] font-bold uppercase text-[#E8A04A]">In collection</span>}
-      {actions.inDiscogsWantlist(track) && <span className="rounded border border-[#4A8AFF]/40 bg-[#4A8AFF]/10 px-1.5 py-0.5 text-[8px] font-bold uppercase text-[#4A8AFF]">On Discogs' Wantlist</span>}
-      {state.listens[track.id]?.badged && <span className="rounded-full bg-[var(--wt-accent)]/10 px-1.5 py-0.5 text-[9px] text-[var(--wt-accent)]">✓ listened</span>}
-      {track.bpm && <span className="text-[9px] text-[var(--wt-faint)]">{track.bpm} BPM</span>}
+    <div className="relative flex min-w-0 items-center gap-[6px]">
+      <button onClick={() => actions.doPlay(track.id, resolvedVideo, track.title, artist)} title={resolvedVideo ? 'Play' : 'Search on YouTube'} className={`flex size-[22px] shrink-0 items-center justify-center rounded-full bg-[var(--wt-bg)] text-[8px] transition-colors hover:bg-[var(--wt-accent)] hover:text-white ${resolvedVideo ? 'text-[var(--wt-accent)]' : 'text-[var(--wt-muted)]'}`}>▶</button>
+      <span className="min-w-0 flex-[0_1_auto] truncate text-[12.5px] font-medium">{track.title}</span>
+      {featuring.length > 0 && <span className="max-w-28 shrink-0 truncate text-[11px] italic text-[var(--wt-faint)]">with {featuring.join(', ')}</span>}
+      {track.duration && <span className="min-w-[26px] shrink-0 text-right text-[11px] text-[var(--wt-faint)]">{track.duration}</span>}
+      <button onClick={() => actions.toggleLike(track.id)} className={`shrink-0 text-[15px] leading-none transition hover:scale-[1.3] ${liked ? 'text-[var(--wt-accent)]' : 'text-[var(--wt-faint)]'}`}>{liked ? '♥' : '♡'}</button>
+      <div className="relative shrink-0"><button title="Add to playlist" onClick={() => setPlaylistOpen(!playlistOpen)} className={`shrink-0 text-[13px] leading-none transition hover:scale-120 ${queued ? 'text-[var(--wt-accent)]' : 'text-[var(--wt-faint)]'}`}>🏷️</button>{playlistOpen && <PlaylistDrop track={trackWithArtist} node={node} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}</div>
+      {!resolvedVideo && <div className="relative shrink-0"><button title="No video found" onClick={() => setHelpOpen(value => !value)} className="shrink-0 rounded-[5px] border border-[var(--wt-border)] px-[5px] py-px text-[10px] leading-[1.4] text-[var(--wt-faint)] transition-colors hover:border-[var(--wt-accent)] hover:text-[var(--wt-accent)]">▾</button>{helpOpen && <div className="absolute right-0 top-full z-50 min-w-[180px] overflow-hidden rounded-[10px] border border-[var(--wt-border)] bg-[var(--wt-surface)] shadow-[var(--wt-shadow)]"><button onClick={() => { actions.mutateState(value => { value.listens[track.id] = { badged: true }; }); setHelpOpen(false); }} className="block w-full px-3 py-2 text-left hover:bg-[var(--wt-hover)]">✓ Mark as Listened</button><button onClick={() => { const input = prompt(`Paste the YouTube link for "${track.title}":`, ''); const id = actions.parseYoutubeUrlInput(input); if (!id) { if (input) alert("That doesn't look like a valid YouTube link."); return; } actions.submitYoutubeLink(track.id, id); setHelpOpen(false); }} className="block w-full px-3 py-2 text-left hover:bg-[var(--wt-hover)]">Help us with the link</button></div>}</div>}
+      {owned && <span className="shrink-0 whitespace-nowrap rounded border border-[rgba(155,107,255,.35)] bg-[rgba(155,107,255,.12)] px-1.5 py-0.5 text-[8.5px] font-bold uppercase text-[#9B6BFF]">In your digital library</span>}
+      {actions.inDiscogsCollection(track) && <span className="shrink-0 whitespace-nowrap rounded border border-[rgba(232,160,74,.35)] bg-[rgba(232,160,74,.12)] px-1.5 py-0.5 text-[8.5px] font-bold uppercase text-[#E8A04A]">In collection</span>}
+      {actions.inDiscogsWantlist(track) && <span className="shrink-0 whitespace-nowrap rounded border border-[rgba(74,138,255,.3)] bg-[rgba(74,138,255,.12)] px-1.5 py-0.5 text-[8.5px] font-bold uppercase text-[#4A8AFF]">On Discogs' Wantlist</span>}
+      {state.listens[track.id]?.badged && <span className="shrink-0 rounded border border-[rgba(94,196,123,.35)] bg-[rgba(94,196,123,.12)] px-1.5 py-0.5 text-[8.5px] font-bold uppercase text-[var(--wt-accent)]">✓ listened</span>}
+      {track.bpm && <span className="shrink-0 whitespace-nowrap rounded-lg border border-[var(--wt-border)] bg-[var(--wt-elevated)] px-1.5 py-0.5 text-[10px] text-[var(--wt-faint)]">{track.bpm} BPM</span>}
     </div>
   );
 }
