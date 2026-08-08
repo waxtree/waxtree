@@ -1,3 +1,4 @@
+import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
 
 export const StoreButton = ({ source, directUrl, releaseTitle, artist, label, isLabel, actions }) => {
@@ -17,8 +18,8 @@ export const StoreButton = ({ source, directUrl, releaseTitle, artist, label, is
     : 'border-border hover:border-[#01E47C] hover:text-[#01E47C]';
 
   return (
-    <button type="button" disabled={loading} onClick={open} className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-[20px] border-[1.5px] px-[11px] py-[5px] text-[11px] text-muted-foreground transition-colors disabled:opacity-50 ${sourceStyle}`}>
-      {loading ? '…' : `${isBandcamp ? 'Bandcamp' : 'Beatport'} ↗`}
+    <button type="button" disabled={loading} onClick={open} className={`inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-[20px] border-[1.5px] px-[11px] py-[5px] text-[11px] text-muted-foreground transition-colors disabled:opacity-50 ${sourceStyle}`}>
+      {loading ? '…' : <>{isBandcamp ? 'Bandcamp' : 'Beatport'}<ArrowUpRight className="size-3" /></>}
     </button>
   );
 };

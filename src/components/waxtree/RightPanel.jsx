@@ -1,4 +1,4 @@
-import { ChevronDown, Heart, SkipBack, SkipForward, Tag, X } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, Heart, SkipBack, SkipForward, Tag, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { RelatedCard } from '@/components/waxtree/RelatedCard';
@@ -35,7 +35,7 @@ export const RightPanel = ({ state, actions }) => {
           ) : (
             <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-secondary p-4 text-center">
               <p className="text-xs text-muted-foreground">{state.ytError?.message || 'No video in Discogs data'}</p>
-              <a className={buttonSecondary} href={state.ytError?.url || fallbackUrl} target="_blank" rel="noreferrer">{state.ytError?.linkText || 'Search on YouTube ↗'}</a>
+              <a className={`${buttonSecondary} inline-flex items-center gap-0.5`} href={state.ytError?.url || fallbackUrl} target="_blank" rel="noreferrer">{(state.ytError?.linkText || 'Search on YouTube ↗').replace(' ↗', '')}<ArrowUpRight className="size-3" /></a>
             </div>
           )}
           <div className="flex items-center gap-1.5 p-2.5">

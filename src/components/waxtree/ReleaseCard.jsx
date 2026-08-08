@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 import { StoreButton } from '@/components/waxtree/StoreButton';
 import { TrackRow } from '@/components/waxtree/TrackRow';
@@ -108,7 +108,7 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
         <div className="flex items-center justify-end gap-[5px]">
           <StoreButton source="bc" directUrl={bandcampDirect} releaseTitle={releaseTitle} artist={isLabel ? first.label : node.name} label={isLabel ? node.name : first.label} isLabel={isLabel} actions={actions} />
           <StoreButton source="bp" releaseTitle={releaseTitle} artist={isLabel ? first.label : node.name} label={isLabel ? node.name : first.label} isLabel={isLabel} actions={actions} />
-          {first.discogsUrl && !digitalOnly && <a href={first.discogsUrl} target="_blank" rel="noreferrer" className={`${actionButton} border-border hover:border-primary hover:text-primary`}>Discogs ↗</a>}
+          {first.discogsUrl && !digitalOnly && <a href={first.discogsUrl} target="_blank" rel="noreferrer" className={`${actionButton} gap-0.5 border-border hover:border-primary hover:text-primary`}>Discogs<ArrowUpRight className="size-3" /></a>}
         </div>
       </div>
     </article>

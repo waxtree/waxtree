@@ -1,4 +1,4 @@
-import { Heart, Tag } from 'lucide-react';
+import { ArrowUpRight, Heart, Tag } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { CookieBanner, ThemeFrame } from '@/components/AppChrome';
 import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
@@ -314,8 +314,8 @@ const LibrariesModal = ({ state, actions }) => {
                   <span className="block truncate text-[11px] text-muted-foreground">{[release.artist, release.year, release.labelExploreName].filter(Boolean).join(' · ')}</span>
                   {release.genres?.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{release.genres.map(genre => <span key={genre} className="rounded border border-primary/30 px-1.5 text-[9px] text-primary">{genre}</span>)}</div>}
                 </div>
-                {release.artistExploreId && <button type="button" className={buttonSecondary} onClick={() => openEntity(release.artistExploreType || 'artist', release.artistExploreId, release.artistExploreName)}>Artist ↗</button>}
-                {release.labelExploreId && <button type="button" className={buttonSecondary} onClick={() => openEntity('label', release.labelExploreId, release.labelExploreName)}>Label ↗</button>}
+                {release.artistExploreId && <button type="button" className={`${buttonSecondary} inline-flex items-center gap-0.5`} onClick={() => openEntity(release.artistExploreType || 'artist', release.artistExploreId, release.artistExploreName)}>Artist<ArrowUpRight className="size-3" /></button>}
+                {release.labelExploreId && <button type="button" className={`${buttonSecondary} inline-flex items-center gap-0.5`} onClick={() => openEntity('label', release.labelExploreId, release.labelExploreName)}>Label<ArrowUpRight className="size-3" /></button>}
               </div>
             )) : (
               <button type="button" onClick={() => { if (!source.length) actions.mutateState(value => { value.librariesTab = 'sync'; }); }} className="w-full py-8 text-center text-xs text-muted-foreground/70">
