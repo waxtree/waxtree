@@ -19,7 +19,20 @@ export const WaxTreeApp = ({ engine }) => {
     return saved >= 160 && saved <= 520 ? saved : 252;
   });
 
-  useEffect(() => { document.documentElement.dataset.theme = state.theme; }, [state.theme]);
+  useEffect(() => {
+    document.documentElement.dataset.theme = state.theme;
+    // WaxTreeApp drives its theme from the engine's own state.theme, not
+    // AppChrome's useTheme() hook (that's only used by the auth pages) —
+    // confirmed live 2026-08-08: switching theme in-app updated data-theme
+    // (so ThemeFrame's own --wt-* variables, passed as a prop, followed
+    // correctly) but never touched the .dark class, which is what
+    // Tailwind's dark: variant and every shadcn color token actually key
+    // off. Every component just converted to shadcn tokens (Sidebar,
+    // Header, Content, TrackRow, RightPanel, ...) was left stuck on
+    // whichever theme index.html's hardcoded initial class="dark"
+    // happened to be, regardless of later in-app toggles.
+    document.documentElement.classList.toggle('dark', state.theme === 'dark');
+  }, [state.theme]);
 
   if (!ready) return <div className="flex min-h-dvh items-center justify-center bg-background text-sm text-muted-foreground">Checking session…</div>;
 
