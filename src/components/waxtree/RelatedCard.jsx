@@ -19,17 +19,17 @@ export const RelatedCard = ({ card, state, actions }) => {
         </span>
         <Play className="ml-auto size-3.5 shrink-0 fill-primary text-primary" />
       </button>
-      <button type="button" title="Like" onClick={() => { prepare(); actions.toggleLike(card.playId); }} className={liked ? 'text-primary' : 'text-muted-foreground/70'}>
+      <button type="button" title="Like" onClick={() => { prepare(); actions.toggleLike(card.playId); }} className={`flex items-center justify-center ${liked ? 'text-primary' : 'text-muted-foreground/70'}`}>
         <Heart className={`size-3.5 ${liked ? 'fill-current' : ''}`} />
       </button>
-      <div className="relative">
-        <button type="button" title="Add to playlist" onClick={() => { prepare(); setPlaylistOpen(value => !value); }} className={queued ? 'text-primary' : 'text-muted-foreground/70'}>
+      <div className="relative flex items-center">
+        <button type="button" title="Add to playlist" onClick={() => { prepare(); setPlaylistOpen(value => !value); }} className={`flex items-center justify-center ${queued ? 'text-primary' : 'text-muted-foreground/70'}`}>
           <Tag className="size-3.5" />
         </button>
         {playlistOpen && <PlaylistDrop track={track} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}
       </div>
       {card.resolved && (
-        <button type="button" title={`Explore ${card.resolved.discogsName}`} onClick={() => actions.addNode(card.resolved.type, card.resolved.discogsId, card.resolved.discogsName, null, state.activeBranchId)} className="text-primary">
+        <button type="button" title={`Explore ${card.resolved.discogsName}`} onClick={() => actions.addNode(card.resolved.type, card.resolved.discogsId, card.resolved.discogsName, null, state.activeBranchId)} className="flex items-center justify-center text-primary">
           <ChevronRight className="size-3.5" />
         </button>
       )}

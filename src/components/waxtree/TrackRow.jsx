@@ -29,11 +29,11 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
       <span className="min-w-0 flex-[0_1_auto] truncate text-[12.5px] font-medium">{track.title}</span>
       {featuring.length > 0 && <span className="max-w-28 shrink-0 truncate text-[11px] italic text-muted-foreground/70">with {featuring.join(', ')}</span>}
       {track.duration && <span className="min-w-[26px] shrink-0 text-right text-[11px] text-muted-foreground/70">{track.duration}</span>}
-      <button type="button" title="Like" onClick={() => actions.toggleLike(track.id)} className={`shrink-0 transition hover:scale-[1.15] ${liked ? 'text-primary' : 'text-muted-foreground/70'}`}>
+      <button type="button" title="Like" onClick={() => actions.toggleLike(track.id)} className={`flex shrink-0 items-center justify-center transition hover:scale-[1.15] ${liked ? 'text-primary' : 'text-muted-foreground/70'}`}>
         <Heart className={`size-3.5 ${liked ? 'fill-current' : ''}`} />
       </button>
-      <div className="relative shrink-0">
-        <button type="button" title="Add to playlist" onClick={() => setPlaylistOpen(!playlistOpen)} className={`shrink-0 transition hover:scale-[1.1] ${queued ? 'text-primary' : 'text-muted-foreground/70'}`}>
+      <div className="relative flex shrink-0 items-center">
+        <button type="button" title="Add to playlist" onClick={() => setPlaylistOpen(!playlistOpen)} className={`flex items-center justify-center transition hover:scale-[1.1] ${queued ? 'text-primary' : 'text-muted-foreground/70'}`}>
           <Tag className="size-3.5" />
         </button>
         {playlistOpen && <PlaylistDrop track={trackWithArtist} node={node} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}

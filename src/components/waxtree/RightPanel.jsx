@@ -41,11 +41,11 @@ export const RightPanel = ({ state, actions }) => {
           <div className="flex items-center gap-1.5 p-2.5">
             <button type="button" title="Previous" onClick={() => actions.playAdjacentTrack(-1)} className="flex size-7 items-center justify-center rounded-full border border-border text-muted-foreground"><SkipBack className="size-3.5" /></button>
             <button type="button" title="Next" onClick={() => actions.playAdjacentTrack(1)} className="flex size-7 items-center justify-center rounded-full border border-border text-muted-foreground"><SkipForward className="size-3.5" /></button>
-            <button type="button" title="Like" onClick={() => actions.toggleLike(playing.trackId)} className={liked ? 'text-primary' : 'text-muted-foreground/70'}>
+            <button type="button" title="Like" onClick={() => actions.toggleLike(playing.trackId)} className={`flex items-center justify-center ${liked ? 'text-primary' : 'text-muted-foreground/70'}`}>
               <Heart className={`size-4 ${liked ? 'fill-current' : ''}`} />
             </button>
-            <div className="relative">
-              <button type="button" title="Add to playlist" onClick={() => setPlaylistOpen(value => !value)} className={queued ? 'text-primary' : 'text-muted-foreground/70'}>
+            <div className="relative flex items-center">
+              <button type="button" title="Add to playlist" onClick={() => setPlaylistOpen(value => !value)} className={`flex items-center justify-center ${queued ? 'text-primary' : 'text-muted-foreground/70'}`}>
                 <Tag className="size-4" />
               </button>
               {playlistOpen && <PlaylistDrop track={playerTrack} node={context?.node} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}

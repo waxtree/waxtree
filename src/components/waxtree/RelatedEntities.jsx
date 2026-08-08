@@ -1,3 +1,6 @@
+import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
+import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
+
 export const RelatedEntities = ({ node, data, isLabel, actions }) => {
   const entries = isLabel
     ? [data.parentLabel && { ...data.parentLabel, prefix: '↑ ' }, ...(data.sublabels || []).slice(0, 6)].filter(Boolean)
@@ -13,7 +16,7 @@ export const RelatedEntities = ({ node, data, isLabel, actions }) => {
           onClick={() => actions.addNode(entry.type || (isLabel ? 'label' : 'artist'), entry.id, entry.name, node.id, node.branchId)}
           className="flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary"
         >
-          <span>{entry.type === 'label' || isLabel ? '◎' : '♙'}</span>{entry.prefix || ''}{entry.name} ›
+          {entry.type === 'label' || isLabel ? <LabelIcon className="size-3" /> : <ArtistIcon className="size-3" />}{entry.prefix || ''}{entry.name} ›
         </button>
       ))}
     </div>

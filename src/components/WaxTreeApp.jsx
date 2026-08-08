@@ -1,6 +1,8 @@
-import { Heart } from 'lucide-react';
+import { Heart, Tag } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { CookieBanner, ThemeFrame } from '@/components/AppChrome';
+import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
+import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
 import { Content } from '@/components/waxtree/Content';
 import { Header } from '@/components/waxtree/Header';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
@@ -207,7 +209,7 @@ const FollowsModal = ({ state, actions }) => {
     <Modal title="Following" close={close}>
       {state.follows.length ? state.follows.map(follow => (
         <div key={`${follow.type}-${follow.discogs_id}`} className="flex items-center gap-2.5 border-b border-border py-2">
-          {follow.image_url ? <img className="size-10 rounded-lg object-cover" src={follow.image_url} alt="" /> : <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">{follow.type === 'label' ? '◎' : '♙'}</div>}
+          {follow.image_url ? <img className="size-10 rounded-lg object-cover" src={follow.image_url} alt="" /> : <div className="flex size-10 items-center justify-center rounded-lg bg-secondary text-muted-foreground">{follow.type === 'label' ? <LabelIcon className="size-4" /> : <ArtistIcon className="size-4" />}</div>}
           <strong className="min-w-0 flex-1 truncate text-[13px]">{follow.name}</strong>
           <button type="button" className={buttonSecondary} onClick={() => { const existing = state.nodes.find(node => node.discogsId === follow.discogs_id && node.branchId === state.activeBranchId); if (existing) actions.selectNode(existing.id); else actions.addNode(follow.type, follow.discogs_id, follow.name, null, state.activeBranchId); close(); }}>Open ›</button>
           <button type="button" className="text-destructive" onClick={() => actions.toggleFollow({ discogsId: follow.discogs_id, type: follow.type, name: follow.name })}>×</button>
@@ -441,10 +443,13 @@ const NewReleaseRow = ({ release, state, actions, close }) => {
       {track.thumbUrl ? <img className="size-11 rounded-lg object-cover" src={track.thumbUrl} alt="" /> : <div className="flex size-11 items-center justify-center rounded-lg bg-secondary">💿</div>}
       <div className="min-w-0 flex-1"><strong className="block truncate text-[13px]">{release.releaseTitle || track.album || track.title}</strong><span className="text-[11px] text-muted-foreground">New from {release.followName}{track.year ? ` · ${track.year}` : ''}</span></div>
       {track.videoId && <button type="button" onClick={() => { actions.doPlay(track.id, track.videoId, track.title, artistName); close(); }} className="text-primary">▶</button>}
-      <button type="button" title="Like" onClick={() => actions.toggleLike(track.id)} className={liked ? 'text-primary' : 'text-muted-foreground/70'}>
+      <button type="button" title="Like" onClick={() => actions.toggleLike(track.id)} className={`flex items-center justify-center ${liked ? 'text-primary' : 'text-muted-foreground/70'}`}>
         <Heart className={`size-3.5 ${liked ? 'fill-current' : ''}`} />
       </button>
-      <div className="relative"><button type="button" onClick={() => setPlaylistOpen(value => !value)} className={queued ? 'text-primary' : 'text-muted-foreground/70'}>🏷️</button>{playlistOpen && <PlaylistDrop track={queuedTrack} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}</div>
+      <div className="relative flex items-center">
+        <button type="button" title="Add to playlist" onClick={() => setPlaylistOpen(value => !value)} className={`flex items-center justify-center ${queued ? 'text-primary' : 'text-muted-foreground/70'}`}><Tag className="size-3.5" /></button>
+        {playlistOpen && <PlaylistDrop track={queuedTrack} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}
+      </div>
       <button type="button" className={buttonSecondary} onClick={() => { actions.addNode(release.followType, release.followDiscogsId, release.followName, null, state.activeBranchId); close(); }}>Explore ›</button>
     </div>
   );

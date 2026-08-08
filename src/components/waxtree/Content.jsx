@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
+import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
 import { NodeDetails } from '@/components/waxtree/NodeDetails';
 import { PlantLoader } from '@/components/waxtree/PlantLoader';
 import { buttonSecondary } from '@/lib/waxtreeUi';
@@ -39,7 +41,7 @@ export const Content = ({ state, actions }) => {
         </div>
       )}
       <div className="mb-1 flex items-center gap-3">
-        {data?.imageUrl ? <img className="size-[52px] rounded-[10px] border border-border object-cover" src={data.imageUrl} alt={node.name} /> : <div className="flex size-[52px] items-center justify-center rounded-[10px] border border-border bg-secondary text-xl text-muted-foreground">{isLabel ? '◎' : '♙'}</div>}
+        {data?.imageUrl ? <img className="size-[52px] rounded-[10px] border border-border object-cover" src={data.imageUrl} alt={node.name} /> : <div className="flex size-[52px] items-center justify-center rounded-[10px] border border-border bg-secondary text-muted-foreground">{isLabel ? <LabelIcon className="size-6" /> : <ArtistIcon className="size-6" />}</div>}
         <h1 className="min-w-0 flex-1 truncate text-[26px] font-bold">{node.name}</h1>
         <button
           type="button"
