@@ -3,13 +3,16 @@ import { useState } from 'react';
 
 // Same redirect path as the per-release Bandcamp/Beatport buttons
 // (StoreButton, used on release cards / search results) — resolveStoreUrl
-// is the one shared action both call, so a track bought from a playlist
-// lands on the exact same verified/best-effort page a track bought from
-// its own node would.
+// is the one shared action both call. The one difference on purpose: a
+// release card searches by the RELEASE/album title (track.album), since
+// it represents the whole EP being bought — here we already know exactly
+// which single track the user wants, so this searches by the track's own
+// title instead, landing bc-search/bp-search's match on that track's own
+// page rather than its parent release/album page.
 export const BuyMenu = ({ track, actions }) => {
   const [open, setOpen] = useState(false);
   const [loadingSource, setLoadingSource] = useState(null);
-  const releaseTitle = track.album || track.title;
+  const trackTitle = track.title;
   const artist = track.artistName || track.trackArtistName || '';
   const label = track.label || '';
 
@@ -17,7 +20,7 @@ export const BuyMenu = ({ track, actions }) => {
     setOpen(false);
     const nextTab = window.open('about:blank', '_blank');
     setLoadingSource(source);
-    const url = await actions.resolveStoreUrl(source, { isLabel: false, artist, label, title: releaseTitle });
+    const url = await actions.resolveStoreUrl(source, { isLabel: false, artist, label, title: trackTitle });
     setLoadingSource(null);
     if (nextTab && !nextTab.closed) nextTab.location.href = url;
     else window.open(url, '_blank', 'noreferrer');
