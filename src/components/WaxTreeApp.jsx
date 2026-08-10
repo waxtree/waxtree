@@ -6,6 +6,7 @@ import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
 import { Content } from '@/components/waxtree/Content';
 import { Header } from '@/components/waxtree/Header';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
+import { QueueRow } from '@/components/waxtree/QueueRow';
 import { RightPanel } from '@/components/waxtree/RightPanel';
 import { Search } from '@/components/waxtree/Search';
 import { Sidebar } from '@/components/waxtree/Sidebar';
@@ -86,22 +87,13 @@ const Modal = ({ title, close, children, maxWidth = '520px', subtitle }) => (
   </div>
 );
 
-const QueueRow = ({ track, onPlay, onRemove }) => (
-  <div className="flex items-center gap-2.5 border-b border-border py-2">
-    {track.thumbUrl ? <img className="size-10 rounded-lg object-cover" src={track.thumbUrl} alt="" /> : <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">♫</div>}
-    <div className="min-w-0 flex-1"><strong className="block truncate text-[13px]">{track.title}</strong><span className="block truncate text-[11px] text-muted-foreground">{[track.artistName, track.year, track.label].filter(Boolean).join(' · ')}</span></div>
-    {track.videoId && <button type="button" onClick={onPlay} className="text-primary">▶</button>}
-    <button type="button" onClick={onRemove} className="text-base text-muted-foreground/70 hover:text-destructive">×</button>
-  </div>
-);
-
 const PlaylistsModal = ({ state, actions }) => {
   const [name, setName] = useState('');
   const close = () => actions.mutateState(value => { value.playlistsModal = false; });
   return (
     <Modal title="🏷️ Playlists" close={close} subtitle="Create as many playlists as you like — split by genre, by a gig you're digging for, whatever makes sense to you. Rename or delete them anytime.">
       <SectionHeader title="🔖 Listen Later" count={`${state.dasAscoltare.length} tracks`} action={state.dasAscoltare.length ? () => { if (confirm('Clear Listen Later?')) actions.mutateState(value => { value.dasAscoltare = []; }); } : null} />
-      {state.dasAscoltare.length ? state.dasAscoltare.map(track => <QueueRow key={track.id} track={track} onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName); close(); }} onRemove={() => actions.mutateState(value => { value.dasAscoltare = value.dasAscoltare.filter(item => item.id !== track.id); })} />) : <p className="py-4 text-center text-xs text-muted-foreground/70">No tracks — use 🏷️ on any track to add</p>}
+      {state.dasAscoltare.length ? state.dasAscoltare.map(track => <QueueRow key={track.id} track={track} actions={actions} onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName); close(); }} onRemove={() => actions.mutateState(value => { value.dasAscoltare = value.dasAscoltare.filter(item => item.id !== track.id); })} />) : <p className="py-4 text-center text-xs text-muted-foreground/70">No tracks — use 🏷️ on any track to add</p>}
       <SectionHeader title="My Playlists" count={`${state.playlists.length} playlists`} />
       <div className="my-3 flex gap-2">
         <input value={name} onChange={event => setName(event.target.value)} className={modalInput} placeholder="New playlist name…" />
@@ -117,7 +109,7 @@ const PlaylistsModal = ({ state, actions }) => {
               <button type="button" className={buttonSecondary} onClick={() => { if (confirm(`Delete "${playlist.name}"?`)) actions.mutateState(value => { value.playlists = value.playlists.filter(item => item.id !== playlist.id); }); }}>Delete</button>
             </>}
           />
-          {playlist.tracks.length ? playlist.tracks.map(track => <QueueRow key={track.id} track={track} onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName); close(); }} onRemove={() => actions.mutateState(() => { playlist.tracks = playlist.tracks.filter(item => item.id !== track.id); })} />) : <p className="py-3 text-center text-xs text-muted-foreground/70">No tracks yet</p>}
+          {playlist.tracks.length ? playlist.tracks.map(track => <QueueRow key={track.id} track={track} actions={actions} onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName); close(); }} onRemove={() => actions.mutateState(() => { playlist.tracks = playlist.tracks.filter(item => item.id !== track.id); })} />) : <p className="py-3 text-center text-xs text-muted-foreground/70">No tracks yet</p>}
         </div>
       ))}
     </Modal>
@@ -140,7 +132,7 @@ const LikesModal = ({ state, actions }) => {
       {tracks.length ? Object.entries(groups).sort((a, b) => b[1].length - a[1].length).map(([genre, items]) => (
         <div key={genre}>
           <SectionHeader title={`${genre} · ${items.length}`} />
-          {items.map(track => <QueueRow key={`${genre}-${track.id}`} track={track} onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName || track.trackArtistName || ''); close(); }} onRemove={() => actions.toggleLike(track.id)} />)}
+          {items.map(track => <QueueRow key={`${genre}-${track.id}`} track={track} actions={actions} onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName || track.trackArtistName || ''); close(); }} onRemove={() => actions.toggleLike(track.id)} />)}
         </div>
       )) : <p className="py-8 text-center text-xs text-muted-foreground/70">No liked tracks — use ♡ on tracks to add them</p>}
     </Modal>
