@@ -1419,6 +1419,12 @@ const st={
   alreadyListened:saved?.alreadyListened||[],
 };
 document.documentElement.setAttribute('data-theme',st.theme);
+// Tailwind's dark: variant and every shadcn color token key off a `.dark`
+// ancestor class, not data-theme — set alongside it here (and in setTheme
+// below) so the very first paint and every later in-app toggle land in
+// sync, rather than relying solely on WaxTreeApp's own React effect to
+// catch up a render later.
+document.documentElement.classList.toggle('dark',st.theme==='dark');
 
 // ── UI transient state (not persisted) ─────────────────────
 let tracksPageMap={};  // nodeId → page index (0-based)
@@ -3889,7 +3895,7 @@ export function getWaxTreeSnapshot(){return storeVersion;}
 export function getWaxTreeState(){return{state:st,ready:engineReady,session:wtSession};}
 
 function mutateState(mutator){mutator(st);rr();}
-function setTheme(theme){st.theme=theme;document.documentElement.dataset.theme=theme;rr();}
+function setTheme(theme){st.theme=theme;document.documentElement.dataset.theme=theme;document.documentElement.classList.toggle('dark',theme==='dark');rr();}
 async function connectDiscogs(){
   const data=await edgeFn({action:'request_token',callback_url:location.origin+'/app'});
   sessionStorage.setItem('discogs_oauth_secret',data.oauth_token_secret);

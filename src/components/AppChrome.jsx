@@ -38,6 +38,11 @@ export function useTheme() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    // shadcn/Tailwind's dark: variant (see index.css's @custom-variant)
+    // triggers off a `.dark` ancestor class, not data-theme — toggled
+    // alongside it so shadcn components (Button, Card, Input, ...) follow
+    // the same theme switch as the rest of the app.
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('wt-theme', theme);
   }, [theme]);
 
@@ -73,7 +78,7 @@ export function Brand({ subtitle }) {
   return (
     <div className="mb-8 text-center">
       <img className="mx-auto mb-[18px] size-[92px] object-contain" src="/logo.svg" alt="" />
-      <div className="text-[26px] font-bold text-[#3DAE79]">WaxTree</div>
+      <div className="text-[26px] font-bold text-primary">WaxTree</div>
       <div className="mt-1.5 text-[13px] text-[var(--wt-muted)]">{subtitle}</div>
     </div>
   );
