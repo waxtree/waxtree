@@ -2102,7 +2102,7 @@ let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=nu
 let discoveredTracks={};
 function findTrack(id){for(const n of st.nodes){const t=n.data?.tracks?.find(t=>t.id===id);if(t)return t;}return discoveredTracks[id]||null;}
 function tryBadge(){
-  if(ytTid&&(ytAccSec>=3||ytSkips>=2)&&!st.listens[ytTid]?.badged){
+  if(ytTid&&(ytAccSec>=2||ytSkips>=2)&&!st.listens[ytTid]?.badged){
     st.listens[ytTid]={badged:true};
     const found=findTrackAndNode(ytTid);
     const tr=found?.track||findTrack(ytTid);
@@ -2601,11 +2601,16 @@ function createYtPlayer(){
         if(e.data===YT.PlayerState.PLAYING){
           ytPlayStart=Date.now();ytLastTime=null;
           if(ytBadgeTimerId)clearTimeout(ytBadgeTimerId);
+          // Matches tryBadge()'s own ytAccSec>=2 threshold — this timer is
+          // what actually triggers that check for uninterrupted playback
+          // (the skip/pause paths call tryBadge() directly on their own
+          // events), so it has to fire at the same 2s mark, not just have
+          // the comparison value changed on its own.
           ytBadgeTimerId=setTimeout(()=>{
             ytBadgeTimerId=null;
             if(ytPlayStart!==null){ytAccSec+=(Date.now()-ytPlayStart)/1000;ytPlayStart=Date.now();}
             tryBadge();
-          },3000);
+          },2000);
         } else {
           if(ytBadgeTimerId){clearTimeout(ytBadgeTimerId);ytBadgeTimerId=null;}
           if(ytPlayStart){ytAccSec+=(Date.now()-ytPlayStart)/1000;ytPlayStart=null;tryBadge();}
