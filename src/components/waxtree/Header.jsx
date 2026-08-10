@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/button';
 
 export const Header = ({ state, session, actions }) => {
   const username = session?.user?.user_metadata?.username || session?.user?.email?.split('@')[0] || 'Profile';
-  const level = actions.getLevelFromCount(state.searchCount);
+  // Total nodes across every branch, not search-bar use — see addNode's
+  // own comment in waxTreeEngine.jsx for why.
+  const level = actions.getLevelFromCount(state.nodes.length);
   const playlistCount = state.dasAscoltare.length + state.playlists.reduce((sum, playlist) => sum + playlist.tracks.length, 0);
   const avatar = actions.getAvatarUrl();
 
@@ -23,7 +25,9 @@ export const Header = ({ state, session, actions }) => {
       >
         <Tag className="size-3.5" /> Playlists{playlistCount > 0 && <span className="font-bold">{playlistCount}</span>}
       </Button>
-      <Badge className="h-auto rounded-full border border-primary bg-primary/10 px-3 py-1 text-[11px] text-primary">{level.title}</Badge>
+      <Badge asChild className="h-auto cursor-pointer rounded-full border border-primary bg-primary/10 px-3 py-1 text-[11px] text-primary">
+        <button type="button" onClick={() => actions.mutateState(value => { value.profileModal = true; })}>{level.title}</button>
+      </Badge>
       <div className="relative">
         <Button variant="outline" className="h-auto rounded-full px-3 py-1 text-xs text-muted-foreground" onClick={event => { event.stopPropagation(); actions.mutateState(value => { value.profileOpen = !value.profileOpen; }); }}>Profile</Button>
         {state.profileOpen && (

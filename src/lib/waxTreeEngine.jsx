@@ -42,12 +42,13 @@ function showLevelUpToast(lvl){
   if(toastTimer)clearTimeout(toastTimer);
   toastTimer=setTimeout(()=>{st.levelToast=null;rr();},4000);
 }
+// Raw search-bar-use counter — kept for the admin dashboard's own
+// "Searches" column (api/admin-users.js), not for gamification anymore.
+// The level itself is now driven by total nodes across every branch (see
+// addNode's own comment) since that's what a digger's actual progress
+// looks like; a search query alone doesn't move it.
 function incrementSearch(){
-  const prev=st.searchCount;
   st.searchCount++;
-  const prevLvl=getLevelFromCount(prev);
-  const newLvl=getLevelFromCount(st.searchCount);
-  if(newLvl.level>prevLvl.level)showLevelUpToast(newLvl);
   sb.auth.updateUser({data:{search_count:st.searchCount}});
 }
 
@@ -3348,7 +3349,18 @@ function addNode(type,discogsId,name,parentId,branchId){
     parent_type:parent?.type||null,parent_discogs_id:parent?.discogsId||null,parent_name:parent?.name||null});
   const id='n'+Date.now();
   const node={id,branchId:bid,type,discogsId,name,parentId:parentId||null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null};
+  // Gamification level is driven by total nodes across every branch, not
+  // search-bar use (see incrementSearch's own comment) — confirmed live
+  // 2026-08-09: a user whose tree was mostly built by clicking through
+  // Explore/related-artist/alias links (never re-typing a search) stayed
+  // stuck near the bottom despite having far outgrown it. Checked here,
+  // right where a genuinely NEW node lands (the existing-node early
+  // return above never reaches this), so revisiting an already-added
+  // node never double-counts.
+  const prevLvl=getLevelFromCount(st.nodes.length);
   st.nodes=[...st.nodes,node];st.selectedId=id;st.activeBranchId=bid;
+  const newLvl=getLevelFromCount(st.nodes.length);
+  if(newLvl.level>prevLvl.level)showLevelUpToast(newLvl);
   st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
   if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
   rr();

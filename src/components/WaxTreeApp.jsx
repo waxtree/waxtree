@@ -168,8 +168,11 @@ const HistoryModal = ({ state, actions }) => {
 
 const ProfileModal = ({ state, actions }) => {
   const close = () => actions.mutateState(value => { value.profileModal = false; });
-  const level = actions.getLevelFromCount(state.searchCount);
-  const progress = actions.getProgressToNext(state.searchCount);
+  // Total nodes across every branch, not search-bar use — see addNode's
+  // own comment in waxTreeEngine.jsx for why.
+  const nodeCount = state.nodes.length;
+  const level = actions.getLevelFromCount(nodeCount);
+  const progress = actions.getProgressToNext(nodeCount);
   return (
     <Modal title="🌲 My Profile" close={close}>
       <div className="border-b border-border py-4 text-center"><strong className="block text-xl">{level.title}</strong><span className="mt-1 block text-[13px] text-muted-foreground">{level.tagline}</span></div>
@@ -182,7 +185,7 @@ const ProfileModal = ({ state, actions }) => {
       <div className="mt-4 flex flex-col gap-1.5">
         {Array.from({ length: 15 }, (_, index) => index + 1).map(number => {
           const item = actions.getLevelFromCount(number === 15 ? 10001 : [0, 21, 61, 121, 201, 351, 501, 751, 1001, 1501, 2001, 3001, 4501, 6501, 10001][number - 1]);
-          const unlocked = state.searchCount >= item.min;
+          const unlocked = nodeCount >= item.min;
           return (
             <div key={number} className={`flex gap-2.5 rounded-[10px] border p-2.5 ${item.level === level.level ? 'border-primary bg-muted' : 'border-transparent bg-secondary'} ${unlocked ? '' : 'opacity-30'}`}>
               <span className="w-[18px] text-[11px] text-muted-foreground/70">{number}</span>
