@@ -135,3 +135,37 @@
     @apply font-sans;
     }
 }
+
+/* Growing-tree loading animation — ported verbatim from the pre-migration
+   preview.html's own buildPlantLoader()/CSS (confirmed live 2026-08-09: the
+   React rewrite had quietly replaced this with a plain pulsing 🌱 emoji).
+   Kept here per this file's own documented exception for legacy
+   animations — Tailwind utilities can't express a multi-element staggered
+   keyframe sequence like this. See src/components/waxtree/PlantLoader.jsx
+   for the SVG markup this animates. */
+.wt-grow{animation:wt-fadecycle 2.4s ease-in-out infinite}
+@keyframes wt-fadecycle{0%{opacity:0}4%{opacity:1}88%{opacity:1}100%{opacity:0}}
+.wt-b{stroke-dasharray:120}
+.wt-b-trunk{animation:wt-draw-trunk 2.4s ease-out infinite}
+.wt-b-a{animation:wt-draw-a 2.4s ease-out infinite}
+.wt-b-b{animation:wt-draw-b 2.4s ease-out infinite}
+.wt-b-c{animation:wt-draw-c 2.4s ease-out infinite}
+.wt-b-d{animation:wt-draw-d 2.4s ease-out infinite}
+.wt-b-top{animation:wt-draw-top 2.4s ease-out infinite}
+@keyframes wt-draw-trunk{0%{stroke-dashoffset:120}22%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-a{0%,12%{stroke-dashoffset:120}32%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-b{0%,16%{stroke-dashoffset:120}36%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-c{0%,24%{stroke-dashoffset:120}42%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-d{0%,28%{stroke-dashoffset:120}46%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+@keyframes wt-draw-top{0%,32%{stroke-dashoffset:120}48%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+.wt-leaf{transform-box:fill-box;transform-origin:center;opacity:0;transform:scale(.2)}
+.wt-leaf-a{animation:wt-bud-a 2.4s ease-out infinite}
+.wt-leaf-b{animation:wt-bud-b 2.4s ease-out infinite}
+.wt-leaf-c{animation:wt-bud-c 2.4s ease-out infinite}
+.wt-leaf-d{animation:wt-bud-d 2.4s ease-out infinite}
+.wt-leaf-top{animation:wt-bud-top 2.4s ease-out infinite}
+@keyframes wt-bud-a{0%,32%{opacity:0;transform:scale(.2)}40%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+@keyframes wt-bud-b{0%,36%{opacity:0;transform:scale(.2)}44%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+@keyframes wt-bud-c{0%,42%{opacity:0;transform:scale(.2)}50%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+@keyframes wt-bud-d{0%,46%{opacity:0;transform:scale(.2)}54%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+@keyframes wt-bud-top{0%,48%{opacity:0;transform:scale(.2)}56%{opacity:1;transform:scale(1)}100%{opacity:1;transform:scale(1)}}
