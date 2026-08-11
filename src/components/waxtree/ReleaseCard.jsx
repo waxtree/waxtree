@@ -48,7 +48,7 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
   const digitalOnly = tracks.some(track => track.digital) && !tracks.some(track => track.hasVinyl);
 
   const exploreItem = item => {
-    if (item.id) actions.addNode(item.type, item.id, item.name, node.id, node.branchId);
+    if (item.id) actions.addNode(item.type, item.id, item.name, node.id, node.branchId, { background: true });
     else { actions.mutateState(value => { value.q = item.name; }); actions.doSearch(); }
     setExploreOpen(false);
   };
