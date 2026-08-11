@@ -13,7 +13,7 @@ export const RelatedEntities = ({ node, data, isLabel, actions }) => {
         <button
           key={`${entry.type}-${entry.id}`}
           type="button"
-          onClick={() => actions.addNode(entry.type || (isLabel ? 'label' : 'artist'), entry.id, entry.name, node.id, node.branchId)}
+          onClick={() => actions.addNode(entry.type || (isLabel ? 'label' : 'artist'), entry.id, entry.name, node.id, node.branchId, { background: true })}
           className="flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary"
         >
           {entry.type === 'label' || isLabel ? <LabelIcon className="size-3" /> : <ArtistIcon className="size-3" />}{entry.prefix || ''}{entry.name} ›

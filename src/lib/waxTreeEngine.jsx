@@ -3337,7 +3337,7 @@ function startNodeLoad(nodeId){
   const myGen=(nodeLoadGen[nodeId]=(nodeLoadGen[nodeId]||0)+1);
   return ()=>nodeLoadGen[nodeId]!==myGen;
 }
-function addNode(type,discogsId,name,parentId,branchId){
+function addNode(type,discogsId,name,parentId,branchId,opts={}){
   const bid=branchId||st.activeBranchId;
   const existing=st.nodes.find(n=>n.discogsId===discogsId&&n.branchId===bid);
   if(existing){selectNode(existing.id);return;}
@@ -3348,7 +3348,12 @@ function addNode(type,discogsId,name,parentId,branchId){
   logEvent('explore',{type,discogs_id:discogsId,name,
     parent_type:parent?.type||null,parent_discogs_id:parent?.discogsId||null,parent_name:parent?.name||null});
   const id='n'+Date.now();
-  const node={id,branchId:bid,type,discogsId,name,parentId:parentId||null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null};
+  // background: Explore clicked while browsing another node's results —
+  // land the new node in the sidebar and start its load, but don't yank
+  // the digger away from what they're currently reading. justAdded drives
+  // a brief sidebar highlight so it's obvious something landed.
+  const background=!!opts.background;
+  const node={id,branchId:bid,type,discogsId,name,parentId:parentId||null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null,justAdded:background};
   // Gamification level is driven by total nodes across every branch, not
   // search-bar use (see incrementSearch's own comment) — confirmed live
   // 2026-08-09: a user whose tree was mostly built by clicking through
@@ -3358,10 +3363,15 @@ function addNode(type,discogsId,name,parentId,branchId){
   // return above never reaches this), so revisiting an already-added
   // node never double-counts.
   const prevLvl=getLevelFromCount(st.nodes.length);
-  st.nodes=[...st.nodes,node];st.selectedId=id;st.activeBranchId=bid;
+  st.nodes=[...st.nodes,node];
+  if(background){
+    setTimeout(()=>{const n=getNode(id);if(n){n.justAdded=false;rr();}},1400);
+  }else{
+    st.selectedId=id;st.activeBranchId=bid;
+    st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
+  }
   const newLvl=getLevelFromCount(st.nodes.length);
   if(newLvl.level>prevLvl.level)showLevelUpToast(newLvl);
-  st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
   if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
   rr();
   const cancelled=startNodeLoad(id);
