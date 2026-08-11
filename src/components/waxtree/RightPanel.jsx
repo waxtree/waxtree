@@ -2,6 +2,7 @@ import { ArrowUpRight, ChevronDown, Heart, SkipBack, SkipForward, Tag, X } from 
 import { useEffect, useState } from 'react';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { RelatedCard } from '@/components/waxtree/RelatedCard';
+import { YtCustomControls } from '@/components/waxtree/YtCustomControls';
 import { buttonSecondary } from '@/lib/waxtreeUi';
 
 export const RightPanel = ({ state, actions }) => {
@@ -31,7 +32,10 @@ export const RightPanel = ({ state, actions }) => {
             <span className="mt-0.5 block text-[11px] text-muted-foreground">{playing.artistName}</span>
           </div>
           {playing.videoId && !state.ytError ? (
-            <div className="aspect-video w-full bg-black"><div id="yt-iframe-host" className="h-full w-full" /></div>
+            <>
+              <div className="aspect-video w-full bg-black"><div id="yt-iframe-host" className="h-full w-full" /></div>
+              {playing.fromDiscogs && <YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} />}
+            </>
           ) : (
             <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-secondary p-4 text-center">
               <p className="text-xs text-muted-foreground">{state.ytError?.message || 'No video in Discogs data'}</p>

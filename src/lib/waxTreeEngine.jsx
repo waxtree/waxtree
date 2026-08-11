@@ -2094,7 +2094,7 @@ function getRelatedView(){
 }
 
 // ── YouTube ────────────────────────────────────────────────
-let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=null,ytPollId=null,ytBadgeTimerId=null,ytTitle='',ytArtist='';
+let ytPlayer=null,ytTid=null,ytTitle='',ytArtist='';
 // discoveredTracks holds tracks surfaced by Related Tracks (see below) —
 // they don't belong to any open node, so the tree scan above can't see
 // them. Without this fallback, playing a suggested track would make it
@@ -2102,8 +2102,11 @@ let ytPlayer=null,ytAccSec=0,ytPlayStart=null,ytTid=null,ytSkips=0,ytLastTime=nu
 // custom transport bar, and Related Tracks' own refresh-on-track-change).
 let discoveredTracks={};
 function findTrack(id){for(const n of st.nodes){const t=n.data?.tracks?.find(t=>t.id===id);if(t)return t;}return discoveredTracks[id]||null;}
+// Badged the instant playback starts — no accumulated-seconds or skip
+// threshold anymore (there used to be one; removed per explicit request
+// 2026-08-11, "appena parte la traccia appaia il badge Listened").
 function tryBadge(){
-  if(ytTid&&(ytAccSec>=2||ytSkips>=2)&&!st.listens[ytTid]?.badged){
+  if(ytTid&&!st.listens[ytTid]?.badged){
     st.listens[ytTid]={badged:true};
     const found=findTrackAndNode(ytTid);
     const tr=found?.track||findTrack(ytTid);
@@ -2583,39 +2586,20 @@ function createYtPlayer(){
   if(!window.YT?.Player||ytPlayer)return;
   const host=document.getElementById('yt-iframe-host');if(!host)return;
   ytTid=st.nowPlaying.trackId;ytTitle=st.nowPlaying.title||'';ytArtist=st.nowPlaying.artistName||'';
-  ytAccSec=0;ytPlayStart=null;ytSkips=0;ytLastTime=null;
-  if(ytBadgeTimerId){clearTimeout(ytBadgeTimerId);ytBadgeTimerId=null;}
-  if(ytPollId){clearInterval(ytPollId);ytPollId=null;}
-  ytPollId=setInterval(()=>{
-    if(!ytPlayer||typeof ytPlayer.getCurrentTime!=='function')return;
-    const t=ytPlayer.getCurrentTime();
-    if(ytLastTime!==null){const delta=t-ytLastTime;if(delta<-0.5||delta>3.0){ytSkips++;tryBadge();}}
-    ytLastTime=t;
-  },500);
+  // Discogs-confirmed videos get our own transport bar (controls:0 hides
+  // YouTube's native one, an officially supported player param — the video
+  // itself stays visible, satisfying the API terms). Auto-matched videos
+  // keep the native YouTube controls, same split as before the React
+  // migration, just re-ported (see YtCustomControls.jsx for the UI).
+  const custom=!!st.nowPlaying.fromDiscogs;
   ytPlayer=new YT.Player('yt-iframe-host',{
     host:'https://www.youtube-nocookie.com',
     height:'191',width:'340',videoId:st.nowPlaying.videoId,
-    playerVars:{autoplay:1,modestbranding:1,rel:0,fs:0},
+    playerVars:{autoplay:1,modestbranding:1,rel:0,fs:0,...(custom?{controls:0,disablekb:1,iv_load_policy:3}:{})},
     events:{
       onReady(){},
       onStateChange(e){
-        if(e.data===YT.PlayerState.PLAYING){
-          ytPlayStart=Date.now();ytLastTime=null;
-          if(ytBadgeTimerId)clearTimeout(ytBadgeTimerId);
-          // Matches tryBadge()'s own ytAccSec>=2 threshold — this timer is
-          // what actually triggers that check for uninterrupted playback
-          // (the skip/pause paths call tryBadge() directly on their own
-          // events), so it has to fire at the same 2s mark, not just have
-          // the comparison value changed on its own.
-          ytBadgeTimerId=setTimeout(()=>{
-            ytBadgeTimerId=null;
-            if(ytPlayStart!==null){ytAccSec+=(Date.now()-ytPlayStart)/1000;ytPlayStart=Date.now();}
-            tryBadge();
-          },2000);
-        } else {
-          if(ytBadgeTimerId){clearTimeout(ytBadgeTimerId);ytBadgeTimerId=null;}
-          if(ytPlayStart){ytAccSec+=(Date.now()-ytPlayStart)/1000;ytPlayStart=null;tryBadge();}
-        }
+        if(e.data===YT.PlayerState.PLAYING)tryBadge();
       },
       onError(e){
         const vid=st.nowPlaying?.videoId;
@@ -2641,7 +2625,26 @@ function showYtFallback(msg,np){
   st.ytError={message:msg,url,linkText:isNoEmbed?'Watch on YouTube ↗':'Search on YouTube ↗'};
   rr();
 }
-function killYt(){if(ytBadgeTimerId){clearTimeout(ytBadgeTimerId);ytBadgeTimerId=null;}if(ytPollId){clearInterval(ytPollId);ytPollId=null;}if(ytPlayer){ytPlayer.destroy();ytPlayer=null;}}
+function killYt(){if(ytPlayer){ytPlayer.destroy();ytPlayer=null;}}
+// Imperative, read-on-demand player access for the custom transport bar
+// (YtCustomControls.jsx) — deliberately NOT routed through st/rr(). That
+// component polls this every 500ms on its own; funnelling position updates
+// through the shared store would mean a full app re-render twice a second
+// for the entire time something is playing, same reasoning preview.html's
+// updateCustomSeekUI had for writing straight to the DOM instead of state.
+function ytGetSnapshot(){
+  if(!ytPlayer||typeof ytPlayer.getCurrentTime!=='function')return null;
+  return{cur:ytPlayer.getCurrentTime()||0,dur:ytPlayer.getDuration()||0,playing:ytPlayer.getPlayerState?.()===window.YT?.PlayerState?.PLAYING};
+}
+function ytSeekFraction(fraction){
+  if(!ytPlayer?.seekTo)return;
+  const dur=ytPlayer.getDuration?.()||0;
+  if(dur>0)ytPlayer.seekTo(fraction*dur,true);
+}
+function ytTogglePlayPause(){
+  if(!ytPlayer?.getPlayerState)return;
+  if(ytPlayer.getPlayerState()===YT.PlayerState.PLAYING)ytPlayer.pauseVideo();else ytPlayer.playVideo();
+}
 function doPlay(trackId,videoId,title,artistName){
   killYt();
   // Only a video Discogs itself already had gets the custom transport bar —
@@ -3987,6 +3990,7 @@ export const waxTreeActions={
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,
   playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleFollow,toggleLike,togglePin,uploadAvatar,
+  ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
   baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   supabase:sb,
