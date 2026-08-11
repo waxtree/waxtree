@@ -6,6 +6,7 @@ import { ReleaseSection } from '@/components/waxtree/ReleaseSection';
 import { buttonSecondary } from '@/lib/waxtreeUi';
 
 export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage }) => {
+  const isList = node.type === 'discogs_list';
   const filtered = actions.applyFilters(data.tracks || []);
   const hasFilter = state.filterTitle || state.filterFormat !== 'all' || state.filterSort !== 'default' || state.filterGenres.length > 0;
   const notOwned = filtered.filter(track => !actions.inDiscogsCollection(track));
@@ -36,7 +37,7 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
 
   return (
     <>
-      <p className="mb-2.5 text-[13px] text-muted-foreground">{isLabel ? 'Label' : 'Artist'} · {data.trackCount} releases on Discogs</p>
+      <p className="mb-2.5 text-[13px] text-muted-foreground">{isList ? 'Discogs List' : isLabel ? 'Label' : 'Artist'} · {data.trackCount} releases on Discogs</p>
       {data.highlights && (
         <div className="mb-3">
           <div className="mb-2 flex flex-wrap gap-1.5">
@@ -63,7 +64,7 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
       {data.tracks?.length > 0 && (
         <>
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground/70">{isLabel ? 'RELEASES' : 'TRACKS'} ({data.trackCount} Discogs, {filtered.length} loaded)</p>
+            <p className="text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground/70">{isLabel || isList ? 'RELEASES' : 'TRACKS'} ({data.trackCount} Discogs, {filtered.length} loaded)</p>
             <button type="button" onClick={() => actions.mutateState(value => { value.filterOpen = !value.filterOpen; })} className={`rounded-full border px-3 py-1 text-xs ${state.filterOpen || hasFilter ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}>⚙ Filter{hasFilter ? ' •' : ''}</button>
           </div>
           {state.filterOpen && <Filters state={state} genres={genres} resultCount={filtered.length} actions={actions} onResetPage={() => setPage(0)} />}

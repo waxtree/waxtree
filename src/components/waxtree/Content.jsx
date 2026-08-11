@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
-import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
+import { NodeTypeIcon } from '@/components/waxtree/icons/NodeTypeIcon';
 import { NodeDetails } from '@/components/waxtree/NodeDetails';
 import { PlantLoader } from '@/components/waxtree/PlantLoader';
 import { buttonSecondary } from '@/lib/waxtreeUi';
@@ -26,7 +25,14 @@ export const Content = ({ state, actions }) => {
   const chain = actions.ancestry(node.id);
   const data = node.data;
   const isLabel = node.type === 'label';
-  const followed = state.follows.some(item => item.discogs_id === node.discogsId && item.type === node.type);
+  // "Follow" means "watch this artist/label for new releases" — a static
+  // curated list has no such concept, and scanFollowsForNewReleases()
+  // itself only knows how to check artist/label ids (see its own path
+  // ternary), so a discogs_list entry sitting in st.follows would get
+  // queried as if its id were an artist's — hidden entirely here rather
+  // than letting that mismatch happen.
+  const canFollow = node.type !== 'discogs_list';
+  const followed = canFollow && state.follows.some(item => item.discogs_id === node.discogsId && item.type === node.type);
 
   return (
     <main className="min-w-0 overflow-y-auto px-7 pb-28 pt-7">
@@ -41,15 +47,17 @@ export const Content = ({ state, actions }) => {
         </div>
       )}
       <div className="mb-1 flex items-center gap-3">
-        {data?.imageUrl ? <img className="size-[52px] rounded-[10px] border border-border object-cover" src={data.imageUrl} alt={node.name} /> : <div className="flex size-[52px] items-center justify-center rounded-[10px] border border-border bg-secondary text-muted-foreground">{isLabel ? <LabelIcon className="size-6" /> : <ArtistIcon className="size-6" />}</div>}
+        {data?.imageUrl ? <img className="size-[52px] rounded-[10px] border border-border object-cover" src={data.imageUrl} alt={node.name} /> : <div className="flex size-[52px] items-center justify-center rounded-[10px] border border-border bg-secondary text-muted-foreground"><NodeTypeIcon type={node.type} className="size-6" /></div>}
         <h1 className="min-w-0 flex-1 truncate text-[26px] font-bold">{node.name}</h1>
-        <button
-          type="button"
-          onClick={() => actions.toggleFollow(node)}
-          className={`rounded-full border-[1.5px] px-3.5 py-1.5 text-xs font-semibold ${followed ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary'}`}
-        >
-          {followed ? '✓ Following' : '+ Follow'}
-        </button>
+        {canFollow && (
+          <button
+            type="button"
+            onClick={() => actions.toggleFollow(node)}
+            className={`rounded-full border-[1.5px] px-3.5 py-1.5 text-xs font-semibold ${followed ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary'}`}
+          >
+            {followed ? '✓ Following' : '+ Follow'}
+          </button>
+        )}
       </div>
       {node.loading && <PlantLoader />}
       {node.error && (

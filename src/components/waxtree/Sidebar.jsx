@@ -1,3 +1,4 @@
+import { ListMusic } from 'lucide-react';
 import { SidebarNode } from '@/components/waxtree/SidebarNode';
 import { Button } from '@/components/ui/button';
 
@@ -48,6 +49,14 @@ export const Sidebar = ({ state, actions }) => {
           className={`rounded-full border px-2 py-0.5 text-[11px] ${state.sbPinFirst ? 'border-primary text-primary' : 'border-border text-muted-foreground/70'}`}
         >
           Pinned first
+        </button>
+        <button
+          type="button"
+          title="Add a Discogs list"
+          onClick={() => actions.addDiscogsList(prompt('Paste a Discogs list link or ID:', ''))}
+          className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground/70 hover:border-primary hover:text-primary"
+        >
+          <ListMusic className="size-3" /> List
         </button>
         <select
           value={state.sbFilterTag}

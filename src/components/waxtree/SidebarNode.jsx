@@ -1,7 +1,6 @@
 import { Hash, Pin, X } from 'lucide-react';
 import { useState } from 'react';
-import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
-import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
+import { NodeTypeIcon } from '@/components/waxtree/icons/NodeTypeIcon';
 import { Badge } from '@/components/ui/badge';
 
 export const SidebarNode = ({ node, depth, state, actions }) => {
@@ -18,7 +17,7 @@ export const SidebarNode = ({ node, depth, state, actions }) => {
         style={{ paddingLeft: 8 + depth * 14 }}
         className={`group flex cursor-pointer items-start gap-1.5 border-l-2 py-[7px] pr-2.5 ${active ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}
       >
-        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/70">{node.type === 'label' ? <LabelIcon className="size-3.5" /> : <ArtistIcon className="size-3.5" />}</span>
+        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/70"><NodeTypeIcon type={node.type} className="size-3.5" /></span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
             {node.pinned && <span className="size-1.5 rounded-full bg-primary" />}

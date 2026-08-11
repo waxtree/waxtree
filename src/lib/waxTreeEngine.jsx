@@ -2557,7 +2557,7 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
       const found=findTrackAndNode(trackId);
       if(found){
         found.track.videoId=result;
-        lsSet((found.node.type==='label'?'l8:':'a7:')+found.node.discogsId,found.node.data);
+        lsSet(nodeCachePrefix(found.node.type)+found.node.discogsId,found.node.data);
       }
       if(st.nowPlaying?.trackId===trackId){
         // The user is actively watching THIS one resolve (it's what's
@@ -3089,6 +3089,13 @@ async function fetchReleaseBatches(relList,capTracks,isCancelled,fetchOne){
   }
   return{rawTracks,needsCover};
 }
+// Shared by every place that needs the ct2: cache-key prefix for a node
+// type (getCachedNodeData, the two "patch a resolved video back onto the
+// node's cache entry" spots, addNode/retryNode's fetch dispatch) — one
+// place to extend when a new node type is added, instead of five
+// independent artist/label ternaries silently missing the new case.
+function nodeCachePrefix(type){return type==='label'?'l8:':type==='discogs_list'?'ls:':'a7:';}
+function nodeCacheType(prefix){return prefix==='l8:'?'label':prefix==='ls:'?'discogs_list':'artist';}
 function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
   if(!needsCover.length)return;
   (async()=>{
@@ -3102,7 +3109,7 @@ function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
     }
     if(patched){
       lsSet(cacheKey,nd); // persist the same (mutated) object so covers survive a reload
-      pushSharedNodeCache(cacheKey.startsWith('l8:')?'label':'artist',cacheKey.slice(3),nd);
+      pushSharedNodeCache(nodeCacheType(cacheKey.slice(0,3)),cacheKey.slice(3),nd);
     }
   })();
 }
@@ -3111,11 +3118,11 @@ function resolveCoversInBackground(needsCover,cacheKey,isCancelled,nd){
 // instead of always flashing the loading state for a frame first, even
 // when the data was sitting right there in localStorage.
 function getCachedNodeData(type,discogsId){
-  const key=(type==='label'?'l8:':'a7:')+discogsId;
+  const key=nodeCachePrefix(type)+discogsId;
   const c=lsGet(key);
   if(!c)return null;
   if(c._v!==TRACK_DATA_VERSION)return null;
-  if(type==='artist'&&!c.tracks?.length)return null;
+  if((type==='artist'||type==='discogs_list')&&!c.tracks?.length)return null;
   return c;
 }
 
@@ -3308,6 +3315,91 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
   return nd;
 }
 
+// A Discogs List (GET /lists/{id}, the official/public endpoint — its own
+// resource_url, confirmed live 2026-08-10 against a real list) is a curated
+// set of releases (and sometimes whole master-release groups) a Discogs
+// user put together — not an artist or label, so it doesn't fit either of
+// the two existing node types, but its .tracks end up in EXACTLY the same
+// shape buildTrackEntries() already produces for both of those, which is
+// what lets NodeDetails/ReleaseCard/TrackRow/the Buy menu/etc. render a
+// list node with zero changes anywhere in the UI layer — same data shape,
+// different source.
+async function fetchListData(discogsId,isCancelled=()=>false){
+  const c=getCachedNodeData('discogs_list',discogsId);if(c)return c;
+  const shared=await getSharedNodeCache('discogs_list',discogsId);
+  if(shared&&!isCancelled()){lsSet('ls:'+discogsId,shared);return shared;}
+  const ld=await dReq('/lists/'+discogsId);
+  // Discogs lists can also hold artist/label entries alongside releases —
+  // only the release/master ones map onto a track-browsable node the way
+  // this feature is meant to (see the AskUserQuestion this was scoped
+  // against): non-release entries are simply skipped, not an error.
+  const relList=(ld.items||[]).filter(it=>it.type==='release'||it.type==='master');
+  const{rawTracks,needsCover}=await fetchReleaseBatches(relList,200,isCancelled,async rel=>{
+    let fetchId,releaseUrl,rd;
+    if(rel.type==='master'){
+      releaseUrl=`https://www.discogs.com/master/${rel.id}`;
+      fetchId='m'+rel.id;rd=await dReq('/masters/'+rel.id);
+    }else{
+      fetchId=rel.id;releaseUrl=`https://www.discogs.com/release/${fetchId}`;
+      rd=await dReq('/releases/'+fetchId);
+    }
+    const entries=buildTrackEntries(rd,fetchId,releaseUrl,rd.year,rd.labels?.[0]?.name,rel.image_url||'');
+    // Unlike an artist node (every track already belongs to the artist
+    // you're viewing, so there's nothing to explore-to) a list mixes
+    // releases from many different artists — without this, there's no way
+    // to jump from a list straight to the artist behind any given release.
+    // Same override pattern fetchLabelData() already uses for its own
+    // per-track credits, just sourced from the release's own primary
+    // artist instead — genuine various-artist releases keep whatever
+    // per-track credit buildTrackEntries() already found (trackArtists),
+    // this only fills the gap when there isn't one.
+    const primaryArtist=rd.artists?.[0];
+    const isVarious=primaryArtist&&/^various$/i.test(primaryArtist.name.trim());
+    if(primaryArtist&&!isVarious){
+      entries.forEach(e=>{
+        if(e.exploreId||e.trackArtists?.length)return;
+        e.exploreId=primaryArtist.id;e.exploreName=stripDiscogsSuffix(primaryArtist.name);e.exploreType='artist';e.exploreLabel='Explore artist';
+      });
+    }
+    const needsCoverItem=(entries.length&&!entries[0].thumbUrl)
+      ?{entries,artistName:rd.artists?.[0]?.name||ld.name,releaseTitle:rd.title||rel.display_title||'',year:rd.year}
+      :null;
+    return{entries,needsCover:needsCoverItem};
+  });
+  const tracks=dedup(rawTracks);
+  const nd={
+    id:discogsId,name:ld.name,
+    bio:ld.description?stripBio(ld.description):null,
+    imageUrl:null,
+    aliases:[],sublabels:[],parentLabel:null,country:null,
+    highlights:{yearRange:null,names:[],labelStr:ld.user?.username?`Curated by ${ld.user.username} on Discogs`:null},
+    correlatedArtists:[],
+    tracks,trackCount:relList.length,
+    _v:TRACK_DATA_VERSION
+  };
+  lsSet('ls:'+discogsId,nd);
+  pushSharedNodeCache('discogs_list',discogsId,nd);
+  resolveCoversInBackground(needsCover,'ls:'+discogsId,isCancelled,nd);
+  return nd;
+}
+
+// User-facing entry point for adding a list node — accepts either a bare
+// numeric list id or a full Discogs list URL (https://www.discogs.com/
+// lists/Some-Title/123456), matching how a user would naturally copy a
+// list link straight out of their browser instead of having to dig the
+// raw id out of it themselves.
+function parseDiscogsListInput(input){
+  const trimmed=(input||'').trim();
+  if(/^\d+$/.test(trimmed))return trimmed;
+  const m=trimmed.match(/discogs\.com\/lists\/[^/]*\/(\d+)/i)||trimmed.match(/discogs\.com\/lists\/(\d+)/i);
+  return m?m[1]:null;
+}
+function addDiscogsList(input){
+  const listId=parseDiscogsListInput(input);
+  if(!listId){if(input)alert("That doesn't look like a Discogs list link or ID.");return;}
+  addNode('discogs_list',listId,'List '+listId,null,st.activeBranchId);
+}
+
 // ── Actions ────────────────────────────────────────────────
 function getNode(id){return st.nodes.find(n=>n.id===id);}
 function getBranch(id){return st.branches.find(b=>b.id===id);}
@@ -3365,10 +3457,14 @@ function addNode(type,discogsId,name,parentId,branchId){
   if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
   rr();
   const cancelled=startNodeLoad(id);
-  const fn=type==='label'?fetchLabelData:fetchArtistData;
+  const fn=type==='label'?fetchLabelData:type==='discogs_list'?fetchListData:fetchArtistData;
   fn(discogsId,cancelled).then(d=>{
     if(cancelled())return;
-    const n=getNode(id);if(n){n.data=d;n.loaded=true;n.loading=false;}rr();
+    // d.name is always the real Discogs-side name — a no-op sync for
+    // artist/label (the caller already had the real name from search
+    // results) but the only way a list node ever loses its "List
+    // <id>" placeholder (see addDiscogsList) once its real title arrives.
+    const n=getNode(id);if(n){n.data=d;if(d?.name)n.name=d.name;n.loaded=true;n.loading=false;}rr();
     fetchBandcamp(id,d?.name||name);
   }).catch(e=>{
     if(cancelled())return;
@@ -3387,16 +3483,16 @@ function retryNode(nodeId){
   const cached=getCachedNodeData(node.type,node.discogsId);
   if(cached){
     startNodeLoad(nodeId); // still bump the generation, cancels any stale in-flight load for this node
-    node.data=cached;node.loaded=true;node.loading=false;rr();
+    node.data=cached;if(cached?.name)node.name=cached.name;node.loaded=true;node.loading=false;rr();
     fetchBandcamp(nodeId,cached?.name||node.name);
     return;
   }
   node.loading=true;rr();
   const cancelled=startNodeLoad(nodeId);
-  const fn=node.type==='label'?fetchLabelData:fetchArtistData;
+  const fn=node.type==='label'?fetchLabelData:node.type==='discogs_list'?fetchListData:fetchArtistData;
   fn(node.discogsId,cancelled).then(d=>{
     if(cancelled())return;
-    const n=getNode(nodeId);if(n){n.data=d;n.loaded=true;n.loading=false;}rr();
+    const n=getNode(nodeId);if(n){n.data=d;if(d?.name)n.name=d.name;n.loaded=true;n.loading=false;}rr();
     fetchBandcamp(nodeId,d?.name||node.name);
   }).catch(e=>{
     if(cancelled())return;
@@ -3929,7 +4025,7 @@ function submitYoutubeLink(trackId,videoId){
   const found=findTrackAndNode(trackId);
   if(found){
     found.track.videoId=videoId;
-    lsSet((found.node.type==='label'?'l8:':'a7:')+found.node.discogsId,found.node.data);
+    lsSet(nodeCachePrefix(found.node.type)+found.node.discogsId,found.node.data);
   }
   rr();
 }
@@ -3971,7 +4067,7 @@ function getExploreTargets(trackId,artistName){
 }
 
 export const waxTreeActions={
-  addBranch,addNode,addTag,ancestry,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
+  addBranch,addDiscogsList,addNode,addTag,ancestry,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,
