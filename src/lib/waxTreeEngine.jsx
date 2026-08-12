@@ -752,13 +752,23 @@ async function matchLibraryWithDiscogs(){
           }catch{}
         }
         return{artistNorm,cands};
-      }catch(e){console.warn('WaxTree: artist search failed for',artistNorm,e);return{artistNorm,cands:[]};}
+      }catch(e){console.warn('WaxTree: artist search failed for',artistNorm,e);return{artistNorm,cands:[],failed:true};}
     }));
-    for(const{artistNorm,cands}of searchResults){
+    for(const{artistNorm,cands,failed}of searchResults){
       if(!st.libraryMatchRunning)break;
       const groupTracks=byArtist.get(artistNorm);
       const unmatched=()=>groupTracks.filter(t=>!matches[t.titleNorm+'|'+t.artistNorm]);
       let canonicalName=null;
+      // A genuine failure (rate-limited, network) has to NOT mark this
+      // artist checked below — it used to, indistinguishable from a real
+      // "searched Discogs, found nothing" answer, so an artist caught in a
+      // 429 storm was silently written off forever instead of retried on
+      // the next run. Confirmed live 2026-08-12: 7 back-to-back 429s from
+      // the shared no-personal-token proxy during a library-match run
+      // (same contention class that caused a real outage 2026-07-16),
+      // right when this was very likely quietly killing hundreds of
+      // artists' worth of matching in one run.
+      let hadFailure=failed;
       for(const cand of cands){
         if(!unmatched().length)break;
         try{
@@ -777,7 +787,7 @@ async function matchLibraryWithDiscogs(){
               st.libraryMatchProgress.found++;
             }
           });
-        }catch(e){console.warn('WaxTree: fetching artist data failed for',artistNorm,e);}
+        }catch(e){console.warn('WaxTree: fetching artist data failed for',artistNorm,e);hadFailure=true;}
       }
       // Second pass: whatever the artist-catalog window missed — deep
       // catalog beyond fetchArtistData()'s 200-track/newest-first cap, or
@@ -819,9 +829,12 @@ async function matchLibraryWithDiscogs(){
           }
           lsSet(vKey,verdict);
           if(verdict.match){matches[key]=verdict.match;st.libraryMatchProgress.found++;}
-        }catch(e){console.warn('WaxTree: track search failed for',t.titleNorm,e);}
+        }catch(e){console.warn('WaxTree: track search failed for',t.titleNorm,e);hadFailure=true;}
       }
-      checked.add(artistNorm);
+      // Only a genuinely completed pass (search succeeded even if it found
+      // nothing) retires this artist — a failed one goes back into
+      // "remaining" on the next run instead of being lost for good.
+      if(!hadFailure)checked.add(artistNorm);
     }
     st.libraryMatchProgress.done=Math.min(remaining.length,i+batch.length);
     saveDigitalMatches(matches);
@@ -2905,9 +2918,23 @@ function lsSet(k,d){
 function stripBio(t){return t.replace(/\[a\d*=([^\]]+)\]/g,'$1').replace(/\[l=([^\]]+)\]/g,'$1').replace(/\[url=[^\]]*\]([^[]*)\[\/url\]/g,'$1').replace(/\[[^\]]*\]/g,'').trim();}
 
 let rqN=0,rqW=Date.now();
+// Separate, more conservative pacing for the no-token path below: it goes
+// through the app's own shared Discogs consumer key (api/discogs-oauth.js's
+// 'search' action) — the SAME quota every user without a personal token
+// draws from at once, not this browser's own, and was entirely unthrottled
+// client-side before this. A big batch (library match fires
+// DIGITAL_MATCH_BATCH concurrent searches) could — and did — hammer it hard
+// enough to trip repeated 429s: confirmed live 2026-08-12, 7 back-to-back
+// 429s mid library-match run, same contention class that caused a real
+// outage on 2026-07-16 (see memory). Lower ceiling than the personal-token
+// path below: it's shared across every such user at once, and Discogs' own
+// unauthenticated/consumer-key-only limit is tighter than a per-user token's.
+let rqSharedN=0,rqSharedW=Date.now();
 async function dReq(path,p={},_retry=0){
   const tok=getToken();
   if(!tok){
+    const now=Date.now();if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
+    if(rqSharedN>=20){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedW)));rqSharedN=0;rqSharedW=Date.now();}rqSharedN++;
     try{return await edgeFn({action:'search',path,params:JSON.stringify(p)});}
     catch(e){
       if(_retry<3&&(e.message==='rate_limited'||e.message.includes('rate_limit'))){
@@ -4065,11 +4092,11 @@ function getExploreTargets(trackId,artistName){
 
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
-  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
+  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getDiscogsToken:getToken,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,
   playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,retryNode,scanFollowsForNewReleases,
-  resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleFollow,toggleLike,togglePin,uploadAvatar,
+  resolveStoreUrl,saveDiscogsToken:saveToken,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleFollow,toggleLike,togglePin,uploadAvatar,
   baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   supabase:sb,
