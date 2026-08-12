@@ -436,18 +436,44 @@ async function handleDiscogsCallback(){
   }catch(e){st.discogsSyncing=false;rr();alert('Discogs connection failed: '+e.message);}
 }
 
-function isOwned(trackTitle,trackArtist){
+// Same tiered title match pickTrackMatch() already uses for the library-scan
+// search (exact / mix-descriptor-only / duration-confirmed prefix), plus an
+// artist cross-check that's no longer optional. The old version returned a
+// match on title alone whenever EITHER side's artist was blank — and a local
+// scan leaves artistNorm blank constantly (any file whose name doesn't
+// parse as "Artist - Title" and has no ID3 artist tag, e.g. most DJ-pool
+// downloads) — so a short/generic title like "Feel It" was silently
+// matching any owned file with a similar title and no artist tag at all,
+// badging tracks the user never actually had. Confirmed live 2026-08-12
+// (Andrew Macari's "Feel It" badged from an unrelated same-named file).
+// Substring/prefix title matching (tiers 1-2) now requires the artist to
+// actually corroborate the match. With no artist to check on either side, an
+// exact title match alone still isn't enough — "Feel It" is exactly the kind
+// of short/generic title two unrelated tracks share — so that case falls
+// back to duration as the sole corroborating signal instead (tight
+// tolerance, since nothing else is confirming it). No artist AND no
+// duration on either side means no way to tell two same-named tracks apart,
+// so that's a no-match rather than a guess.
+function isOwned(trackTitle,trackArtist,trackDuration){
   if(!st.ownedTracks.length)return false;
   const tN=normalizeStr(trackTitle);
   const aN=normalizeStr(trackArtist||'');
   if(!tN)return false;
+  const trackDur=parseDur(trackDuration||'');
+  const tKey=mixTitleKey(tN);
   return st.ownedTracks.some(o=>{
     if(!o.titleNorm)return false;
-    const titleMatch=o.titleNorm===tN||o.titleNorm.includes(tN)||tN.includes(o.titleNorm);
-    if(!titleMatch)return false;
-    if(aN&&o.artistNorm)
-      return o.artistNorm===aN||o.artistNorm.includes(aN)||aN.includes(o.artistNorm);
-    return true;
+    let tier;
+    if(o.titleNorm===tN)tier=0;
+    else{
+      const oKey=mixTitleKey(o.titleNorm);
+      if(oKey===tKey)tier=1;
+      else if(oKey.startsWith(tKey+' ')||tKey.startsWith(oKey+' '))tier=2;
+      else return false;
+    }
+    if(tier===2&&!(o.dur&&trackDur&&Math.abs(o.dur-trackDur)<=20))return false;
+    if(aN&&o.artistNorm)return o.artistNorm===aN||artistTokensOverlap(o.artistNorm,[trackArtist])||artistTokensOverlap(aN,[o.artistRaw||o.artistNorm]);
+    return tier===0&&!!(o.dur&&trackDur&&Math.abs(o.dur-trackDur)<=5);
   });
 }
 
@@ -467,7 +493,7 @@ function getDigitalLibraryEntries(){
     const isLabelNode=n.type==='label';
     tracks.forEach(t=>{
       const artistDisplay=isLabelNode?t.label:n.name;
-      if(!isOwned(t.title,artistDisplay))return;
+      if(!isOwned(t.title,artistDisplay,t.duration))return;
       const key=t.discogsUrl||String(t.id);
       if(seen.has(key))return;
       seen.add(key);
