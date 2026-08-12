@@ -216,17 +216,6 @@ const FollowsModal = ({ state, actions }) => {
 
 const LibrariesModal = ({ state, actions }) => {
   const [scanStatus, setScanStatus] = useState('');
-  const [tokenInput, setTokenInput] = useState('');
-  const [hasToken, setHasToken] = useState(!!actions.getDiscogsToken());
-  const handleSaveToken = () => {
-    actions.saveDiscogsToken(tokenInput);
-    setTokenInput('');
-    setHasToken(true);
-  };
-  const handleClearToken = () => {
-    actions.saveDiscogsToken('');
-    setHasToken(false);
-  };
   const close = () => {
     if (state.discogsSyncing) return;
     actions.mutateState(value => { value.librariesModal = false; value.welcomeSyncIntro = false; });
@@ -289,17 +278,6 @@ const LibrariesModal = ({ state, actions }) => {
             {state.ownedTracks.length > 0 && <button type="button" title="Checks each distinct artist in your library against Discogs — keeps running in the background even if you close this window" disabled={state.libraryMatchRunning} onClick={actions.matchLibraryWithDiscogs} className={buttonSecondary}>{state.libraryMatchRunning ? `Matching artists ${state.libraryMatchProgress.done}/${state.libraryMatchProgress.total}` : 'Match library'}</button>}
             {scanStatus && <p className="basis-full text-[11px] text-muted-foreground">{scanStatus}</p>}
             {state.libraryMatchRunning && <p className="basis-full text-[11px] text-muted-foreground">Checking Discogs one artist at a time — {digitalEntries.length} tracks matched so far. This keeps running in the background even if you close this window; reopen Sync any time to check progress.</p>}
-          </div>
-
-          <SectionHeader title="🔑 Discogs API Token" />
-          <div className="py-3">
-            <p className="mb-2 text-[12px] leading-5 text-muted-foreground">Optional, but speeds up library matching a lot: without a personal token, every search shares one rate limit with every other WaxTree user. With your own token, matching gets its own dedicated quota.</p>
-            <div className="flex flex-wrap items-center gap-2">
-              <input type="password" value={tokenInput} onChange={event => setTokenInput(event.target.value)} placeholder={hasToken ? '•••••••••••••••••• (saved)' : 'Paste your Discogs personal access token'} className={`${modalInput} min-w-[220px] flex-1`} />
-              <button type="button" disabled={!tokenInput.trim()} onClick={handleSaveToken} className={buttonSecondary}>Save</button>
-              {hasToken && <button type="button" onClick={handleClearToken} className={buttonSecondary}>Remove</button>}
-            </div>
-            <p className="mt-2 text-[11px] text-muted-foreground">Generate one at <a href="https://www.discogs.com/settings/developers" target="_blank" rel="noreferrer" className="text-primary underline">discogs.com/settings/developers</a> — stays only in this browser, never sent to WaxTree.</p>
           </div>
 
           <SectionHeader title="🎵 Discogs Collection" />
