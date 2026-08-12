@@ -2,6 +2,23 @@ const ck = process.env.DISCOGS_CONSUMER_KEY ?? ''
 const cs = process.env.DISCOGS_CONSUMER_SECRET ?? ''
 const UA = 'WaxTree/1.0 (luca.doots@gmail.com)'
 
+// Optional pool of personal Discogs access tokens (comma-separated),
+// contributed by whoever wants to lend WaxTree some of their own Discogs
+// rate-limit headroom. Each personal token gets its own independent quota
+// from Discogs (separate from the shared app-level consumer-key quota the
+// 'search' action falls back to below), so every token added here is real
+// extra throughput, not a bigger slice of the same one. Picked at random
+// per request rather than round-robined — serverless invocations don't
+// share memory, so there's no reliable place to track "whose turn is it"
+// across them without another moving part; random spreads load evenly
+// enough across the pool without needing one. Empty/unset = falls back to
+// the original single shared consumer-key behavior, unchanged.
+const tokenPool = (process.env.DISCOGS_TOKEN_POOL ?? '').split(',').map(t => t.trim()).filter(Boolean)
+function pickPooledToken() {
+  if (!tokenPool.length) return null
+  return tokenPool[Math.floor(Math.random() * tokenPool.length)]
+}
+
 function nonce() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
@@ -81,7 +98,7 @@ export default async function handler(req, res) {
     return res.status(200).json(await r.json())
   }
 
-  // ── Search: app-level auth (no user token needed) ─────────
+  // ── Search: app-level auth, or a pooled personal token if any are configured ─────────
   if (action === 'search') {
     const { path, params } = body
     const url = new URL('https://api.discogs.com' + path)
@@ -89,8 +106,12 @@ export default async function handler(req, res) {
       const p = typeof params === 'string' ? JSON.parse(params) : params
       Object.entries(p).forEach(([k, v]) => url.searchParams.set(k, String(v)))
     }
+    const pooled = pickPooledToken()
     const r = await fetch(url.toString(), {
-      headers: { Authorization: `Discogs key=${ck},secret=${cs}`, 'User-Agent': UA },
+      headers: {
+        Authorization: pooled ? `Discogs token=${pooled}` : `Discogs key=${ck},secret=${cs}`,
+        'User-Agent': UA,
+      },
     })
     if (r.status === 429) return res.status(429).json({ error: 'rate_limited' })
     if (!r.ok) return res.status(400).json({ error: `Discogs ${r.status}` })

@@ -2917,6 +2917,33 @@ function lsSet(k,d){
 }
 function stripBio(t){return t.replace(/\[a\d*=([^\]]+)\]/g,'$1').replace(/\[l=([^\]]+)\]/g,'$1').replace(/\[url=[^\]]*\]([^[]*)\[\/url\]/g,'$1').replace(/\[[^\]]*\]/g,'').trim();}
 
+// Cross-user companion to the local ct2: cache — same pattern and reasoning
+// as getSharedNodeCache/pushSharedNodeCache below (which cache a fully-
+// assembled artist/label node), just for the raw Discogs request underneath
+// every dReq() call, search included. matchLibraryWithDiscogs() alone fires
+// thousands of these — one search per distinct local artist tag, most of
+// which turn up no Discogs match at all — and every WaxTree user with any
+// overlap in their local library (a shared artist, a shared "nobody has
+// this name") was redoing that exact search from scratch. See
+// supabase/discogs_search_cache.sql. Non-fatal on any failure, same as the
+// node cache: worst case is exactly what happened before this existed.
+function discogsCacheKey(path,params){
+  const sorted=Object.keys(params||{}).sort().map(k=>`${k}=${params[k]}`).join('&');
+  return path+(sorted?'?'+sorted:'');
+}
+async function getSharedSearchCache(cacheKey){
+  try{
+    const{data,error}=await sb.from('discogs_search_cache').select('data,cached_at').eq('cache_key',cacheKey).maybeSingle();
+    if(error||!data)return null;
+    if(Date.now()-new Date(data.cached_at).getTime()>=CT2_TTL_MS)return null;
+    return data.data;
+  }catch{return null;}
+}
+function pushSharedSearchCache(cacheKey,data){
+  sb.from('discogs_search_cache').upsert({cache_key:cacheKey,data,cached_at:new Date().toISOString()})
+    .then(({error})=>{if(error)console.warn('WaxTree: shared search cache push failed (non-fatal):',error);});
+}
+
 let rqN=0,rqW=Date.now();
 // Separate, more conservative pacing for the no-token path below: it goes
 // through the app's own shared Discogs consumer key (api/discogs-oauth.js's
@@ -2930,7 +2957,7 @@ let rqN=0,rqW=Date.now();
 // path below: it's shared across every such user at once, and Discogs' own
 // unauthenticated/consumer-key-only limit is tighter than a per-user token's.
 let rqSharedN=0,rqSharedW=Date.now();
-async function dReq(path,p={},_retry=0){
+async function dReqRaw(path,p={},_retry=0){
   const tok=getToken();
   if(!tok){
     const now=Date.now();if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
@@ -2939,7 +2966,7 @@ async function dReq(path,p={},_retry=0){
     catch(e){
       if(_retry<3&&(e.message==='rate_limited'||e.message.includes('rate_limit'))){
         await new Promise(r=>setTimeout(r,15000*(1+_retry)));
-        return dReq(path,p,_retry+1);
+        return dReqRaw(path,p,_retry+1);
       }
       throw e;
     }
@@ -2951,14 +2978,22 @@ async function dReq(path,p={},_retry=0){
   let res;
   try{res=await fetch(url,{headers:{Authorization:`Discogs token=${tok}`}});}
   catch(e){
-    if(_retry<2){await new Promise(r=>setTimeout(r,5000*(1+_retry)));return dReq(path,p,_retry+1);}
+    if(_retry<2){await new Promise(r=>setTimeout(r,5000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
     throw e;
   }
   if(res.status===429){
-    if(_retry<2){await new Promise(r=>setTimeout(r,12000*(1+_retry)));return dReq(path,p,_retry+1);}
+    if(_retry<2){await new Promise(r=>setTimeout(r,12000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
     throw new Error('Rate limit — try again in a moment');
   }
   if(!res.ok)throw new Error(`Discogs ${res.status}`);return res.json();
+}
+async function dReq(path,p={}){
+  const cacheKey=discogsCacheKey(path,p);
+  const cached=await getSharedSearchCache(cacheKey);
+  if(cached)return cached;
+  const data=await dReqRaw(path,p);
+  pushSharedSearchCache(cacheKey,data);
+  return data;
 }
 // Releases included alongside artist/label, matching how a plain search on
 // discogs.com itself behaves (confirmed live 2026-08-01: searching "Strings
