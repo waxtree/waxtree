@@ -275,8 +275,9 @@ const LibrariesModal = ({ state, actions }) => {
           <div className="flex flex-wrap items-center gap-2 py-3">
             <div className="min-w-[180px] flex-1"><strong className="block text-[13px]">Music folder</strong><span className="text-[11px] text-muted-foreground">{state.ownedTracks.length ? `${state.ownedTracks.length} tracks indexed` : 'No folder linked yet'}</span></div>
             <button type="button" onClick={scanFolder} className={buttonSecondary}>{state.ownedTracks.length ? 'Rescan' : 'Link folder'}</button>
-            {state.ownedTracks.length > 0 && <button type="button" disabled={state.libraryMatchRunning} onClick={actions.matchLibraryWithDiscogs} className={buttonSecondary}>{state.libraryMatchRunning ? `${state.libraryMatchProgress.done}/${state.libraryMatchProgress.total}` : 'Match library'}</button>}
+            {state.ownedTracks.length > 0 && <button type="button" title="Checks each distinct artist in your library against Discogs — keeps running in the background even if you close this window" disabled={state.libraryMatchRunning} onClick={actions.matchLibraryWithDiscogs} className={buttonSecondary}>{state.libraryMatchRunning ? `Matching artists ${state.libraryMatchProgress.done}/${state.libraryMatchProgress.total}` : 'Match library'}</button>}
             {scanStatus && <p className="basis-full text-[11px] text-muted-foreground">{scanStatus}</p>}
+            {state.libraryMatchRunning && <p className="basis-full text-[11px] text-muted-foreground">Checking Discogs one artist at a time — {digitalEntries.length} tracks matched so far. This keeps running in the background even if you close this window; reopen Sync any time to check progress.</p>}
           </div>
 
           <SectionHeader title="🎵 Discogs Collection" />
