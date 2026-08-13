@@ -11,7 +11,7 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   const liked = !!state.likes[track.id];
   const queued = state.dasAscoltare.some(item => item.id === track.id);
   const trackWithArtist = { ...track, artistName: artist };
-  const owned = actions.isOwned(track.title, artist);
+  const owned = actions.isOwned(track.title, artist, track.duration);
   const featuring = primaryArtist && track.label && track.label !== primaryArtist
     ? track.label.split(',').map(value => value.trim()).filter(value => value && actions.normalizeStr(value) !== actions.normalizeStr(primaryArtist))
     : [];

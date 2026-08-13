@@ -76,13 +76,19 @@ function normalizeStr(str){
 const keepRawArtist=a=>/[,&\/]|\b(?:feat|ft|featuring|vs|presents|pres|b2b|meets|versus)\b/i.test(a||'')?a.trim():undefined;
 const keepRawTitle=t=>/[()\[\]]/.test(t||'')?t.trim():undefined;
 
+// Separator requires a space OR underscore on both sides of the dash — not
+// just a space, DJ-pool filenames are as often "Artist_-_Title.mp3" as
+// "Artist - Title.mp3" — while still refusing to split a bare mid-word
+// hyphen with no surrounding whitespace/underscore ("Drum-n-Bass Anthem",
+// a single title with no artist), which would silently mis-split instead.
+const FILENAME_SEP=/(?:\s|_)[-–—](?:\s|_)/;
 function parseFilename(filename){
   let name=filename.replace(/\.[^/.]+$/,'');
   name=name.replace(/^[\dA-Da-d]{1,2}[.\-\s]+/,'');
-  const parts=name.split(/\s[-–]\s/);
-  if(parts.length>=2)return{titleNorm:normalizeStr(parts[parts.length-1]),artistNorm:normalizeStr(parts[0]),filename,dur:null,titleRaw:keepRawTitle(parts[parts.length-1]),artistRaw:keepRawArtist(parts[0])};
+  const parts=name.split(FILENAME_SEP);
+  if(parts.length>=2)return{titleNorm:normalizeStr(parts[parts.length-1]),artistNorm:normalizeStr(parts[0]),filename,dur:null,titleRaw:keepRawTitle(parts[parts.length-1]),artistRaw:keepRawArtist(parts[0]),source:'filename'};
   const trimmed=name.trim();
-  if(trimmed)return{titleNorm:normalizeStr(trimmed),artistNorm:'',filename,dur:null};
+  if(trimmed)return{titleNorm:normalizeStr(trimmed),artistNorm:'',filename,dur:null,source:'filename'};
   return null;
 }
 
@@ -93,7 +99,7 @@ async function extractMetadata(file,mm){
       const title=meta.common.title?.trim();
       const artist=meta.common.artist?.trim();
       const dur=meta.format.duration?Math.round(meta.format.duration):null;
-      if(title)return{titleNorm:normalizeStr(title),artistNorm:normalizeStr(artist||''),filename:file.name,dur,titleRaw:keepRawTitle(title),artistRaw:keepRawArtist(artist)};
+      if(title)return{titleNorm:normalizeStr(title),artistNorm:normalizeStr(artist||''),filename:file.name,dur,titleRaw:keepRawTitle(title),artistRaw:keepRawArtist(artist),source:'id3'};
     }catch{}
   }
   return parseFilename(file.name);
@@ -118,8 +124,13 @@ function pickMusicFolder(){
 // Phase 2: read metadata in parallel batches of BATCH_SIZE
 async function extractAllMetadata(handles,onProgress){
   const results=[];
+  // How each track's artist/title actually got determined — matchLibraryWithDiscogs()
+  // can only ever search for a track it has an artist for, so "how many files have
+  // no artist at all" directly caps how much of the library is even attempted. This
+  // used to be invisible; see the report linkLibrary() logs with it.
+  const idStats={mmLoaded:false,id3:0,id3NoArtist:0,filenameParsed:0,filenameNoArtist:0,unparsable:0};
   let mm=null;
-  try{mm=await import('https://esm.sh/music-metadata-browser@2.5.10');}catch{}
+  try{mm=await import('https://esm.sh/music-metadata-browser@2.5.10');idStats.mmLoaded=true;}catch{}
   for(let i=0;i<handles.length;i+=BATCH_SIZE){
     const batch=handles.slice(i,i+BATCH_SIZE);
     const batchOut=await Promise.all(batch.map(async h=>{
@@ -127,16 +138,19 @@ async function extractAllMetadata(handles,onProgress){
       catch{return parseFilename(h.name);}
     }));
     for(const t of batchOut){
-      if(t?.titleNorm)results.push(t);
-      else if(t?.filename){
+      if(t?.titleNorm){
+        results.push(t);
+        if(t.source==='id3')idStats[t.artistNorm?'id3':'id3NoArtist']++;
+        else idStats[t.artistNorm?'filenameParsed':'filenameNoArtist']++;
+      }else if(t?.filename){
         // Normalization emptied the title (e.g. all-symbol name) — index raw filename so the track is never lost
         const raw=t.filename.replace(/\.[^/.]+$/,'').toLowerCase().replace(/\s+/g,' ').trim();
-        if(raw)results.push({titleNorm:raw,artistNorm:'',filename:t.filename,dur:t.dur||null});
+        if(raw){results.push({titleNorm:raw,artistNorm:'',filename:t.filename,dur:t.dur||null});idStats.unparsable++;}
       }
     }
     onProgress?.(Math.min(i+BATCH_SIZE,handles.length),handles.length);
   }
-  return results;
+  return{results,idStats};
 }
 
 // track.altIds carries the ids of any other release-variant rows that got
@@ -436,18 +450,44 @@ async function handleDiscogsCallback(){
   }catch(e){st.discogsSyncing=false;rr();alert('Discogs connection failed: '+e.message);}
 }
 
-function isOwned(trackTitle,trackArtist){
+// Same tiered title match pickTrackMatch() already uses for the library-scan
+// search (exact / mix-descriptor-only / duration-confirmed prefix), plus an
+// artist cross-check that's no longer optional. The old version returned a
+// match on title alone whenever EITHER side's artist was blank — and a local
+// scan leaves artistNorm blank constantly (any file whose name doesn't
+// parse as "Artist - Title" and has no ID3 artist tag, e.g. most DJ-pool
+// downloads) — so a short/generic title like "Feel It" was silently
+// matching any owned file with a similar title and no artist tag at all,
+// badging tracks the user never actually had. Confirmed live 2026-08-12
+// (Andrew Macari's "Feel It" badged from an unrelated same-named file).
+// Substring/prefix title matching (tiers 1-2) now requires the artist to
+// actually corroborate the match. With no artist to check on either side, an
+// exact title match alone still isn't enough — "Feel It" is exactly the kind
+// of short/generic title two unrelated tracks share — so that case falls
+// back to duration as the sole corroborating signal instead (tight
+// tolerance, since nothing else is confirming it). No artist AND no
+// duration on either side means no way to tell two same-named tracks apart,
+// so that's a no-match rather than a guess.
+function isOwned(trackTitle,trackArtist,trackDuration){
   if(!st.ownedTracks.length)return false;
   const tN=normalizeStr(trackTitle);
   const aN=normalizeStr(trackArtist||'');
   if(!tN)return false;
+  const trackDur=parseDur(trackDuration||'');
+  const tKey=mixTitleKey(tN);
   return st.ownedTracks.some(o=>{
     if(!o.titleNorm)return false;
-    const titleMatch=o.titleNorm===tN||o.titleNorm.includes(tN)||tN.includes(o.titleNorm);
-    if(!titleMatch)return false;
-    if(aN&&o.artistNorm)
-      return o.artistNorm===aN||o.artistNorm.includes(aN)||aN.includes(o.artistNorm);
-    return true;
+    let tier;
+    if(o.titleNorm===tN)tier=0;
+    else{
+      const oKey=mixTitleKey(o.titleNorm);
+      if(oKey===tKey)tier=1;
+      else if(oKey.startsWith(tKey+' ')||tKey.startsWith(oKey+' '))tier=2;
+      else return false;
+    }
+    if(tier===2&&!(o.dur&&trackDur&&Math.abs(o.dur-trackDur)<=20))return false;
+    if(aN&&o.artistNorm)return o.artistNorm===aN||artistTokensOverlap(o.artistNorm,[trackArtist])||artistTokensOverlap(aN,[o.artistRaw||o.artistNorm]);
+    return tier===0&&!!(o.dur&&trackDur&&Math.abs(o.dur-trackDur)<=5);
   });
 }
 
@@ -467,7 +507,7 @@ function getDigitalLibraryEntries(){
     const isLabelNode=n.type==='label';
     tracks.forEach(t=>{
       const artistDisplay=isLabelNode?t.label:n.name;
-      if(!isOwned(t.title,artistDisplay))return;
+      if(!isOwned(t.title,artistDisplay,t.duration))return;
       const key=t.discogsUrl||String(t.id);
       if(seen.has(key))return;
       seen.add(key);
@@ -605,7 +645,17 @@ function pickArtistCandidate(results,artistNorm){
   const cmp=x=>x.replace(/^the\s+/,'').replace(/\band\b/g,' ').replace(/\s+/g,' ').trim();
   const want=cmp(artistNorm);
   if(!want)return null;
-  return (results||[]).find(r=>cmp(normalizeStr(stripDiscogsSuffix(r.title)))===want)||null;
+  const exact=(results||[]).find(r=>cmp(normalizeStr(stripDiscogsSuffix(r.title)))===want);
+  if(exact)return exact;
+  // No exact profile-name match — real spelling/formatting drift between a
+  // local tag and Discogs' own preferred name (an extra middle name, a
+  // mononym vs full name, "&" spelled out differently than cmp() folds)
+  // used to lose the whole artist's catalog here with no second chance.
+  // A loosely-picked candidate is safe to try: fetchArtistData()'s tracks
+  // still have to clear pickTrackMatch()'s own strict title tiers per
+  // track right after this, which is what actually gates a false match,
+  // not this pick — same reasoning as the per-track fallback search below.
+  return (results||[]).find(r=>artistTokensOverlap(want,[stripDiscogsSuffix(r.title)]))||null;
 }
 // Multi-artist tags ("A & B", "A feat. C") can never equal a single
 // Discogs artist profile. With the raw tag available (new scans keep it —
@@ -661,6 +711,10 @@ async function matchLibraryWithDiscogs(){
   // Nothing left from previous runs — a click here means starting a full
   // fresh pass in case Discogs data changed since.
   if(!remaining.length){checked=new Set();remaining=allArtists;}
+  console.log('WaxTree library match: starting run',{
+    distinctArtists:allArtists.length,artistsRemaining:remaining.length,
+    tracksSkippedNoArtist:st.ownedTracks.length-st.ownedTracks.filter(t=>t.artistNorm&&t.titleNorm).length,
+  });
 
   st.libraryMatchRunning=true;
   st.libraryMatchProgress={done:0,total:remaining.length,found:0};
@@ -698,13 +752,23 @@ async function matchLibraryWithDiscogs(){
           }catch{}
         }
         return{artistNorm,cands};
-      }catch(e){console.warn('WaxTree: artist search failed for',artistNorm,e);return{artistNorm,cands:[]};}
+      }catch(e){console.warn('WaxTree: artist search failed for',artistNorm,e);return{artistNorm,cands:[],failed:true};}
     }));
-    for(const{artistNorm,cands}of searchResults){
+    for(const{artistNorm,cands,failed}of searchResults){
       if(!st.libraryMatchRunning)break;
       const groupTracks=byArtist.get(artistNorm);
       const unmatched=()=>groupTracks.filter(t=>!matches[t.titleNorm+'|'+t.artistNorm]);
       let canonicalName=null;
+      // A genuine failure (rate-limited, network) has to NOT mark this
+      // artist checked below — it used to, indistinguishable from a real
+      // "searched Discogs, found nothing" answer, so an artist caught in a
+      // 429 storm was silently written off forever instead of retried on
+      // the next run. Confirmed live 2026-08-12: 7 back-to-back 429s from
+      // the shared no-personal-token proxy during a library-match run
+      // (same contention class that caused a real outage 2026-07-16),
+      // right when this was very likely quietly killing hundreds of
+      // artists' worth of matching in one run.
+      let hadFailure=failed;
       for(const cand of cands){
         if(!unmatched().length)break;
         try{
@@ -723,7 +787,7 @@ async function matchLibraryWithDiscogs(){
               st.libraryMatchProgress.found++;
             }
           });
-        }catch(e){console.warn('WaxTree: fetching artist data failed for',artistNorm,e);}
+        }catch(e){console.warn('WaxTree: fetching artist data failed for',artistNorm,e);hadFailure=true;}
       }
       // Second pass: whatever the artist-catalog window missed — deep
       // catalog beyond fetchArtistData()'s 200-track/newest-first cap, or
@@ -765,9 +829,12 @@ async function matchLibraryWithDiscogs(){
           }
           lsSet(vKey,verdict);
           if(verdict.match){matches[key]=verdict.match;st.libraryMatchProgress.found++;}
-        }catch(e){console.warn('WaxTree: track search failed for',t.titleNorm,e);}
+        }catch(e){console.warn('WaxTree: track search failed for',t.titleNorm,e);hadFailure=true;}
       }
-      checked.add(artistNorm);
+      // Only a genuinely completed pass (search succeeded even if it found
+      // nothing) retires this artist — a failed one goes back into
+      // "remaining" on the next run instead of being lost for good.
+      if(!hadFailure)checked.add(artistNorm);
     }
     st.libraryMatchProgress.done=Math.min(remaining.length,i+batch.length);
     saveDigitalMatches(matches);
@@ -780,6 +847,10 @@ async function matchLibraryWithDiscogs(){
     // progress counter.
     if(isSyncTabOpen()&&Date.now()-lastProgressRr>=1000){lastProgressRr=Date.now();rr();}
   }
+  console.log('WaxTree library match: run finished',{
+    artistsCheckedThisRun:st.libraryMatchProgress.done,tracksFoundThisRun:st.libraryMatchProgress.found,
+    artistsCheckedTotal:checked.size,artistsTotal:allArtists.length,tracksMatchedTotal:Object.keys(matches).length,
+  });
   st.libraryMatchRunning=false;
   if(isSyncTabOpen())rr();
 }
@@ -820,16 +891,41 @@ async function linkLibrary(onProgress=()=>{}){
   stats.dirs=stats.folders.length;
   console.log('WaxTree scan report:',{audioFiles:audioFiles.length,totalFilesSeen:files.length,foldersScanned:stats.dirs,nonAudioFiles:stats.otherFiles,hiddenJunkFiles:stats.junkFiles,byExtension:stats.extCounts});
   console.table(stats.folders);
-  const owned=await extractAllMetadata(audioFiles,onProgress);
+  const{results:owned,idStats}=await extractAllMetadata(audioFiles,onProgress);
   const scannedAt=new Date().toISOString();
   st.ownedTracks=owned;
+  // How many tracks even HAVE an artist WaxTree can search Discogs with —
+  // directly answers "why did only a fraction of my library match": a
+  // track with no artist detected (no ID3 artist tag AND a filename that
+  // doesn't parse as "Artist - Title") never gets attempted by
+  // matchLibraryWithDiscogs() at all, no matter how good the matching
+  // logic is. distinctArtists is what that function actually iterates.
+  const withArtist=owned.filter(o=>o.artistNorm).length;
+  console.log('WaxTree library metadata report:',{
+    totalTracks:owned.length,
+    withArtist,noArtist:owned.length-withArtist,
+    distinctArtists:new Set(owned.map(o=>o.artistNorm).filter(Boolean)).size,
+    id3TagsUsed:idStats.mmLoaded,
+    fromId3Tags:idStats.id3,fromId3NoArtist:idStats.id3NoArtist,
+    fromFilename:idStats.filenameParsed,fromFilenameNoArtist:idStats.filenameNoArtist,
+    unparsableFilenames:idStats.unparsable,
+  });
   // Persist locally — matching data lives in localStorage (drop filename to keep it small).
+  // artistRaw/titleRaw ARE kept now (they weren't before): matchLibraryWithDiscogs()
+  // prefers them for search queries and multi-artist splitting over the normalized
+  // string, but a big library's match run spans many sessions via the auto-resume
+  // in the boot sequence below — every one of those resumed runs was reloading
+  // st.ownedTracks from exactly this payload, so dropping raw tags here meant only
+  // the very first, same-session batch ever got to use them; everything matched
+  // after any reload was already working with degraded data. keepRawArtist/
+  // keepRawTitle already only set these for tracks where they carry real
+  // information, so this is a small, bounded addition, not the full filename.
   // Supabase user_metadata only gets the count: the full list bloats the JWT and the update
   // fails silently on big libraries, which is what kept resurrecting stale partial scans.
-  const persisted=saveOwnedTracks(owned.map(o=>({titleNorm:o.titleNorm,artistNorm:o.artistNorm,dur:o.dur||null})));
+  const persisted=saveOwnedTracks(owned.map(o=>({titleNorm:o.titleNorm,artistNorm:o.artistNorm,dur:o.dur||null,artistRaw:o.artistRaw,titleRaw:o.titleRaw})));
   try{await sb.auth.updateUser({data:{owned_tracks:null,library_scanned_at:scannedAt,library_track_count:owned.length}});}
   catch(e){console.warn('WaxTree: could not update library metadata:',e);}
-  return{count:owned.length,scannedAt,filesFound:audioFiles.length,persisted,stats};
+  return{count:owned.length,scannedAt,filesFound:audioFiles.length,persisted,stats,idStats};
 }
 
 // ── Auth ───────────────────────────────────────────────────
@@ -2824,15 +2920,56 @@ function lsSet(k,d){
 }
 function stripBio(t){return t.replace(/\[a\d*=([^\]]+)\]/g,'$1').replace(/\[l=([^\]]+)\]/g,'$1').replace(/\[url=[^\]]*\]([^[]*)\[\/url\]/g,'$1').replace(/\[[^\]]*\]/g,'').trim();}
 
+// Cross-user companion to the local ct2: cache — same pattern and reasoning
+// as getSharedNodeCache/pushSharedNodeCache below (which cache a fully-
+// assembled artist/label node), just for the raw Discogs request underneath
+// every dReq() call, search included. matchLibraryWithDiscogs() alone fires
+// thousands of these — one search per distinct local artist tag, most of
+// which turn up no Discogs match at all — and every WaxTree user with any
+// overlap in their local library (a shared artist, a shared "nobody has
+// this name") was redoing that exact search from scratch. See
+// supabase/discogs_search_cache.sql. Non-fatal on any failure, same as the
+// node cache: worst case is exactly what happened before this existed.
+function discogsCacheKey(path,params){
+  const sorted=Object.keys(params||{}).sort().map(k=>`${k}=${params[k]}`).join('&');
+  return path+(sorted?'?'+sorted:'');
+}
+async function getSharedSearchCache(cacheKey){
+  try{
+    const{data,error}=await sb.from('discogs_search_cache').select('data,cached_at').eq('cache_key',cacheKey).maybeSingle();
+    if(error||!data)return null;
+    if(Date.now()-new Date(data.cached_at).getTime()>=CT2_TTL_MS)return null;
+    return data.data;
+  }catch{return null;}
+}
+function pushSharedSearchCache(cacheKey,data){
+  sb.from('discogs_search_cache').upsert({cache_key:cacheKey,data,cached_at:new Date().toISOString()})
+    .then(({error})=>{if(error)console.warn('WaxTree: shared search cache push failed (non-fatal):',error);});
+}
+
 let rqN=0,rqW=Date.now();
-async function dReq(path,p={},_retry=0){
+// Separate, more conservative pacing for the no-token path below: it goes
+// through the app's own shared Discogs consumer key (api/discogs-oauth.js's
+// 'search' action) — the SAME quota every user without a personal token
+// draws from at once, not this browser's own, and was entirely unthrottled
+// client-side before this. A big batch (library match fires
+// DIGITAL_MATCH_BATCH concurrent searches) could — and did — hammer it hard
+// enough to trip repeated 429s: confirmed live 2026-08-12, 7 back-to-back
+// 429s mid library-match run, same contention class that caused a real
+// outage on 2026-07-16 (see memory). Lower ceiling than the personal-token
+// path below: it's shared across every such user at once, and Discogs' own
+// unauthenticated/consumer-key-only limit is tighter than a per-user token's.
+let rqSharedN=0,rqSharedW=Date.now();
+async function dReqRaw(path,p={},_retry=0){
   const tok=getToken();
   if(!tok){
+    const now=Date.now();if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
+    if(rqSharedN>=20){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedW)));rqSharedN=0;rqSharedW=Date.now();}rqSharedN++;
     try{return await edgeFn({action:'search',path,params:JSON.stringify(p)});}
     catch(e){
       if(_retry<3&&(e.message==='rate_limited'||e.message.includes('rate_limit'))){
         await new Promise(r=>setTimeout(r,15000*(1+_retry)));
-        return dReq(path,p,_retry+1);
+        return dReqRaw(path,p,_retry+1);
       }
       throw e;
     }
@@ -2844,14 +2981,22 @@ async function dReq(path,p={},_retry=0){
   let res;
   try{res=await fetch(url,{headers:{Authorization:`Discogs token=${tok}`}});}
   catch(e){
-    if(_retry<2){await new Promise(r=>setTimeout(r,5000*(1+_retry)));return dReq(path,p,_retry+1);}
+    if(_retry<2){await new Promise(r=>setTimeout(r,5000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
     throw e;
   }
   if(res.status===429){
-    if(_retry<2){await new Promise(r=>setTimeout(r,12000*(1+_retry)));return dReq(path,p,_retry+1);}
+    if(_retry<2){await new Promise(r=>setTimeout(r,12000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
     throw new Error('Rate limit — try again in a moment');
   }
   if(!res.ok)throw new Error(`Discogs ${res.status}`);return res.json();
+}
+async function dReq(path,p={}){
+  const cacheKey=discogsCacheKey(path,p);
+  const cached=await getSharedSearchCache(cacheKey);
+  if(cached)return cached;
+  const data=await dReqRaw(path,p);
+  pushSharedSearchCache(cacheKey,data);
+  return data;
 }
 // Releases included alongside artist/label, matching how a plain search on
 // discogs.com itself behaves (confirmed live 2026-08-01: searching "Strings
