@@ -104,31 +104,47 @@ function loadGoogleAnalytics() {
   window.gtag('config', 'G-BG6G70ZKRE');
 }
 
-function loadSentry() {
+// Session Replay is the whole point of loading Sentry on the logged-in app
+// (see CookieBanner's includeSentry) — but recording the admin's own
+// constant testing/QA sessions is pure noise against the point of watching
+// this (seeing what REAL users do), and burns through the replay quota
+// doing it. Error/performance tracking stays on for every account,
+// including this one — only the replay integration itself gets skipped.
+const ADMIN_EMAIL = 'navi.avinn@gmail.com';
+
+function loadSentry(user) {
   if (document.querySelector('script[data-waxtree-sentry]')) return;
+  const isAdmin = user?.email === ADMIN_EMAIL;
   const script = document.createElement('script');
   script.dataset.waxtreeSentry = 'true';
   script.src = 'https://browser.sentry-cdn.com/10.65.0/bundle.tracing.replay.min.js';
   script.crossOrigin = 'anonymous';
-  script.onload = () => window.Sentry?.init({
-    dsn: 'https://0120197e3869fdd033c9574c0d4e9841@o4511727540305920.ingest.de.sentry.io/4511727608987728',
-    integrations: [window.Sentry.browserTracingIntegration(), window.Sentry.replayIntegration()],
-    tracesSampleRate: 1,
-    replaysSessionSampleRate: 0.1,
-    replaysOnErrorSampleRate: 1,
-  });
+  script.onload = () => {
+    window.Sentry?.init({
+      dsn: 'https://0120197e3869fdd033c9574c0d4e9841@o4511727540305920.ingest.de.sentry.io/4511727608987728',
+      integrations: isAdmin ? [window.Sentry.browserTracingIntegration()] : [window.Sentry.browserTracingIntegration(), window.Sentry.replayIntegration()],
+      tracesSampleRate: 1,
+      // Full-rate for now (was 0.1) — low enough real traffic that the
+      // default sampling was very likely why no replay had shown up yet.
+      // Worth dialing back down once there's actually a steady stream of
+      // real sessions coming in.
+      replaysSessionSampleRate: isAdmin ? 0 : 1,
+      replaysOnErrorSampleRate: isAdmin ? 0 : 1,
+    });
+    if (user) window.Sentry?.setUser({ id: user.id, email: user.email });
+  };
   document.head.appendChild(script);
 }
 
-export function CookieBanner({ includeSentry = false, app = false }) {
+export function CookieBanner({ includeSentry = false, app = false, user = null }) {
   const [visible, setVisible] = useState(() => !localStorage.getItem('wt-cookie-consent'));
 
   useEffect(() => {
     if (localStorage.getItem('wt-cookie-consent') === 'accepted') {
       loadGoogleAnalytics();
-      if (includeSentry) loadSentry();
+      if (includeSentry) loadSentry(user);
     }
-  }, [includeSentry]);
+  }, [includeSentry, user]);
 
   if (!visible) return null;
 
@@ -137,7 +153,7 @@ export function CookieBanner({ includeSentry = false, app = false }) {
     setVisible(false);
     if (accepted) {
       loadGoogleAnalytics();
-      if (includeSentry) loadSentry();
+      if (includeSentry) loadSentry(user);
     }
   };
 

@@ -61,7 +61,7 @@ export const WaxTreeApp = ({ engine }) => {
           <div><div className="font-bold">{state.levelToast.title}</div><div className="text-xs text-muted-foreground">{state.levelToast.tagline}</div></div>
         </div>
       )}
-      <CookieBanner includeSentry app />
+      <CookieBanner includeSentry app user={session?.user} />
     </ThemeFrame>
   );
 };

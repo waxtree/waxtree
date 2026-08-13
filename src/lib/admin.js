@@ -9,6 +9,13 @@ export const fmtDateTime = value => {
   return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
 };
 
+export const fmtDuration = seconds => {
+  if (!seconds && seconds !== 0) return '—';
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
 export const authedFetch = async (path, options = {}) => {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('no session');

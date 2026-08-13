@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ThemeFrame, useTheme } from '@/components/AppChrome';
+import { ReplaysSection } from '@/components/admin/ReplaysSection';
 import { StatsSection } from '@/components/admin/StatsSection';
 import { UsersTable } from '@/components/admin/UsersTable';
 import { authedFetch } from '@/lib/admin';
@@ -13,6 +14,9 @@ export const AdminPage = () => {
   const [expanded, setExpanded] = useState({});
   const [events, setEvents] = useState({});
   const [busyUser, setBusyUser] = useState(null);
+  // Kept separate from `status` on purpose — Sentry being slow/misconfigured
+  // shouldn't block the rest of the dashboard (stats/users) from loading.
+  const [replays, setReplays] = useState({ loading: true });
 
   const load = useCallback(async () => {
     try {
@@ -24,6 +28,13 @@ export const AdminPage = () => {
       setStats(await statsResponse.json());
       setUsers((await usersResponse.json()).users);
       setStatus('ready');
+      try {
+        const replaysResponse = await authedFetch('/api/admin-replays');
+        if (!replaysResponse.ok) throw new Error((await replaysResponse.json().catch(() => ({}))).error || `HTTP ${replaysResponse.status}`);
+        setReplays({ items: (await replaysResponse.json()).replays });
+      } catch (error) {
+        setReplays({ error: error.message });
+      }
     } catch (error) {
       setStatus(`error:${error.message}`);
     }
@@ -77,6 +88,7 @@ export const AdminPage = () => {
           <>
             <StatsSection stats={stats} />
             <UsersTable users={users} expanded={expanded} events={events} busyUser={busyUser} onExpand={toggleEvents} onToggle={toggleUser} />
+            <ReplaysSection state={replays} />
           </>
         )}
       </main>
