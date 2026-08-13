@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
 
+// light.--wt-accent and dark.--wt-accent are logo.svg's own two greens
+// (#3DAE79, #5EC47B) — light's used to be #3DAE5A, a shade that was never
+// actually in the logo (confirmed live 2026-08-12: visibly off against the
+// real mark on login/register/landing). dark's already matched. Keep these
+// two exact if the logo ever changes; everything else here (genre tags,
+// Bandcamp/Beatport brand colors, neutral backgrounds) is intentionally
+// its own thing, not meant to trace back to the logo.
 const palettes = {
   dark: {
     '--wt-bg': '#09090B',
@@ -24,7 +31,7 @@ const palettes = {
     '--wt-text': '#1B2D22',
     '--wt-muted': '#3D6B4E',
     '--wt-faint': '#8FB09A',
-    '--wt-accent': '#3DAE5A',
+    '--wt-accent': '#3DAE79',
     '--wt-accent-light': '#5EC47B',
     '--wt-border': '#C0D9C7',
     '--wt-input': '#FFFFFF',
