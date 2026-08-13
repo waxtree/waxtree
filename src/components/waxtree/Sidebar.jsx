@@ -1,5 +1,6 @@
 import { SidebarNode } from '@/components/waxtree/SidebarNode';
 import { Button } from '@/components/ui/button';
+import { hScrollThin } from '@/lib/waxtreeUi';
 
 export const Sidebar = ({ state, actions }) => {
   const allTags = [...new Set(state.nodes.flatMap(node => node.tags || []))].sort();
@@ -21,7 +22,7 @@ export const Sidebar = ({ state, actions }) => {
 
   return (
     <aside className="flex min-h-0 flex-col overflow-hidden border-r border-border bg-card">
-      <div className="flex shrink-0 items-end gap-0.5 overflow-x-auto border-b border-border px-2 pt-2">
+      <div className={`flex shrink-0 items-end gap-0.5 border-b border-border px-2 pt-2 ${hScrollThin}`}>
         {state.branches.map(item => (
           <div
             key={item.id}

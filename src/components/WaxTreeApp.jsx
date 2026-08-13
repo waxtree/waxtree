@@ -5,10 +5,13 @@ import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
 import { Content } from '@/components/waxtree/Content';
 import { Header } from '@/components/waxtree/Header';
+import { Modal } from '@/components/waxtree/Modal';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
+import { PlaylistsModal } from '@/components/waxtree/PlaylistsModal';
 import { QueueRow } from '@/components/waxtree/QueueRow';
 import { RightPanel } from '@/components/waxtree/RightPanel';
 import { Search } from '@/components/waxtree/Search';
+import { SectionHeader } from '@/components/waxtree/SectionHeader';
 import { Sidebar } from '@/components/waxtree/Sidebar';
 import { SidebarResize } from '@/components/waxtree/SidebarResize';
 import { buttonPrimary, buttonSecondary, modalInput } from '@/lib/waxtreeUi';
@@ -76,52 +79,6 @@ const ModalLayer = ({ state, session, actions }) => {
   if (state.premiumModal) return <Modal title="Feature coming soon" close={() => actions.mutateState(value => { value.premiumModal = false; })} maxWidth="400px"><div className="text-center"><div className="mb-2 text-4xl">🔒</div><p className="mb-5 text-[13px] leading-5 text-muted-foreground">We're still working on this — it'll be available soon. Thanks for testing WaxTree!</p><button type="button" className={`${buttonPrimary} w-full py-2.5`} onClick={() => actions.mutateState(value => { value.premiumModal = false; })}>Got it</button></div></Modal>;
   return null;
 };
-
-const Modal = ({ title, close, children, maxWidth = '520px', subtitle }) => (
-  <div onClick={close} className="fixed inset-0 z-[700] flex items-center justify-center bg-black/60 p-5">
-    <section onClick={event => event.stopPropagation()} style={{ maxWidth }} className="max-h-[84vh] w-full overflow-y-auto rounded-[14px] border border-border bg-card p-[22px] shadow-[var(--wt-shadow)]">
-      <div className="mb-1 flex items-center justify-between gap-4"><h2 className="text-[15px] font-bold">{title}</h2><button type="button" className={buttonSecondary} onClick={close}>×</button></div>
-      {subtitle && <p className="mb-3.5 text-[12.5px] leading-5 text-muted-foreground">{subtitle}</p>}
-      {children}
-    </section>
-  </div>
-);
-
-const PlaylistsModal = ({ state, actions }) => {
-  const [name, setName] = useState('');
-  const close = () => actions.mutateState(value => { value.playlistsModal = false; });
-  return (
-    <Modal title="🏷️ Playlists" close={close} subtitle="Create as many playlists as you like — split by genre, by a gig you're digging for, whatever makes sense to you. Rename or delete them anytime.">
-      <SectionHeader title="🔖 Listen Later" count={`${state.dasAscoltare.length} tracks`} action={state.dasAscoltare.length ? () => { if (confirm('Clear Listen Later?')) actions.mutateState(value => { value.dasAscoltare = []; }); } : null} />
-      {state.dasAscoltare.length ? state.dasAscoltare.map(track => <QueueRow key={track.id} track={track} actions={actions} onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName); close(); }} onRemove={() => actions.mutateState(value => { value.dasAscoltare = value.dasAscoltare.filter(item => item.id !== track.id); })} />) : <p className="py-4 text-center text-xs text-muted-foreground/70">No tracks — use 🏷️ on any track to add</p>}
-      <SectionHeader title="My Playlists" count={`${state.playlists.length} playlists`} />
-      <div className="my-3 flex gap-2">
-        <input value={name} onChange={event => setName(event.target.value)} className={modalInput} placeholder="New playlist name…" />
-        <button type="button" onClick={() => { if (!name.trim()) return; actions.mutateState(value => { value.playlists = [...value.playlists, { id: `pl-${Date.now()}`, name: name.trim(), tracks: [] }]; }); setName(''); }} className={buttonPrimary}>Create</button>
-      </div>
-      {state.playlists.map(playlist => (
-        <div key={playlist.id} className="mb-4">
-          <SectionHeader
-            title={playlist.name}
-            count={`${playlist.tracks.length} tracks`}
-            controls={<>
-              <button type="button" className={buttonSecondary} onClick={() => { const next = prompt('Playlist name:', playlist.name); if (next?.trim()) actions.mutateState(() => { playlist.name = next.trim(); }); }}>Rename</button>
-              <button type="button" className={buttonSecondary} onClick={() => { if (confirm(`Delete "${playlist.name}"?`)) actions.mutateState(value => { value.playlists = value.playlists.filter(item => item.id !== playlist.id); }); }}>Delete</button>
-            </>}
-          />
-          {playlist.tracks.length ? playlist.tracks.map(track => <QueueRow key={track.id} track={track} actions={actions} onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName); close(); }} onRemove={() => actions.mutateState(() => { playlist.tracks = playlist.tracks.filter(item => item.id !== track.id); })} />) : <p className="py-3 text-center text-xs text-muted-foreground/70">No tracks yet</p>}
-        </div>
-      ))}
-    </Modal>
-  );
-};
-
-const SectionHeader = ({ title, count, action, controls }) => (
-  <div className="mt-3 flex items-center justify-between border-b border-border py-2 text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground/70">
-    <span>{title}</span>
-    <div className="flex items-center gap-2 font-normal normal-case tracking-normal">{count}{action && <button type="button" className={buttonSecondary} onClick={action}>Clear</button>}{controls}</div>
-  </div>
-);
 
 const LikesModal = ({ state, actions }) => {
   const close = () => actions.mutateState(value => { value.likesModal = false; });
