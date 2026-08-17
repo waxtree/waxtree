@@ -20,7 +20,7 @@ export const ReplaysSection = ({ state }) => (
     <CardContent>
       {state.loading && <div className="text-muted-foreground">Loading…</div>}
       {state.error && <div className="text-destructive">Failed to load replays: {state.error}</div>}
-      {state.items && !state.items.length && <div className="text-muted-foreground">No replays yet — real users need to accept cookies and use the app for one to show up here.</div>}
+      {state.items && !state.items.length && <div className="text-muted-foreground">No replays in the last 7 days — real users need to accept cookies and use the app for one to show up here.</div>}
       {state.items && state.items.length > 0 && (
         <div className="divide-y divide-border">
           {state.items.map(replay => (

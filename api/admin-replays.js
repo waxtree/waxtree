@@ -25,6 +25,10 @@ export default async function handler(req, res) {
     url.searchParams.set('project', SENTRY_PROJECT_ID)
     url.searchParams.set('per_page', '25')
     url.searchParams.set('sort', '-started_at')
+    // Old replays (recorded before Sentry.setUser() shipped) are permanently
+    // untagged and not worth surfacing here — a week is plenty to catch
+    // anything from a real, recent visit.
+    url.searchParams.set('statsPeriod', '7d')
     ;['id', 'started_at', 'finished_at', 'duration', 'user', 'count_errors', 'urls'].forEach(field => url.searchParams.append('field', field))
 
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
