@@ -2934,9 +2934,24 @@ function discogsCacheKey(path,params){
   const sorted=Object.keys(params||{}).sort().map(k=>`${k}=${params[k]}`).join('&');
   return path+(sorted?'?'+sorted:'');
 }
+// A slow/hanging Supabase call here must never hold up the actual search —
+// this is a nice-to-have optimization, not something worth a stuck
+// "Searching…" over. Confirmed live 2026-08-13: a search that should be
+// instant sat for a long time before finally resolving, right after this
+// cache shipped — a missing/misconfigured discogs_search_cache table
+// (see supabase/discogs_search_cache.sql — has to be created manually, may
+// not have been yet) or ordinary network slowness both turn into an
+// unbounded wait here otherwise, since dReq() awaits this before doing
+// anything else. 2.5s is generous for a same-region Supabase read; losing
+// a cache hit occasionally because it was a bit slow costs nothing (falls
+// through to the normal fetch, exactly like a cache miss).
 async function getSharedSearchCache(cacheKey){
   try{
-    const{data,error}=await sb.from('discogs_search_cache').select('data,cached_at').eq('cache_key',cacheKey).maybeSingle();
+    const query=sb.from('discogs_search_cache').select('data,cached_at').eq('cache_key',cacheKey).maybeSingle();
+    const timeout=new Promise(resolve=>setTimeout(()=>resolve(null),2500));
+    const result=await Promise.race([query,timeout]);
+    if(!result)return null;
+    const{data,error}=result;
     if(error||!data)return null;
     if(Date.now()-new Date(data.cached_at).getTime()>=CT2_TTL_MS)return null;
     return data.data;
@@ -3276,7 +3291,14 @@ function getCachedNodeData(type,discogsId){
 // Discogs fetch.
 async function getSharedNodeCache(type,discogsId){
   try{
-    const{data,error}=await sb.from('discogs_node_cache').select('data,cached_at').eq('id',type+':'+discogsId).maybeSingle();
+    // Same unbounded-wait guard as getSharedSearchCache above, and for the
+    // same reason: a stuck Supabase read here must never turn into a stuck
+    // "Loading…" on an artist/label node.
+    const query=sb.from('discogs_node_cache').select('data,cached_at').eq('id',type+':'+discogsId).maybeSingle();
+    const timeout=new Promise(resolve=>setTimeout(()=>resolve(null),2500));
+    const result=await Promise.race([query,timeout]);
+    if(!result)return null;
+    const{data,error}=result;
     if(error||!data)return null;
     if(Date.now()-new Date(data.cached_at).getTime()>=CT2_TTL_MS)return null;
     if(data.data?._v!==TRACK_DATA_VERSION)return null;
