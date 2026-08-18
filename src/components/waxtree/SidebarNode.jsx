@@ -9,24 +9,34 @@ export const SidebarNode = ({ node, depth, state, actions }) => {
   const [tagging, setTagging] = useState(false);
   const [tag, setTag] = useState('');
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
-  const [dropEdge, setDropEdge] = useState(null);
+  const [dropZone, setDropZone] = useState(null); // 'before' | 'inside' | 'after'
 
+  // Middle band drops ONTO the node (becomes its child) — top/bottom bands
+  // reorder as a sibling before/after it, same as any list drag-to-reorder.
+  // 30/40/30 split, wide enough for the middle "make it a sub-node" target
+  // to be reliably hittable without a ruler.
+  const zoneFor = event => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = (event.clientY - rect.top) / rect.height;
+    return ratio < 0.3 ? 'before' : ratio > 0.7 ? 'after' : 'inside';
+  };
   const handleDragOver = event => {
     event.preventDefault();
-    // dataTransfer.getData() is unreadable during dragover in every
-    // browser (only .types is, by design) — the dragged-vs-self check
-    // has to wait until drop; harmless if the indicator briefly shows
-    // while hovering a node over itself, since reorderNode no-ops on
-    // draggedId === targetId anyway.
-    const midpoint = event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2;
-    setDropEdge(event.clientY < midpoint ? 'before' : 'after');
+    setDropZone(zoneFor(event));
   };
   const handleDrop = event => {
     event.preventDefault();
     event.stopPropagation();
+    // Recomputed fresh here rather than trusting the `dropZone` state set
+    // by the last dragover — dragover and drop can fire close enough
+    // together that React hasn't re-rendered handleDrop's own closure
+    // with the latest setDropZone() yet, so reading `dropZone` here could
+    // silently act on a stale (often still-null) value. Confirmed live:
+    // dropping dead-center on a node was landing as 'before' instead of
+    // 'inside' because of exactly this.
     const draggedId = event.dataTransfer.getData('text/plain');
-    if (draggedId && draggedId !== node.id) actions.reorderNode(draggedId, node.id, dropEdge || 'before');
-    setDropEdge(null);
+    if (draggedId && draggedId !== node.id) actions.repositionNode(draggedId, node.id, zoneFor(event));
+    setDropZone(null);
   };
 
   return (
@@ -34,15 +44,15 @@ export const SidebarNode = ({ node, depth, state, actions }) => {
       <div
         draggable
         onDragStart={event => event.dataTransfer.setData('text/plain', node.id)}
-        onDragEnd={() => setDropEdge(null)}
+        onDragEnd={() => setDropZone(null)}
         onDragOver={handleDragOver}
-        onDragLeave={() => setDropEdge(null)}
+        onDragLeave={() => setDropZone(null)}
         onDrop={handleDrop}
         onClick={() => actions.selectNode(node.id)}
         style={{ paddingLeft: 8 + depth * 14 }}
-        className={`group relative flex cursor-pointer items-start gap-1.5 border-l-2 py-[7px] pr-2.5 ${node.justAdded ? 'animate-pulse border-primary bg-primary/20' : active ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}
+        className={`group relative flex cursor-pointer items-start gap-1.5 border-l-2 py-[7px] pr-2.5 ${node.justAdded ? 'animate-pulse border-primary bg-primary/20' : active ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'} ${dropZone === 'inside' ? 'outline-2 outline-dashed -outline-offset-2 outline-primary' : ''}`}
       >
-        {dropEdge && <span className={`absolute inset-x-0 h-0.5 bg-primary ${dropEdge === 'before' ? 'top-0' : 'bottom-0'}`} />}
+        {(dropZone === 'before' || dropZone === 'after') && <span className={`absolute inset-x-0 h-0.5 bg-primary ${dropZone === 'before' ? 'top-0' : 'bottom-0'}`} />}
         <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/70">{node.type === 'label' ? <LabelIcon className="size-3.5" /> : <ArtistIcon className="size-3.5" />}</span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
