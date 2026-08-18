@@ -3,6 +3,7 @@ import { Filters } from '@/components/waxtree/Filters';
 import { RelatedEntities } from '@/components/waxtree/RelatedEntities';
 import { ReleaseCard } from '@/components/waxtree/ReleaseCard';
 import { ReleaseSection } from '@/components/waxtree/ReleaseSection';
+import { YoutubeExtrasSection } from '@/components/waxtree/YoutubeExtrasSection';
 import { buttonSecondary } from '@/lib/waxtreeUi';
 
 export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage }) => {
@@ -81,6 +82,7 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
       )}
       <ReleaseSection title="IN YOUR COLLECTION" groups={ownedGroups} node={node} isLabel={isLabel} state={state} actions={actions} />
       <ReleaseSection title="ALREADY LISTENED" groups={listenedGroups} node={node} isLabel={isLabel} state={state} actions={actions} />
+      {!isLabel && <YoutubeExtrasSection node={node} state={state} actions={actions} />}
     </>
   );
 };

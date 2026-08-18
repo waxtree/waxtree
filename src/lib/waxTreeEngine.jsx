@@ -1526,6 +1526,7 @@ document.documentElement.classList.toggle('dark',st.theme==='dark');
 // ── UI transient state (not persisted) ─────────────────────
 let tracksPageMap={};  // nodeId → page index (0-based)
 let bcCacheMap={};     // nodeId → {tracks,loading,err}
+let ytExtrasCacheMap={}; // nodeId → {tracks,loading,err} — see fetchYtExtras below
 
 // ── Render ─────────────────────────────────────────────────
 let pending=false,storeVersion=0,engineReady=false;
@@ -3515,6 +3516,74 @@ async function fetchBandcamp(nodeId,artistName){
   rr();
 }
 
+// Lighter than normalizeStr() on purpose: normalizeStr strips words like
+// "remix"/"edit" as noise for artist/title-identity matching, but here two
+// different mixes of the same track ARE different content — stripping that
+// would wrongly suppress a genuinely-new upload as "already on Discogs".
+function ytExtraKey(title){
+  return (title||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim();
+}
+const YT_EXTRA_NOISE_RE=/\(\s*official[^)]*\)|\[\s*official[^\]]*\]|\(\s*(?:lyric|music)\s*video\s*\)|\(\s*audio\s*\)|\(\s*visualizer\s*\)/gi;
+
+// Surfaces videos on an artist's OWN confirmed YouTube channel (see
+// ytChannelMap/fetchSharedYtChannel above) that don't match anything
+// already in their Discogs tracklist — likely Bandcamp-only or otherwise
+// off-Discogs releases the artist still uploaded to YouTube. v1 is
+// deliberately conservative: only runs when a channel is ALREADY confirmed
+// (locally or by another WaxTree user), never spends a fresh search.list
+// call just for this — same quota discipline as resolveTrackVideoId's own
+// channel-shortcut path, which this reuses (fetchChannelUploads costs ~3
+// units against the generous general pool only, never the tight
+// search-specific one). Session-only cache (not persisted) — this is a
+// discovery nicety, not core function, so a reload just re-derives it.
+async function fetchYtExtras(nodeId,artistName,nodeData){
+  if(ytExtrasCacheMap[nodeId])return;
+  ytExtrasCacheMap[nodeId]={tracks:[],loading:true,err:null};
+  try{
+    const artistN=normalizeStr(artistName||'');
+    let channelId=ytChannelMap[artistN]||await fetchSharedYtChannel(artistN);
+    if(!channelId){ytExtrasCacheMap[nodeId]={tracks:[],loading:false,err:null};rr();return;}
+    if(!ytChannelMap[artistN]){ytChannelMap[artistN]=channelId;saveYtChannelMap(ytChannelMap);}
+
+    const spend=trySpendYtCalls('channel');
+    if(spend!=='ok'){
+      ytExtrasCacheMap[nodeId]={tracks:[],loading:false,err:null};
+      // Only the ~10s burst window blocked this (not the daily cap) — worth
+      // one retry once it resets, same reasoning as resolveTrackVideoId's retryBurst.
+      if(spend==='burst')setTimeout(()=>{delete ytExtrasCacheMap[nodeId];fetchYtExtras(nodeId,artistName,nodeData);},10500);
+      rr();return;
+    }
+
+    const uploads=await fetchChannelUploads(channelId);
+    const existingKeys=new Set((nodeData?.tracks||[]).map(t=>ytExtraKey(t.title)));
+    const artistEsc=(artistName||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const prefixRe=artistEsc?new RegExp('^\\s*'+artistEsc+'\\s*[-–—]\\s*','i'):null;
+    const cards=[];
+    for(const upload of uploads){
+      if(!upload.id||!upload.title)continue;
+      // Shorter than ~60s is very unlikely to be a full track; longer than
+      // ~20min is almost certainly a DJ mix/set/podcast, not a single track.
+      if(upload.durationSec&&(upload.durationSec<60||upload.durationSec>1200))continue;
+      let title=upload.title;
+      if(prefixRe)title=title.replace(prefixRe,'');
+      title=title.replace(YT_EXTRA_NOISE_RE,'').trim();
+      const key=ytExtraKey(title);
+      if(!key||existingKeys.has(key))continue; // already have this one from Discogs
+      // Shaped exactly like RelatedCard's `card` prop (playId/artist, not
+      // id/artistName) so the existing component can render these as-is —
+      // resolved/discogsUrl/cosineId stay null, no Explore chevron for a
+      // track that's already inside the artist node you're looking at.
+      cards.push({playId:'yt:'+upload.id,videoId:upload.id,title,artist:artistName,thumbUrl:`https://i.ytimg.com/vi/${upload.id}/mqdefault.jpg`,resolved:null,discogsUrl:null,cosineId:null});
+    }
+    ytExtrasCacheMap[nodeId]={tracks:cards.slice(0,8),loading:false,err:null};
+  }catch(e){
+    ytExtrasCacheMap[nodeId]={tracks:[],loading:false,err:e.message};
+  }
+  rr();
+}
+function getYtExtras(nodeId){return ytExtrasCacheMap[nodeId]||null;}
+
 // Per-node load generation — each node cancels only its OWN previous
 // in-flight fetch (e.g. a fast double retry), never another node's.
 // A single shared counter here previously meant clicking Explore on
@@ -3568,6 +3637,7 @@ function addNode(type,discogsId,name,parentId,branchId,opts={}){
     if(cancelled())return;
     const n=getNode(id);if(n){n.data=d;n.loaded=true;n.loading=false;}rr();
     fetchBandcamp(id,d?.name||name);
+    if(type==='artist')fetchYtExtras(id,d?.name||name,d);
   }).catch(e=>{
     if(cancelled())return;
     const n=getNode(id);if(n){n.error=e.message;n.loading=false;}rr();
@@ -3587,6 +3657,7 @@ function retryNode(nodeId){
     startNodeLoad(nodeId); // still bump the generation, cancels any stale in-flight load for this node
     node.data=cached;node.loaded=true;node.loading=false;rr();
     fetchBandcamp(nodeId,cached?.name||node.name);
+    if(node.type==='artist')fetchYtExtras(nodeId,cached?.name||node.name,cached);
     return;
   }
   node.loading=true;rr();
@@ -3596,6 +3667,7 @@ function retryNode(nodeId){
     if(cancelled())return;
     const n=getNode(nodeId);if(n){n.data=d;n.loaded=true;n.loading=false;}rr();
     fetchBandcamp(nodeId,d?.name||node.name);
+    if(node.type==='artist')fetchYtExtras(nodeId,d?.name||node.name,d);
   }).catch(e=>{
     if(cancelled())return;
     const n=getNode(nodeId);if(n){n.error=e.message;n.loading=false;}rr();
@@ -3627,7 +3699,16 @@ function selectNode(id){
   // Silently re-fetch an artist/label node that was added before a
   // track-data fix — otherwise it keeps showing whatever was baked into it
   // back then forever.
-  if(n&&(n.type==='label'||n.type==='artist')&&n.loaded&&!n.loading&&n.data?._v!==TRACK_DATA_VERSION)retryNode(id);
+  if(n&&(n.type==='label'||n.type==='artist')&&n.loaded&&!n.loading&&n.data?._v!==TRACK_DATA_VERSION){
+    retryNode(id); // its own .then() covers fetchYtExtras once fresh data lands
+  }else if(n&&n.type==='artist'&&n.loaded&&!n.loading&&n.data){
+    // ytExtrasCacheMap is session-only (not persisted) — a node loaded from
+    // a PREVIOUS session already has n.loaded=true, so ensureNodeLoaded()
+    // above never re-triggers addNode/retryNode's own fetchYtExtras call
+    // for it. Without this, extras would only ever appear on a node's
+    // very first-ever load, never on a returning visit to an existing one.
+    fetchYtExtras(id,n.data?.name||n.name,n.data);
+  }
   rr();
 }
 function togglePin(id){const n=getNode(id);if(n)n.pinned=!n.pinned;rr();}
@@ -4170,7 +4251,7 @@ function getExploreTargets(trackId,artistName){
 
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
-  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
+  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,getYtExtras,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,
   playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,retryNode,scanFollowsForNewReleases,
