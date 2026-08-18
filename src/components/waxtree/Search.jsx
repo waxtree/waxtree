@@ -1,31 +1,49 @@
-import { Search as SearchIcon } from 'lucide-react';
-import { useRef } from 'react';
+import { ChevronDown, Search as SearchIcon } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { GenreYearPicker } from '@/components/waxtree/GenreYearPicker';
 
 export const Search = ({ state, actions }) => {
-  const activeBranch = actions.getBranch(state.activeBranchId);
   const timer = useRef(null);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const update = event => {
     const query = event.target.value;
     actions.mutateState(value => { value.q = query; if (!query.trim()) { value.results = []; value.err = ''; } });
     clearTimeout(timer.current);
     if (query.trim()) timer.current = setTimeout(actions.liveSearchTick, 300);
   };
-  const showResults = state.loading || state.err || state.results.length > 0;
+  const isTextMode = state.exploreMode === 'search';
+  const showResults = isTextMode && (state.loading || state.err || state.results.length > 0);
 
   return (
     <div className="group relative min-w-0 shrink grow-[10] basis-0 max-w-[540px]">
       <div className="flex items-center gap-2 rounded-full border-[1.5px] border-border bg-background px-3.5 py-1.5 transition focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(94,196,123,.12)]">
-        {activeBranch && <span className="shrink-0 rounded-full border border-primary px-2 py-px text-[10px] text-primary">{activeBranch.name}</span>}
-        <input
-          value={state.q}
-          onChange={update}
-          onKeyDown={event => { if (event.key === 'Enter') actions.doSearch(); if (event.key === 'Escape') actions.mutateState(value => { value.results = []; value.err = ''; }); }}
-          className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground/70"
-          placeholder="Search artist, label, or track..."
-        />
-        <button type="button" title="Search" aria-label="Search" onClick={actions.doSearch} className="shrink-0 text-muted-foreground/70 hover:text-primary">
-          <SearchIcon className="size-3.5" />
-        </button>
+        <div className="relative shrink-0">
+          <button type="button" onClick={() => setModeMenuOpen(value => !value)} className="flex items-center gap-0.5 rounded-full border border-primary px-2 py-px text-[10px] text-primary">
+            Explore<ChevronDown className="size-2.5" />
+          </button>
+          {modeMenuOpen && (
+            <div className="absolute left-0 top-[calc(100%+4px)] z-[310] min-w-[190px] overflow-hidden rounded-lg border border-border bg-card p-1 shadow-[var(--wt-shadow)]">
+              <button type="button" onClick={() => { actions.mutateState(value => { value.exploreMode = 'search'; }); setModeMenuOpen(false); }} className={`block w-full rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-muted ${isTextMode ? 'text-primary' : ''}`}>By Artist / Label / Track</button>
+              <button type="button" onClick={() => { actions.mutateState(value => { value.exploreMode = 'genreYear'; }); setModeMenuOpen(false); }} className={`block w-full rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-muted ${!isTextMode ? 'text-primary' : ''}`}>By Genre / Year</button>
+            </div>
+          )}
+        </div>
+        {isTextMode ? (
+          <>
+            <input
+              value={state.q}
+              onChange={update}
+              onKeyDown={event => { if (event.key === 'Enter') actions.doSearch(); if (event.key === 'Escape') actions.mutateState(value => { value.results = []; value.err = ''; }); }}
+              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground/70"
+              placeholder="Search artist, label, or track..."
+            />
+            <button type="button" title="Search" aria-label="Search" onClick={actions.doSearch} className="shrink-0 text-muted-foreground/70 hover:text-primary">
+              <SearchIcon className="size-3.5" />
+            </button>
+          </>
+        ) : (
+          <GenreYearPicker state={state} actions={actions} />
+        )}
       </div>
       {showResults && (
         <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[300] max-h-[280px] overflow-y-auto rounded-xl border border-border bg-card shadow-[var(--wt-shadow)]">
@@ -45,7 +63,7 @@ export const Search = ({ state, actions }) => {
           ))}
         </div>
       )}
-      {!showResults && state.chips.length > 0 && (
+      {isTextMode && !showResults && state.chips.length > 0 && (
         <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[300] hidden max-h-[280px] w-max min-w-full max-w-[540px] overflow-y-auto rounded-xl border border-border bg-card p-2.5 shadow-[var(--wt-shadow)] group-hover:block group-focus-within:block">
           <span className="mb-1.5 block text-[10px] font-bold uppercase text-muted-foreground/70">Recent Searches</span>
           <div className="flex flex-wrap gap-1.5">

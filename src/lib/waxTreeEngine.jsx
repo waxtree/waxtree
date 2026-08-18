@@ -1455,6 +1455,12 @@ const st={
   // happened to already be resolved in memory.
   likedTracks:saved?.likedTracks||{},
   q:'',results:[],loading:false,err:'',
+  // Explore-by-genre/year — a second search mode alongside the default
+  // artist/label/track text search, toggled from the same "Explore"
+  // control (see Search.jsx). Transient/session-only, same treatment as
+  // the plain text search's own q/results/loading/err above.
+  exploreMode:'search', // 'search' | 'genreYear'
+  exploreGenres:[],exploreYears:[],genreYearResults:null,genreYearLoading:false,genreYearErr:'',
   bioOpen:{},renameId:null,renameVal:'',tagNodeId:null,tagVal:'',
   filterOpen:false,filterTitle:'',filterFormat:'all',filterSort:'default',filterGenres:[],
   sbPinFirst:saved?.sbPinFirst||false,sbFilterTag:'',
@@ -3085,6 +3091,62 @@ async function searchDiscogs(q,{background=false}={}){
   lsSet('s:'+q,r);return r;
 }
 
+// ── Explore by genre/year ──────────────────────────────────
+// Discogs' own fixed top-level genre taxonomy — stable and small enough to
+// hardcode rather than fetch, and matches the exact strings its search API
+// expects for the `genre` param.
+const EXPLORE_GENRES=['Blues','Brass & Military',"Children's",'Classical','Electronic','Folk, World, & Country','Funk / Soul','Hip Hop','Jazz','Latin','Non-Music','Pop','Reggae','Rock','Stage & Screen'];
+// Discogs' search API takes one genre and one year per request — true
+// multi-select means one request per (genre × year) combination, merged
+// after. Capped so a broad selection (e.g. 4 genres × 4 years) can't fire
+// an unpaced 16-request burst on a single submit; each combo still goes
+// through dReqRaw's paced counter (background:true below) rather than the
+// search bar's own unthrottled path, since this is a multi-call burst a
+// human isn't pacing one request at a time the way plain text search is.
+const GENRE_YEAR_MAX_COMBOS=9;
+function toggleExploreGenre(genre){
+  const removing=st.exploreGenres.includes(genre);
+  const next=removing?st.exploreGenres.filter(g=>g!==genre):[...st.exploreGenres,genre];
+  if(!removing&&next.length*Math.max(st.exploreYears.length,1)>GENRE_YEAR_MAX_COMBOS)return;
+  st.exploreGenres=next;rr();
+}
+function addExploreYear(year){
+  const y=parseInt(year,10);
+  if(!y||y<1900||y>new Date().getFullYear()+1||st.exploreYears.includes(y))return;
+  if(Math.max(st.exploreGenres.length,1)*(st.exploreYears.length+1)>GENRE_YEAR_MAX_COMBOS)return;
+  st.exploreYears=[...st.exploreYears,y];rr();
+}
+function removeExploreYear(year){st.exploreYears=st.exploreYears.filter(y=>y!==year);rr();}
+async function searchByGenreYear(){
+  if(!st.exploreGenres.length&&!st.exploreYears.length)return;
+  const genres=st.exploreGenres.length?st.exploreGenres:[null];
+  const years=st.exploreYears.length?st.exploreYears:[null];
+  const combos=[];
+  genres.forEach(genre=>years.forEach(year=>combos.push({genre,year})));
+  st.genreYearLoading=true;st.genreYearErr='';st.genreYearResults=null;rr();
+  const seen=new Map();
+  let anySucceeded=false;
+  for(const combo of combos.slice(0,GENRE_YEAR_MAX_COMBOS)){
+    const params={type:'release',per_page:'50'};
+    if(combo.genre)params.genre=combo.genre;
+    if(combo.year)params.year=String(combo.year);
+    try{
+      const data=await Promise.race([
+        dReq('/database/search',params,{background:true}),
+        new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('timeout')),7000)),
+      ]);
+      anySucceeded=true;
+      (data.results||[]).forEach(r=>{
+        if(!seen.has(r.id))seen.set(r.id,{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null,genre:(r.genre||[])[0]||null,country:r.country||null,format:(r.format||[]).join(', ')});
+      });
+    }catch{/* one combo failing shouldn't sink the whole search — the rest still run */}
+  }
+  st.genreYearLoading=false;
+  if(!anySucceeded)st.genreYearErr='Search failed — try again';
+  else st.genreYearResults=[...seen.values()].sort((a,b)=>(b.year||0)-(a.year||0));
+  rr();
+}
+
 // ── Remix-artist resolution ────────────────────────────────
 // A candidate phrase like "Andrey Pushkarev" or "Chevel Deconstructed" is
 // checked against real Discogs artist search results, longest word-count
@@ -4248,14 +4310,15 @@ function getExploreTargets(trackId,artistName){
 }
 
 export const waxTreeActions={
-  addBranch,addNode,addTag,ancestry,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
+  addBranch,addNode,addTag,ancestry,addExploreYear,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
-  liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,
+  liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryNode,scanFollowsForNewReleases,
-  resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleFollow,toggleLike,togglePin,uploadAvatar,
+  resolveStoreUrl,searchByGenreYear,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreGenre,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
   baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
+  exploreGenres:EXPLORE_GENRES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,
 };
