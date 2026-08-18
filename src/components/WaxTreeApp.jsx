@@ -10,7 +10,6 @@ import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { PlaylistsModal } from '@/components/waxtree/PlaylistsModal';
 import { QueueRow } from '@/components/waxtree/QueueRow';
 import { RightPanel } from '@/components/waxtree/RightPanel';
-import { Search } from '@/components/waxtree/Search';
 import { SectionHeader } from '@/components/waxtree/SectionHeader';
 import { Sidebar } from '@/components/waxtree/Sidebar';
 import { SidebarResize } from '@/components/waxtree/SidebarResize';
@@ -46,7 +45,6 @@ export const WaxTreeApp = ({ engine }) => {
     <ThemeFrame theme={state.theme} className="h-dvh overflow-hidden text-sm">
       <div className="flex h-dvh flex-col overflow-hidden" translate="no">
         <Header state={state} session={session} actions={actions} />
-        <Search state={state} actions={actions} />
         <div style={{ '--wt-app-columns': `${sidebarWidth}px 4px minmax(0,1fr) 260px` }} className="grid min-h-0 flex-1 grid-cols-[var(--wt-app-columns)] overflow-hidden max-[900px]:grid-cols-[210px_3px_minmax(0,1fr)]">
           <Sidebar state={state} actions={actions} />
           <SidebarResize width={sidebarWidth} onResize={setSidebarWidth} />
