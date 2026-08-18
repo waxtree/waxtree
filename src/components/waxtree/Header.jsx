@@ -15,7 +15,7 @@ export const Header = ({ state, session, actions }) => {
     <header className="flex h-[50px] shrink-0 items-center gap-3.5 border-b border-border bg-card px-[18px]">
       <div className="flex shrink-0 items-center gap-3">
         <img className="h-10 w-10 object-contain" src="/logo.svg" alt="" />
-        <span className="text-2xl font-bold"><em className="font-bold not-italic text-foreground">Wax</em><span className="text-primary">Tree</span></span>
+        <span className="text-2xl font-bold text-primary">WaxTree</span>
         <span className="self-end pb-1 text-[13px] font-medium text-muted-foreground/70">Beta v.1</span>
       </div>
       <Search state={state} actions={actions} />
