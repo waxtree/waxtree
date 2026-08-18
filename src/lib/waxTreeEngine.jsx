@@ -2976,42 +2976,37 @@ let rqN=0,rqW=Date.now();
 // path below: it's shared across every such user at once, and Discogs' own
 // unauthenticated/consumer-key-only limit is tighter than a per-user token's.
 let rqSharedN=0,rqSharedW=Date.now();
-// Split from the general no-token budget above (2026-08-18): a live search
-// bar call and a background node-exploration call used to draw from the
-// SAME 20/60s counter, so a burst of exploration (or several tracks'
-// worth of resolveRemixArtistCandidates) could fully exhaust it right
-// before the user typed a search — confirmed live: "Connor Wall" stuck on
-// "Searching..." then timing out on BOTH main and a branch that never
-// touched this throttle, which only makes sense if something upstream of
-// the search itself (i.e. this shared counter) was already spent. A human
-// actively watching "Searching…" needs its own reserved slice that
-// exploration traffic can never eat into — same split already used for
-// YouTube's search vs channel quotas (see trySpendYtCalls).
+// This used to be one pre-emptive local budget shared by EVERY no-token
+// call, sized to stay under Discogs' own real limit (see the 2026-08-12
+// library-match 429 storm this was built for). Splitting it in two
+// (2026-08-18, 10/10 then rebalanced 6/14) still didn't hold up: a real
+// human testing session — a dozen-plus searches typed one after another —
+// kept tripping straight back into "Search timed out", even though a
+// direct same-moment check against Discogs itself came back in well under
+// a second with plenty of headroom. That's the tell: a real human typing
+// searches at human speed, one at a time, was never the actual burst risk
+// this throttle exists for. The actual risk is CODE that fires many
+// requests back-to-back with no human pacing them at all — a batch
+// library match, or resolveRemixArtistCandidates() walking several
+// candidate substrings per remix-titled track, both of which also hit
+// this same '/database/search' path.
 //
-// First cut split this evenly (10/10) — regression, confirmed live right
-// after: opening a node with a big discography now visibly took much
-// longer to leave "Loading…" than before. fetchArtistData/fetchLabelData
-// fire ONE dReq per release (up to 200 tracks' worth, via
-// fetchReleaseBatches) — a single node open can burn through this budget
-// far faster than a search bar ever does, so exploration needs most of
-// the pool, not half. Search realistically only ever needs a small,
-// reliably-available slice (one submit plus a couple of live-typing
-// ticks), not a large share — 6 is already generous for that. Kept the
-// combined ceiling (6+14=20) identical to the original single counter's,
-// so this still can't trip Discogs' own real rate limit any harder than
-// before it was split.
-let rqSharedSearchN=0,rqSharedSearchW=Date.now();
-async function dReqRaw(path,p={},_retry=0){
+// So: the search bar itself (doSearch/liveSearchTick — opts.background
+// unset) now gets NO pre-emptive local wait at all. If it's ever wrong
+// about there being headroom, the existing retry-on-429 below (and
+// searchDiscogs()'s own 7s hard ceiling) still catches it — that's a real
+// signal from Discogs, not a local guess. Only genuinely automatic,
+// unpaced traffic — node exploration AND remix resolution, marked via
+// opts.background — still goes through the pre-emptive counter, since
+// that's the traffic that can actually fire faster than any human could.
+async function dReqRaw(path,p={},_retry=0,opts={}){
   const tok=getToken();
   if(!tok){
-    const isSearch=path==='/database/search';
-    const now=Date.now();
-    if(isSearch){
-      if(now-rqSharedSearchW>60000){rqSharedSearchN=0;rqSharedSearchW=now;}
-      if(rqSharedSearchN>=6){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedSearchW)));rqSharedSearchN=0;rqSharedSearchW=Date.now();}rqSharedSearchN++;
-    }else{
+    const isPaced=path!=='/database/search'||opts.background;
+    if(isPaced){
+      const now=Date.now();
       if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
-      if(rqSharedN>=14){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedW)));rqSharedN=0;rqSharedW=Date.now();}rqSharedN++;
+      if(rqSharedN>=15){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedW)));rqSharedN=0;rqSharedW=Date.now();}rqSharedN++;
     }
     try{return await edgeFn({action:'search',path,params:JSON.stringify(p)});}
     catch(e){
@@ -3022,7 +3017,7 @@ async function dReqRaw(path,p={},_retry=0){
       // searchDiscogs()'s own hard ceiling for the other half of this fix.
       if(_retry<2&&(e.message==='rate_limited'||e.message.includes('rate_limit'))){
         await new Promise(r=>setTimeout(r,2000*(1+_retry)));
-        return dReqRaw(path,p,_retry+1);
+        return dReqRaw(path,p,_retry+1,opts);
       }
       throw e;
     }
@@ -3034,20 +3029,20 @@ async function dReqRaw(path,p={},_retry=0){
   let res;
   try{res=await fetch(url,{headers:{Authorization:`Discogs token=${tok}`}});}
   catch(e){
-    if(_retry<2){await new Promise(r=>setTimeout(r,2000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
+    if(_retry<2){await new Promise(r=>setTimeout(r,2000*(1+_retry)));return dReqRaw(path,p,_retry+1,opts);}
     throw e;
   }
   if(res.status===429){
-    if(_retry<2){await new Promise(r=>setTimeout(r,3000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
+    if(_retry<2){await new Promise(r=>setTimeout(r,3000*(1+_retry)));return dReqRaw(path,p,_retry+1,opts);}
     throw new Error('Rate limit — try again in a moment');
   }
   if(!res.ok)throw new Error(`Discogs ${res.status}`);return res.json();
 }
-async function dReq(path,p={}){
+async function dReq(path,p={},opts={}){
   const cacheKey=discogsCacheKey(path,p);
   const cached=await getSharedSearchCache(cacheKey);
   if(cached)return cached;
-  const data=await dReqRaw(path,p);
+  const data=await dReqRaw(path,p,0,opts);
   pushSharedSearchCache(cacheKey,data);
   return data;
 }
@@ -3063,7 +3058,7 @@ async function dReq(path,p={}){
 // the release's own structured data instead of parsing this string, since
 // it breaks down for various-artist/multi-credit releases like
 // "A / B - Track1 / Track2 / Track3", confirmed live).
-async function searchDiscogs(q){
+async function searchDiscogs(q,{background=false}={}){
   const c=lsGet('s:'+q);if(c)return c;
   // Hard ceiling — this is what backs the search bar (doSearch/
   // liveSearchTick), a live call a human is actively staring at "Searching…"
@@ -3075,8 +3070,12 @@ async function searchDiscogs(q){
   // still finish and populate the shared cache for the next person; it just
   // stops making this particular search wait on it) and always gives the
   // search bar a definitive answer within a few seconds.
+  // background:true (resolveRemixArtistCandidates only) routes through
+  // dReqRaw's paced/throttled counter instead of the search bar's own
+  // unthrottled path — see dReqRaw's own comment for why those two need
+  // different treatment despite hitting the same Discogs endpoint.
   const data=await Promise.race([
-    dReq('/database/search',{q,per_page:'25'}),
+    dReq('/database/search',{q,per_page:'25'},{background}),
     new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('Search timed out — try again')),7000)),
   ]);
   const r=data.results.filter(r=>r.type==='artist'||r.type==='label'||r.type==='release').map(r=>
@@ -3100,7 +3099,7 @@ async function resolveRemixArtistCandidates(remainder){
     const candidate=words.slice(0,n).join(' ').replace(/['’]s$/i,'').trim();
     if(!candidate||REMIX_TYPE_WORD_RE.test(candidate)||REMIX_GENERIC_RE.test(candidate))continue;
     try{
-      const results=await searchDiscogs(candidate);
+      const results=await searchDiscogs(candidate,{background:true});
       anySucceeded=true;
       const hit=results.find(r=>r.type==='artist'&&r.title.replace(/\s*\(\d+\)$/,'').toLowerCase()===candidate.toLowerCase());
       if(hit)return{name:hit.title,id:hit.id};
