@@ -3649,6 +3649,34 @@ function moveNodeToBranch(nodeId,targetBranchId){
   node.parentId=null;
   st.activeBranchId=targetBranchId;st.selectedId=nodeId;rr();
 }
+// Sidebar rendering derives sibling order straight from st.nodes' own array
+// order (see Sidebar.jsx's children()), so reordering is just moving the
+// dragged node to its new array position — no separate `order` field to
+// keep in sync. Restricted to actual siblings (same branch AND same
+// parent) — dragging onto a node elsewhere in the tree falls back to a
+// no-op rather than silently reparenting it, which is what
+// moveNodeToBranch (a deliberate, explicit action) is already for.
+function reorderNode(draggedId,targetId,position){
+  if(draggedId===targetId)return;
+  const dragged=getNode(draggedId),target=getNode(targetId);
+  if(!dragged||!target)return;
+  if(dragged.branchId!==target.branchId||dragged.parentId!==target.parentId)return;
+  const without=st.nodes.filter(n=>n.id!==draggedId);
+  const targetIndex=without.findIndex(n=>n.id===targetId);
+  without.splice(position==='after'?targetIndex+1:targetIndex,0,dragged);
+  st.nodes=without;
+  rr();
+}
+function reorderBranch(draggedId,targetId,position){
+  if(draggedId===targetId)return;
+  const dragged=getBranch(draggedId),target=getBranch(targetId);
+  if(!dragged||!target)return;
+  const without=st.branches.filter(b=>b.id!==draggedId);
+  const targetIndex=without.findIndex(b=>b.id===targetId);
+  without.splice(position==='after'?targetIndex+1:targetIndex,0,dragged);
+  st.branches=without;
+  rr();
+}
 function selectNode(id){
   st.selectedId=id;const n=getNode(id);if(n)st.activeBranchId=n.branchId;
   st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
@@ -4204,7 +4232,7 @@ export const waxTreeActions={
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,
-  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,retryNode,scanFollowsForNewReleases,
+  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,reorderNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
   baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,
