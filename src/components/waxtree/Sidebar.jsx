@@ -26,10 +26,20 @@ export const Sidebar = ({ state, actions }) => {
         {state.branches.map(item => (
           <div
             key={item.id}
+            draggable
+            onDragStart={event => event.dataTransfer.setData('application/x-wt-branch', item.id)}
             onClick={() => actions.mutateState(value => { value.activeBranchId = item.id; })}
             onDoubleClick={() => { const name = prompt('Branch name:', item.name); if (name) actions.renameBranch(item.id, name); }}
             onDragOver={event => event.preventDefault()}
-            onDrop={event => actions.moveNodeToBranch(event.dataTransfer.getData('text/plain'), item.id)}
+            onDrop={event => {
+              const draggedBranchId = event.dataTransfer.getData('application/x-wt-branch');
+              if (draggedBranchId) {
+                const midpoint = event.currentTarget.getBoundingClientRect().left + event.currentTarget.getBoundingClientRect().width / 2;
+                actions.reorderBranch(draggedBranchId, item.id, event.clientX < midpoint ? 'before' : 'after');
+              } else {
+                actions.moveNodeToBranch(event.dataTransfer.getData('text/plain'), item.id);
+              }
+            }}
             className={`relative -bottom-px flex shrink-0 cursor-pointer items-center gap-1 rounded-t-lg border border-b-0 px-2 py-1.5 text-[10px] font-bold uppercase tracking-[.06em] ${state.activeBranchId === item.id ? 'border-border bg-card text-primary' : 'border-border bg-secondary text-muted-foreground'}`}
           >
             <span className="max-w-20 truncate">{item.name}</span>

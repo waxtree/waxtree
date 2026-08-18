@@ -1,4 +1,4 @@
-import { Hash, Pin, X } from 'lucide-react';
+import { FolderInput, Hash, Pin, X } from 'lucide-react';
 import { useState } from 'react';
 import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
@@ -8,16 +8,51 @@ export const SidebarNode = ({ node, depth, state, actions }) => {
   const active = node.id === state.selectedId;
   const [tagging, setTagging] = useState(false);
   const [tag, setTag] = useState('');
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [dropZone, setDropZone] = useState(null); // 'before' | 'inside' | 'after'
+
+  // Middle band drops ONTO the node (becomes its child) — top/bottom bands
+  // reorder as a sibling before/after it, same as any list drag-to-reorder.
+  // 30/40/30 split, wide enough for the middle "make it a sub-node" target
+  // to be reliably hittable without a ruler.
+  const zoneFor = event => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = (event.clientY - rect.top) / rect.height;
+    return ratio < 0.3 ? 'before' : ratio > 0.7 ? 'after' : 'inside';
+  };
+  const handleDragOver = event => {
+    event.preventDefault();
+    setDropZone(zoneFor(event));
+  };
+  const handleDrop = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    // Recomputed fresh here rather than trusting the `dropZone` state set
+    // by the last dragover — dragover and drop can fire close enough
+    // together that React hasn't re-rendered handleDrop's own closure
+    // with the latest setDropZone() yet, so reading `dropZone` here could
+    // silently act on a stale (often still-null) value. Confirmed live:
+    // dropping dead-center on a node was landing as 'before' instead of
+    // 'inside' because of exactly this.
+    const draggedId = event.dataTransfer.getData('text/plain');
+    if (draggedId && draggedId !== node.id) actions.repositionNode(draggedId, node.id, zoneFor(event));
+    setDropZone(null);
+  };
 
   return (
     <>
       <div
         draggable
         onDragStart={event => event.dataTransfer.setData('text/plain', node.id)}
+        onDragEnd={() => setDropZone(null)}
+        onDragOver={handleDragOver}
+        onDragLeave={() => setDropZone(null)}
+        onDrop={handleDrop}
         onClick={() => actions.selectNode(node.id)}
         style={{ paddingLeft: 8 + depth * 14 }}
-        className={`group flex cursor-pointer items-start gap-1.5 border-l-2 py-[7px] pr-2.5 ${node.justAdded ? 'animate-pulse border-primary bg-primary/20' : active ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}
+        className={`group relative flex cursor-pointer items-start gap-1.5 border-l-2 py-[7px] pr-2.5 ${node.justAdded ? 'animate-pulse border-primary bg-primary/20' : active ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'} ${dropZone === 'inside' ? 'outline-2 outline-dashed -outline-offset-2 outline-primary' : ''}`}
       >
+        {(dropZone === 'before' || dropZone === 'after') && <span className={`absolute inset-x-0 h-0.5 bg-primary ${dropZone === 'before' ? 'top-0' : 'bottom-0'}`} />}
         <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/70">{node.type === 'label' ? <LabelIcon className="size-3.5" /> : <ArtistIcon className="size-3.5" />}</span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
@@ -31,10 +66,19 @@ export const SidebarNode = ({ node, depth, state, actions }) => {
             </div>
           )}
         </div>
-        <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100">
+        <div className={`relative flex shrink-0 gap-1 ${branchMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
           <button type="button" title="Pin" onClick={event => { event.stopPropagation(); actions.togglePin(node.id); }} className="text-muted-foreground hover:text-primary"><Pin className="size-3.5" /></button>
           <button type="button" title="Tag" onClick={event => { event.stopPropagation(); setTagging(value => !value); }} className="text-muted-foreground hover:text-primary"><Hash className="size-3.5" /></button>
+          <button type="button" title="Move to branch" onClick={event => { event.stopPropagation(); setBranchMenuOpen(value => !value); }} className="text-muted-foreground hover:text-primary"><FolderInput className="size-3.5" /></button>
           <button type="button" title="Remove" onClick={event => { event.stopPropagation(); actions.removeNode(node.id); }} className="text-muted-foreground hover:text-destructive"><X className="size-3.5" /></button>
+          {branchMenuOpen && (
+            <div className="absolute right-0 top-[calc(100%+4px)] z-[400] min-w-[140px] overflow-hidden rounded-lg border border-border bg-card p-1 shadow-[var(--wt-shadow)]" onClick={event => event.stopPropagation()}>
+              {state.branches.filter(branch => branch.id !== node.branchId).map(branch => (
+                <button key={branch.id} type="button" onClick={() => { actions.moveNodeToBranch(node.id, branch.id); setBranchMenuOpen(false); }} className="block w-full truncate rounded-md px-2.5 py-1.5 text-left text-[12px] hover:bg-muted">{branch.name}</button>
+              ))}
+              {state.branches.length <= 1 && <span className="block px-2.5 py-1.5 text-[11px] text-muted-foreground/70">No other branches</span>}
+            </div>
+          )}
         </div>
       </div>
       {tagging && (

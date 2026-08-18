@@ -3649,6 +3649,54 @@ function moveNodeToBranch(nodeId,targetBranchId){
   node.parentId=null;
   st.activeBranchId=targetBranchId;st.selectedId=nodeId;rr();
 }
+// Is nodeId target itself, or nested anywhere under it? Walks UP from
+// target via parentId — cheaper than walking down, and this is the exact
+// shape repositionNode needs to reject (a drop that would make a node its
+// own ancestor).
+function isNodeOrDescendant(nodeId,ancestorId){
+  let cursor=getNode(nodeId);
+  while(cursor){
+    if(cursor.id===ancestorId)return true;
+    cursor=cursor.parentId?getNode(cursor.parentId):null;
+  }
+  return false;
+}
+// Sidebar rendering derives sibling order straight from st.nodes' own array
+// order (see Sidebar.jsx's children()), so 'before'/'after' is just moving
+// the dragged node to its new array position — no separate `order` field
+// to keep in sync. mode:
+//   'before'/'after' — becomes a sibling of target (adopts target's OWN
+//     parentId, even if that differs from the dragged node's current
+//     parent — this is what lets a nested node get dragged back out to
+//     root level, or across to a different branch of the tree, just by
+//     dropping it next to a node that already lives where it should go).
+//   'inside' — becomes a child of target (dropped ON target itself,
+//     not its top/bottom edge — see SidebarNode's drop-zone split).
+// Both reject a drop that would nest a node under its own descendant
+// (or under itself) — that's a cycle, not a valid tree position.
+function repositionNode(draggedId,targetId,mode){
+  if(draggedId===targetId)return;
+  const dragged=getNode(draggedId),target=getNode(targetId);
+  if(!dragged||!target||dragged.branchId!==target.branchId)return;
+  if(isNodeOrDescendant(targetId,draggedId))return;
+  if(mode==='inside'){dragged.parentId=target.id;rr();return;}
+  dragged.parentId=target.parentId;
+  const without=st.nodes.filter(n=>n.id!==draggedId);
+  const targetIndex=without.findIndex(n=>n.id===targetId);
+  without.splice(mode==='after'?targetIndex+1:targetIndex,0,dragged);
+  st.nodes=without;
+  rr();
+}
+function reorderBranch(draggedId,targetId,position){
+  if(draggedId===targetId)return;
+  const dragged=getBranch(draggedId),target=getBranch(targetId);
+  if(!dragged||!target)return;
+  const without=st.branches.filter(b=>b.id!==draggedId);
+  const targetIndex=without.findIndex(b=>b.id===targetId);
+  without.splice(position==='after'?targetIndex+1:targetIndex,0,dragged);
+  st.branches=without;
+  rr();
+}
 function selectNode(id){
   st.selectedId=id;const n=getNode(id);if(n)st.activeBranchId=n.branchId;
   st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
@@ -4204,7 +4252,7 @@ export const waxTreeActions={
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,
-  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,retryNode,scanFollowsForNewReleases,
+  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
   baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,
