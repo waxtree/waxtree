@@ -13,7 +13,7 @@ export const Search = ({ state, actions }) => {
   const showResults = state.loading || state.err || state.results.length > 0;
 
   return (
-    <div className="group relative min-w-0 flex-1 max-w-[360px]">
+    <div className="group relative min-w-0 shrink grow-[10] basis-0 max-w-[540px]">
       <div className="flex items-center gap-2 rounded-full border-[1.5px] border-border bg-background px-3.5 py-1.5 transition focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(94,196,123,.12)]">
         {activeBranch && <span className="shrink-0 rounded-full border border-primary px-2 py-px text-[10px] text-primary">{activeBranch.name}</span>}
         <input
@@ -46,7 +46,7 @@ export const Search = ({ state, actions }) => {
         </div>
       )}
       {!showResults && state.chips.length > 0 && (
-        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[300] hidden max-h-[280px] w-max min-w-full max-w-[420px] overflow-y-auto rounded-xl border border-border bg-card p-2.5 shadow-[var(--wt-shadow)] group-hover:block group-focus-within:block">
+        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[300] hidden max-h-[280px] w-max min-w-full max-w-[540px] overflow-y-auto rounded-xl border border-border bg-card p-2.5 shadow-[var(--wt-shadow)] group-hover:block group-focus-within:block">
           <span className="mb-1.5 block text-[10px] font-bold uppercase text-muted-foreground/70">Recent Searches</span>
           <div className="flex flex-wrap gap-1.5">
             {state.chips.map(name => (
