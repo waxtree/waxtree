@@ -3151,6 +3151,17 @@ function retryGenreYearNode(nodeId){
 async function fetchGenreYearResults(nodeId,styles,years){
   const stylesList=styles.length?styles:[null];
   const yearsList=years.length?years:[null];
+  // Years stay OR ("any of these years" — a release can only ever have
+  // one anyway, so AND across years would just always be empty). Styles
+  // are AND: each combo still only filters Discogs by ONE style at a
+  // time (its search API doesn't take multiple), but every release it
+  // returns comes back with its own full style tag list — so when more
+  // than one style is selected, a result only survives if ITS OWN style
+  // list is a superset of every style picked, not just the one that
+  // happened to be this particular combo's filter. Querying once per
+  // selected style (rather than just one) still matters even under AND:
+  // it's the only way to find a release whose PRIMARY match is a style
+  // other than whichever one a single query would have picked.
   const combos=[];
   stylesList.forEach(style=>yearsList.forEach(year=>combos.push({style,year})));
   const seen=new Map();
@@ -3166,7 +3177,10 @@ async function fetchGenreYearResults(nodeId,styles,years){
       ]);
       anySucceeded=true;
       (data.results||[]).forEach(r=>{
-        if(!seen.has(r.id))seen.set(r.id,{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null,genre:(r.style||[])[0]||(r.genre||[])[0]||null,country:r.country||null,format:(r.format||[]).join(', ')});
+        if(seen.has(r.id))return;
+        const releaseStyles=r.style||[];
+        if(styles.length>1&&!styles.every(s=>releaseStyles.includes(s)))return;
+        seen.set(r.id,{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null,genre:releaseStyles[0]||(r.genre||[])[0]||null,styles:releaseStyles,country:r.country||null,format:(r.format||[]).join(', ')});
       });
     }catch{/* one combo failing shouldn't sink the whole search — the rest still run */}
   }
@@ -4320,6 +4334,24 @@ function registerRelatedTrack(card){
   discoveredTracks[card.playId]={id:card.playId,videoId:card.videoId,title:card.title,trackArtistName:card.artist,thumbUrl:card.thumbUrl,duration:null,resolved:card.resolved,discogsUrl:card.discogsUrl,cosineId:card.cosineId};
 }
 function playRelated(card){registerRelatedTrack(card);doPlay(card.playId,card.videoId,card.title,card.artist);}
+// Used by GenreYearResults' inline play button — a bare search-result
+// card only ever has release-level summary fields (no tracklist), so
+// this fetches the real release detail first and reuses
+// buildTrackEntries' own parsing (same code fetchArtistData/fetchLabelData
+// use) rather than re-deriving track/video extraction from scratch.
+// Registered via discoveredTracks, same pattern as Related Tracks and the
+// YouTube-extras cards — makes it playable/likeable without belonging to
+// any node, and doPlay's own no-Discogs-video fallback already resolves
+// a YouTube match on the fly exactly as it does for any other track.
+async function playFirstTrackOfRelease(releaseId){
+  const rd=await dReq('/releases/'+releaseId);
+  const entries=buildTrackEntries(rd,releaseId,`https://www.discogs.com/release/${releaseId}`,rd.year,null,'');
+  const first=entries[0];
+  if(!first)throw new Error('No playable track found on this release');
+  const artistName=first.trackArtistName||first.releaseArtistName||'';
+  discoveredTracks[first.id]={id:first.id,videoId:first.videoId,title:first.title,trackArtistName:artistName,thumbUrl:first.thumbUrl,duration:null,resolved:null,discogsUrl:first.discogsUrl,cosineId:null};
+  doPlay(first.id,first.videoId,first.title,artistName);
+}
 function getTrackVideo(track,artistName,nodeName){
   if(track.videoId)return track.videoId;
   if(track.id in ytMatches)return ytMatches[track.id]||null;
@@ -4344,7 +4376,7 @@ export const waxTreeActions={
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
-  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
+  playAdjacentTrack,playFirstTrackOfRelease,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
   baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,
