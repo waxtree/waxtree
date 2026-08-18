@@ -2975,11 +2975,33 @@ let rqN=0,rqW=Date.now();
 // path below: it's shared across every such user at once, and Discogs' own
 // unauthenticated/consumer-key-only limit is tighter than a per-user token's.
 let rqSharedN=0,rqSharedW=Date.now();
+// Split from the general no-token budget above (2026-08-18): a live search
+// bar call and a background node-exploration call used to draw from the
+// SAME 20/60s counter, so a burst of exploration (or several tracks'
+// worth of resolveRemixArtistCandidates) could fully exhaust it right
+// before the user typed a search — confirmed live: "Connor Wall" stuck on
+// "Searching..." then timing out on BOTH main and a branch that never
+// touched this throttle, which only makes sense if something upstream of
+// the search itself (i.e. this shared counter) was already spent. A human
+// actively watching "Searching…" needs its own reserved slice that
+// exploration traffic can never eat into — same split already used for
+// YouTube's search vs channel quotas (see trySpendYtCalls). Kept the
+// combined ceiling (10+10=20) identical to the old single counter's, so
+// this doesn't risk tripping Discogs' own real rate limit any harder than
+// before — it only stops one traffic class from starving the other.
+let rqSharedSearchN=0,rqSharedSearchW=Date.now();
 async function dReqRaw(path,p={},_retry=0){
   const tok=getToken();
   if(!tok){
-    const now=Date.now();if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
-    if(rqSharedN>=20){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedW)));rqSharedN=0;rqSharedW=Date.now();}rqSharedN++;
+    const isSearch=path==='/database/search';
+    const now=Date.now();
+    if(isSearch){
+      if(now-rqSharedSearchW>60000){rqSharedSearchN=0;rqSharedSearchW=now;}
+      if(rqSharedSearchN>=10){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedSearchW)));rqSharedSearchN=0;rqSharedSearchW=Date.now();}rqSharedSearchN++;
+    }else{
+      if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
+      if(rqSharedN>=10){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedW)));rqSharedN=0;rqSharedW=Date.now();}rqSharedN++;
+    }
     try{return await edgeFn({action:'search',path,params:JSON.stringify(p)});}
     catch(e){
       // Was 15s*(1+retry) up to 3 retries — up to 90s of backoff alone, on
