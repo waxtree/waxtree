@@ -2982,8 +2982,13 @@ async function dReqRaw(path,p={},_retry=0){
     if(rqSharedN>=20){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedW)));rqSharedN=0;rqSharedW=Date.now();}rqSharedN++;
     try{return await edgeFn({action:'search',path,params:JSON.stringify(p)});}
     catch(e){
-      if(_retry<3&&(e.message==='rate_limited'||e.message.includes('rate_limit'))){
-        await new Promise(r=>setTimeout(r,15000*(1+_retry)));
+      // Was 15s*(1+retry) up to 3 retries — up to 90s of backoff alone, on
+      // top of the throttle wait above, stacking into multi-minute hangs on
+      // a live search (confirmed 2026-08-13). A human waiting on the search
+      // bar can't be kept patient the way a background bulk job can — see
+      // searchDiscogs()'s own hard ceiling for the other half of this fix.
+      if(_retry<2&&(e.message==='rate_limited'||e.message.includes('rate_limit'))){
+        await new Promise(r=>setTimeout(r,2000*(1+_retry)));
         return dReqRaw(path,p,_retry+1);
       }
       throw e;
@@ -2996,11 +3001,11 @@ async function dReqRaw(path,p={},_retry=0){
   let res;
   try{res=await fetch(url,{headers:{Authorization:`Discogs token=${tok}`}});}
   catch(e){
-    if(_retry<2){await new Promise(r=>setTimeout(r,5000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
+    if(_retry<2){await new Promise(r=>setTimeout(r,2000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
     throw e;
   }
   if(res.status===429){
-    if(_retry<2){await new Promise(r=>setTimeout(r,12000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
+    if(_retry<2){await new Promise(r=>setTimeout(r,3000*(1+_retry)));return dReqRaw(path,p,_retry+1);}
     throw new Error('Rate limit — try again in a moment');
   }
   if(!res.ok)throw new Error(`Discogs ${res.status}`);return res.json();
@@ -3027,7 +3032,20 @@ async function dReq(path,p={}){
 // "A / B - Track1 / Track2 / Track3", confirmed live).
 async function searchDiscogs(q){
   const c=lsGet('s:'+q);if(c)return c;
-  const data=await dReq('/database/search',{q,per_page:'25'});
+  // Hard ceiling — this is what backs the search bar (doSearch/
+  // liveSearchTick), a live call a human is actively staring at "Searching…"
+  // for, not a background bulk job that can afford to patiently retry.
+  // dReq()'s own throttle/backoff (see dReqRaw) is deliberately more patient
+  // than this for everything else, and could previously chain into several
+  // minutes of real wait on a single search (confirmed live 2026-08-13).
+  // This must never happen — Promise.race abandons the slow chain (it can
+  // still finish and populate the shared cache for the next person; it just
+  // stops making this particular search wait on it) and always gives the
+  // search bar a definitive answer within a few seconds.
+  const data=await Promise.race([
+    dReq('/database/search',{q,per_page:'25'}),
+    new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('Search timed out — try again')),7000)),
+  ]);
   const r=data.results.filter(r=>r.type==='artist'||r.type==='label'||r.type==='release').map(r=>
     r.type==='release'
       ?{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null}
