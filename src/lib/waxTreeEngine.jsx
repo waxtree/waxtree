@@ -1459,8 +1459,8 @@ const st={
   // artist/label/track text search, toggled from the same "Explore"
   // control (see Search.jsx). Transient/session-only, same treatment as
   // the plain text search's own q/results/loading/err above.
-  exploreMode:'search', // 'search' | 'genreYear'
-  exploreGenres:[],exploreYears:[],genreYearResults:null,genreYearLoading:false,genreYearErr:'',
+  exploreMode:'search', // 'search' | 'genreYear' — which input the search bar itself shows
+  exploreStyles:[],exploreYears:[],
   bioOpen:{},renameId:null,renameVal:'',tagNodeId:null,tagVal:'',
   filterOpen:false,filterTitle:'',filterFormat:'all',filterSort:'default',filterGenres:[],
   sbPinFirst:saved?.sbPinFirst||false,sbFilterTag:'',
@@ -3092,58 +3092,88 @@ async function searchDiscogs(q,{background=false}={}){
 }
 
 // ── Explore by genre/year ──────────────────────────────────
-// Discogs' own fixed top-level genre taxonomy — stable and small enough to
-// hardcode rather than fetch, and matches the exact strings its search API
-// expects for the `genre` param.
-const EXPLORE_GENRES=['Blues','Brass & Military',"Children's",'Classical','Electronic','Folk, World, & Country','Funk / Soul','Hip Hop','Jazz','Latin','Non-Music','Pop','Reggae','Rock','Stage & Screen'];
-// Discogs' search API takes one genre and one year per request — true
-// multi-select means one request per (genre × year) combination, merged
-// after. Capped so a broad selection (e.g. 4 genres × 4 years) can't fire
-// an unpaced 16-request burst on a single submit; each combo still goes
-// through dReqRaw's paced counter (background:true below) rather than the
-// search bar's own unthrottled path, since this is a multi-call burst a
-// human isn't pacing one request at a time the way plain text search is.
+// Scoped to Electronic's own sub-genres (Discogs "style") for now — that's
+// the digging focus here, not a general-purpose genre browser. Genre
+// itself is fixed to 'Electronic' rather than user-selectable; styles are
+// its well-known Discogs facet values.
+const EXPLORE_STYLES=['Acid','Acid House','Acid Techno','Ambient','Bassline','Big Beat','Breakbeat','Breakcore','Breaks','Chiptune','Deep House','Disco','Downtempo','Drone','Drum n Bass','Dub','Dub Techno','Dubstep','EBM','Electro','Electro House','Electroclash','Euro House','Eurodance','Footwork','Future Jazz','Gabber','Garage House','Ghetto House','Goa Trance','Grime','Hard House','Hard Techno','Hard Trance','Hardcore','Hardstyle','Hi NRG','House','IDM','Industrial','Italo-Disco','Italo House','Jungle','Leftfield','Minimal','Minimal Techno','New Beat','New Wave','Noise','Nu-Disco','Power Electronics','Progressive House','Progressive Trance','Psy-Trance','Speed Garage','Synth-pop','Tech House','Tech Trance','Techno','Trance','Tribal','Trip Hop','UK Garage','Vaporwave'];
+// Discogs' search API takes one style and one year per request — true
+// multi-select means one request per (style × year) combination, merged
+// after. Capped so a broad selection can't fire an oversized burst on a
+// single submit. Each combo is awaited sequentially (not fired
+// concurrently), which already paces them by real wall-clock time between
+// requests — deliberately NOT routed through dReqRaw's background-traffic
+// counter: that counter is for genuinely unpaced code (a batch iterating
+// with zero delay), and wrongly classifying a human-submitted search as
+// "background" meant it could queue behind unrelated exploration traffic
+// and blow the local 7s-per-request ceiling — confirmed live as a search
+// that simply errored out despite the same query working fine directly
+// against Discogs. Same fix, same reasoning as the plain text search bar's
+// own throttle removal.
 const GENRE_YEAR_MAX_COMBOS=9;
-function toggleExploreGenre(genre){
-  const removing=st.exploreGenres.includes(genre);
-  const next=removing?st.exploreGenres.filter(g=>g!==genre):[...st.exploreGenres,genre];
+function toggleExploreStyle(style){
+  const removing=st.exploreStyles.includes(style);
+  const next=removing?st.exploreStyles.filter(s=>s!==style):[...st.exploreStyles,style];
   if(!removing&&next.length*Math.max(st.exploreYears.length,1)>GENRE_YEAR_MAX_COMBOS)return;
-  st.exploreGenres=next;rr();
+  st.exploreStyles=next;rr();
 }
 function addExploreYear(year){
   const y=parseInt(year,10);
   if(!y||y<1900||y>new Date().getFullYear()+1||st.exploreYears.includes(y))return;
-  if(Math.max(st.exploreGenres.length,1)*(st.exploreYears.length+1)>GENRE_YEAR_MAX_COMBOS)return;
+  if(Math.max(st.exploreStyles.length,1)*(st.exploreYears.length+1)>GENRE_YEAR_MAX_COMBOS)return;
   st.exploreYears=[...st.exploreYears,y];rr();
 }
 function removeExploreYear(year){st.exploreYears=st.exploreYears.filter(y=>y!==year);rr();}
-async function searchByGenreYear(){
-  if(!st.exploreGenres.length&&!st.exploreYears.length)return;
-  const genres=st.exploreGenres.length?st.exploreGenres:[null];
-  const years=st.exploreYears.length?st.exploreYears:[null];
+// A genre/year search becomes a node, same as any other exploration —
+// persists in the tree (pin/tag/drag/reorder/move-to-branch all already
+// work generically on any node, no special-casing needed), and can be
+// revisited later without re-querying. Mirrors addNode's own shape/flow
+// (foreground, immediately selected, loading state while it fetches).
+function addGenreYearNode(styles,years){
+  const bid=st.activeBranchId;
+  if(!st.isPremium&&st.nodes.filter(n=>n.branchId===bid).length>=FREE_NODE_LIMIT){st.premiumModal=true;rr();return;}
+  const name=[styles.length?styles.join(', '):'Electronic',years.length?years.slice().sort((a,b)=>a-b).join('/'):null].filter(Boolean).join(', ');
+  const id='n'+Date.now();
+  // params kept on the node itself (not just inside .data) so a failed
+  // fetch can still be retried — .data only gets populated on success.
+  const node={id,branchId:bid,type:'genreYear',discogsId:null,name,parentId:null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null,params:{styles,years}};
+  st.nodes=[...st.nodes,node];
+  st.selectedId=id;st.activeBranchId=bid;
+  if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
+  rr();
+  fetchGenreYearResults(id,styles,years);
+}
+function retryGenreYearNode(nodeId){
+  const n=getNode(nodeId);if(!n||n.type!=='genreYear')return;
+  n.error=null;n.loading=true;rr();
+  fetchGenreYearResults(nodeId,n.params?.styles||[],n.params?.years||[]);
+}
+async function fetchGenreYearResults(nodeId,styles,years){
+  const stylesList=styles.length?styles:[null];
+  const yearsList=years.length?years:[null];
   const combos=[];
-  genres.forEach(genre=>years.forEach(year=>combos.push({genre,year})));
-  st.genreYearLoading=true;st.genreYearErr='';st.genreYearResults=null;rr();
+  stylesList.forEach(style=>yearsList.forEach(year=>combos.push({style,year})));
   const seen=new Map();
   let anySucceeded=false;
   for(const combo of combos.slice(0,GENRE_YEAR_MAX_COMBOS)){
-    const params={type:'release',per_page:'50'};
-    if(combo.genre)params.genre=combo.genre;
+    const params={type:'release',per_page:'50',genre:'Electronic'};
+    if(combo.style)params.style=combo.style;
     if(combo.year)params.year=String(combo.year);
     try{
       const data=await Promise.race([
-        dReq('/database/search',params,{background:true}),
+        dReq('/database/search',params),
         new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('timeout')),7000)),
       ]);
       anySucceeded=true;
       (data.results||[]).forEach(r=>{
-        if(!seen.has(r.id))seen.set(r.id,{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null,genre:(r.genre||[])[0]||null,country:r.country||null,format:(r.format||[]).join(', ')});
+        if(!seen.has(r.id))seen.set(r.id,{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null,genre:(r.style||[])[0]||(r.genre||[])[0]||null,country:r.country||null,format:(r.format||[]).join(', ')});
       });
     }catch{/* one combo failing shouldn't sink the whole search — the rest still run */}
   }
-  st.genreYearLoading=false;
-  if(!anySucceeded)st.genreYearErr='Search failed — try again';
-  else st.genreYearResults=[...seen.values()].sort((a,b)=>(b.year||0)-(a.year||0));
+  const n=getNode(nodeId);if(!n)return;
+  n.loading=false;
+  if(!anySucceeded)n.error='Search failed — try again';
+  else{n.data={styles,years,results:[...seen.values()].sort((a,b)=>(b.year||0)-(a.year||0))};n.loaded=true;}
   rr();
 }
 
@@ -4310,15 +4340,15 @@ function getExploreTargets(trackId,artistName){
 }
 
 export const waxTreeActions={
-  addBranch,addNode,addTag,ancestry,addExploreYear,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
+  addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
-  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryNode,scanFollowsForNewReleases,
-  resolveStoreUrl,searchByGenreYear,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreGenre,toggleFollow,toggleLike,togglePin,uploadAvatar,
+  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
+  resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
   baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
-  exploreGenres:EXPLORE_GENRES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
+  exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,
 };

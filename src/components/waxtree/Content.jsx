@@ -10,10 +10,10 @@ export const Content = ({ state, actions }) => {
   const node = actions.getNode(state.selectedId);
   const [page, setPage] = useState(0);
   useEffect(() => { setPage(0); }, [node?.id]);
-  useEffect(() => { if (node?.loaded && node.data) void actions.fetchBandcamp(node.id, node.data.name || node.name); }, [actions, node?.data, node?.id, node?.loaded, node?.name]);
+  useEffect(() => { if (node?.type !== 'genreYear' && node?.loaded && node.data) void actions.fetchBandcamp(node.id, node.data.name || node.name); }, [actions, node?.data, node?.id, node?.loaded, node?.name, node?.type]);
 
-  if (state.exploreMode === 'genreYear' && (state.genreYearLoading || state.genreYearResults || state.genreYearErr)) {
-    return <GenreYearResults state={state} actions={actions} />;
+  if (node?.type === 'genreYear') {
+    return <GenreYearResults node={node} actions={actions} />;
   }
 
   if (!node) {
