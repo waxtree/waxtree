@@ -2985,10 +2985,20 @@ let rqSharedN=0,rqSharedW=Date.now();
 // the search itself (i.e. this shared counter) was already spent. A human
 // actively watching "Searching…" needs its own reserved slice that
 // exploration traffic can never eat into — same split already used for
-// YouTube's search vs channel quotas (see trySpendYtCalls). Kept the
-// combined ceiling (10+10=20) identical to the old single counter's, so
-// this doesn't risk tripping Discogs' own real rate limit any harder than
-// before — it only stops one traffic class from starving the other.
+// YouTube's search vs channel quotas (see trySpendYtCalls).
+//
+// First cut split this evenly (10/10) — regression, confirmed live right
+// after: opening a node with a big discography now visibly took much
+// longer to leave "Loading…" than before. fetchArtistData/fetchLabelData
+// fire ONE dReq per release (up to 200 tracks' worth, via
+// fetchReleaseBatches) — a single node open can burn through this budget
+// far faster than a search bar ever does, so exploration needs most of
+// the pool, not half. Search realistically only ever needs a small,
+// reliably-available slice (one submit plus a couple of live-typing
+// ticks), not a large share — 6 is already generous for that. Kept the
+// combined ceiling (6+14=20) identical to the original single counter's,
+// so this still can't trip Discogs' own real rate limit any harder than
+// before it was split.
 let rqSharedSearchN=0,rqSharedSearchW=Date.now();
 async function dReqRaw(path,p={},_retry=0){
   const tok=getToken();
@@ -2997,10 +3007,10 @@ async function dReqRaw(path,p={},_retry=0){
     const now=Date.now();
     if(isSearch){
       if(now-rqSharedSearchW>60000){rqSharedSearchN=0;rqSharedSearchW=now;}
-      if(rqSharedSearchN>=10){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedSearchW)));rqSharedSearchN=0;rqSharedSearchW=Date.now();}rqSharedSearchN++;
+      if(rqSharedSearchN>=6){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedSearchW)));rqSharedSearchN=0;rqSharedSearchW=Date.now();}rqSharedSearchN++;
     }else{
       if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
-      if(rqSharedN>=10){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedW)));rqSharedN=0;rqSharedW=Date.now();}rqSharedN++;
+      if(rqSharedN>=14){await new Promise(r=>setTimeout(r,62000-(Date.now()-rqSharedW)));rqSharedN=0;rqSharedW=Date.now();}rqSharedN++;
     }
     try{return await edgeFn({action:'search',path,params:JSON.stringify(p)});}
     catch(e){
