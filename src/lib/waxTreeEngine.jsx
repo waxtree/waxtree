@@ -3689,7 +3689,16 @@ function startNodeLoad(nodeId){
 function addNode(type,discogsId,name,parentId,branchId,opts={}){
   const bid=branchId||st.activeBranchId;
   const existing=st.nodes.find(n=>n.discogsId===discogsId&&n.branchId===bid);
-  if(existing){selectNode(existing.id);return;}
+  if(existing){
+    // Re-exploring something already in the tree is still "I'm interested
+    // in this right now" — promote it to the top of its sibling group too,
+    // same as a brand-new node, instead of leaving it wherever it was first
+    // added (which is what made re-opening an already-explored child look
+    // like the top-insertion fix wasn't applying to nested nodes at all).
+    st.nodes=[existing,...st.nodes.filter(n=>n.id!==existing.id)];
+    selectNode(existing.id);
+    return;
+  }
   if(!st.isPremium&&st.nodes.filter(n=>n.branchId===bid).length>=FREE_NODE_LIMIT){st.premiumModal=true;rr();return;}
   // The exploration edge — where the digger jumped from is as much the
   // signal as where they landed. No parent = entered via search.
