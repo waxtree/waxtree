@@ -3165,7 +3165,7 @@ function addGenreYearNode(styles,years){
   // params kept on the node itself (not just inside .data) so a failed
   // fetch can still be retried — .data only gets populated on success.
   const node={id,branchId:bid,type:'genreYear',discogsId:null,name,parentId:null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null,params:{styles,years}};
-  st.nodes=[...st.nodes,node];
+  st.nodes=[node,...st.nodes]; // newest at the top — see addNode's own comment on the same change
   st.selectedId=id;st.activeBranchId=bid;
   if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
   rr();
@@ -3712,7 +3712,14 @@ function addNode(type,discogsId,name,parentId,branchId,opts={}){
   // return above never reaches this), so revisiting an already-added
   // node never double-counts.
   const prevLvl=getLevelFromCount(st.nodes.length);
-  st.nodes=[...st.nodes,node];
+  // Prepended, not appended — newest node lands at the top of its sibling
+  // group (root-level or nested, same array-order-drives-render-order
+  // mechanism Sidebar.jsx's children() already relies on), oldest sinks
+  // toward the bottom. Was append-only before; see the .at(-1)→[0] fallback-
+  // selection changes in removeNode/removeBranch for the other half of
+  // this — those used to mean "the most recently added node in this
+  // branch", which only still holds true if changed to match.
+  st.nodes=[node,...st.nodes];
   if(background){
     setTimeout(()=>{const n=getNode(id);if(n){n.justAdded=false;rr();}},1400);
   }else{
@@ -3765,7 +3772,10 @@ function retryNode(nodeId){
 function removeNode(nodeId){
   st.nodes.forEach(n=>{if(n.parentId===nodeId)n.parentId=null;});
   st.nodes=st.nodes.filter(n=>n.id!==nodeId);
-  if(st.selectedId===nodeId)st.selectedId=st.nodes.filter(n=>n.branchId===st.activeBranchId).at(-1)?.id||null;
+  // [0], not .at(-1) — nodes are prepended now (newest first), so the
+  // most-recently-added node left in this branch is the first match, not
+  // the last.
+  if(st.selectedId===nodeId)st.selectedId=st.nodes.filter(n=>n.branchId===st.activeBranchId)[0]?.id||null;
   rr();
 }
 function moveNodeToBranch(nodeId,targetBranchId){
@@ -3872,7 +3882,7 @@ function removeBranch(id){
   if(st.branches.length<=1)return;
   st.branches=st.branches.filter(b=>b.id!==id);st.nodes=st.nodes.filter(n=>n.branchId!==id);
   if(st.activeBranchId===id)st.activeBranchId=st.branches[0].id;
-  if(!getNode(st.selectedId))st.selectedId=st.nodes.filter(n=>n.branchId===st.activeBranchId).at(-1)?.id||null;rr();
+  if(!getNode(st.selectedId))st.selectedId=st.nodes.filter(n=>n.branchId===st.activeBranchId)[0]?.id||null;rr(); // [0] — see removeNode's own comment
 }
 function renameBranch(id,name){const b=getBranch(id);if(b&&name.trim())b.name=name.trim();st.renameId=null;rr();}
 // Live search-as-you-type: doSearch (Enter/button) does an immediate lookup and
