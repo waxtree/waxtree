@@ -1,8 +1,24 @@
-import { GenreYearResultCard } from '@/components/waxtree/GenreYearResultCard';
+import { useEffect, useState } from 'react';
+import { ReleaseCard } from '@/components/waxtree/ReleaseCard';
 import { buttonSecondary } from '@/lib/waxtreeUi';
 
-export const GenreYearResults = ({ node, actions }) => {
+const PAGE_SIZE = 15;
+
+export const GenreYearResults = ({ node, state, actions }) => {
   const results = node.data?.results || [];
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageResults = results.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
+  useEffect(() => { setPage(0); }, [node.id]);
+  // Only the current page's releases get their real tracklist fetched —
+  // fetchGenreYearReleaseDetails no-ops on anything already cached, so
+  // paging back to an earlier page is instant.
+  useEffect(() => {
+    const ids = results.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE).map(release => release.id);
+    if (ids.length) actions.fetchGenreYearReleaseDetails(ids);
+  }, [actions, node.data, safePage]);
 
   return (
     <main className="min-w-0 overflow-y-auto px-7 pb-28 pt-7">
@@ -19,11 +35,31 @@ export const GenreYearResults = ({ node, actions }) => {
       {node.loaded && !node.loading && !node.error && (
         results.length ? (
           <>
-            <p className="mb-2 text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground/70">{results.length} release{results.length > 1 ? 's' : ''}</p>
-            <div className="grid grid-cols-1 gap-1.5 min-[900px]:grid-cols-2">
-              {results.map(release => <GenreYearResultCard key={release.id} release={release} actions={actions} />)}
+            <p className="text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground/70">RELEASES ({results.length} Discogs)</p>
+            <div className="mt-3 flex flex-col gap-[6px]">
+              {pageResults.map(release => {
+                const detail = actions.getGenreYearReleaseDetail(release.id);
+                if (!detail || detail.loading) {
+                  return (
+                    <div key={release.id} className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-[14px] py-[10px] text-xs text-muted-foreground">
+                      <span className="block size-3.5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      Loading {release.title}…
+                    </div>
+                  );
+                }
+                if (detail.err || !detail.tracks.length) return null;
+                const group = { key: 'gy-' + release.id, tracks: detail.tracks };
+                const syntheticNode = { id: null, name: detail.tracks[0].releaseArtistName || release.label || 'Various', branchId: state.activeBranchId };
+                return <ReleaseCard key={release.id} group={group} node={syntheticNode} isLabel={false} state={state} actions={actions} />;
+              })}
             </div>
-            {results.length >= 300 && <p className="mt-4 text-center text-xs text-muted-foreground/70">Showing the first {results.length} matches — narrow your styles/years for more precise results.</p>}
+            {totalPages > 1 && (
+              <div className="mt-5 flex items-center justify-center gap-3">
+                <button type="button" disabled={safePage === 0} onClick={() => setPage(value => value - 1)} className={`${buttonSecondary} disabled:opacity-30`}>← Prev</button>
+                <span className="text-xs text-muted-foreground">Page {safePage + 1} / {totalPages}</span>
+                <button type="button" disabled={safePage >= totalPages - 1} onClick={() => setPage(value => value + 1)} className={`${buttonSecondary} disabled:opacity-30`}>Next →</button>
+              </div>
+            )}
           </>
         ) : <div className="py-12 text-center text-sm text-muted-foreground/70">No releases found for that combination.</div>
       )}

@@ -3004,19 +3004,10 @@ let rqSharedN=0,rqSharedW=Date.now();
 // unpaced traffic — node exploration AND remix resolution, marked via
 // opts.background — still goes through the pre-emptive counter, since
 // that's the traffic that can actually fire faster than any human could.
-//
-// opts.foreground is the escape hatch for a non-search path that's ALSO a
-// single human-initiated action rather than automated traffic — e.g. the
-// genre/year results' play button fetching one release's detail. Without
-// it, every non-search path defaults to paced (right for the bulk
-// per-release fetches fetchArtistData/fetchLabelData already do), which
-// meant a single Play click could queue for up to 62s behind unrelated
-// exploration traffic despite the actual Discogs call taking well under a
-// second on its own — confirmed live, same bug class as the search bar's.
 async function dReqRaw(path,p={},_retry=0,opts={}){
   const tok=getToken();
   if(!tok){
-    const isPaced=opts.foreground?false:(path!=='/database/search'||opts.background);
+    const isPaced=path!=='/database/search'||opts.background;
     if(isPaced){
       const now=Date.now();
       if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
@@ -4341,24 +4332,41 @@ function registerRelatedTrack(card){
   discoveredTracks[card.playId]={id:card.playId,videoId:card.videoId,title:card.title,trackArtistName:card.artist,thumbUrl:card.thumbUrl,duration:null,resolved:card.resolved,discogsUrl:card.discogsUrl,cosineId:card.cosineId};
 }
 function playRelated(card){registerRelatedTrack(card);doPlay(card.playId,card.videoId,card.title,card.artist);}
-// Used by GenreYearResults' inline play button — a bare search-result
-// card only ever has release-level summary fields (no tracklist), so
-// this fetches the real release detail first and reuses
-// buildTrackEntries' own parsing (same code fetchArtistData/fetchLabelData
-// use) rather than re-deriving track/video extraction from scratch.
-// Registered via discoveredTracks, same pattern as Related Tracks and the
-// YouTube-extras cards — makes it playable/likeable without belonging to
-// any node, and doPlay's own no-Discogs-video fallback already resolves
-// a YouTube match on the fly exactly as it does for any other track.
-async function playFirstTrackOfRelease(releaseId){
-  const rd=await dReq('/releases/'+releaseId,{},{foreground:true});
-  const entries=buildTrackEntries(rd,releaseId,`https://www.discogs.com/release/${releaseId}`,rd.year,null,'');
-  const first=entries[0];
-  if(!first)throw new Error('No playable track found on this release');
-  const artistName=first.trackArtistName||first.releaseArtistName||'';
-  discoveredTracks[first.id]={id:first.id,videoId:first.videoId,title:first.title,trackArtistName:artistName,thumbUrl:first.thumbUrl,duration:null,resolved:null,discogsUrl:first.discogsUrl,cosineId:null};
-  doPlay(first.id,first.videoId,first.title,artistName);
+// GenreYearResults renders real ReleaseCard/TrackRow rows — same as any
+// artist/label page — instead of a lightweight custom card, so every
+// track gets its own working play button (correctly colored once a video
+// resolves) for free, no bespoke play logic needed here. But a bare
+// search result only ever has release-level summary fields (no
+// tracklist), so this fetches each release's real detail first, same as
+// fetchArtistData/fetchLabelData already do per release, and reuses
+// buildTrackEntries' own parsing rather than re-deriving it. Session-only
+// cache (not persisted), same treatment as bcCacheMap.
+let genreYearReleaseCache={}; // releaseId → {tracks,loading,err}
+async function fetchGenreYearReleaseDetails(releaseIds){
+  const toFetch=releaseIds.filter(id=>!genreYearReleaseCache[id]);
+  if(!toFetch.length)return;
+  toFetch.forEach(id=>{genreYearReleaseCache[id]={tracks:[],loading:true,err:null};});
+  rr();
+  // Same FETCH_BATCH concurrency fetchArtistData already uses for its own
+  // per-release fetches — deliberately left on the default paced path
+  // (no {foreground:true}) despite being human-triggered (opening/paging
+  // through results): unlike the single-release play button this used to
+  // be, this can fire up to FETCH_BATCH requests at once, which is
+  // exactly the unpaced-burst shape the pacing exists to protect against.
+  for(let i=0;i<toFetch.length;i+=FETCH_BATCH){
+    const batch=toFetch.slice(i,i+FETCH_BATCH);
+    await Promise.all(batch.map(async id=>{
+      try{
+        const rd=await dReq('/releases/'+id);
+        genreYearReleaseCache[id]={tracks:buildTrackEntries(rd,id,`https://www.discogs.com/release/${id}`,rd.year,null,''),loading:false,err:null};
+      }catch(e){
+        genreYearReleaseCache[id]={tracks:[],loading:false,err:e.message};
+      }
+    }));
+    rr();
+  }
 }
+function getGenreYearReleaseDetail(releaseId){return genreYearReleaseCache[releaseId]||null;}
 function getTrackVideo(track,artistName,nodeName){
   if(track.videoId)return track.videoId;
   if(track.id in ytMatches)return ytMatches[track.id]||null;
@@ -4383,7 +4391,8 @@ export const waxTreeActions={
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
-  playAdjacentTrack,playFirstTrackOfRelease,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
+  fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
+  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
   baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,

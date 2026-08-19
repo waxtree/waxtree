@@ -13,7 +13,7 @@ export const Content = ({ state, actions }) => {
   useEffect(() => { if (node?.type !== 'genreYear' && node?.loaded && node.data) void actions.fetchBandcamp(node.id, node.data.name || node.name); }, [actions, node?.data, node?.id, node?.loaded, node?.name, node?.type]);
 
   if (node?.type === 'genreYear') {
-    return <GenreYearResults node={node} actions={actions} />;
+    return <GenreYearResults node={node} state={state} actions={actions} />;
   }
 
   if (!node) {
