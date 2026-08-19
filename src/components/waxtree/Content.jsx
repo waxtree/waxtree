@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
+import { GenreYearResults } from '@/components/waxtree/GenreYearResults';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
 import { NodeDetails } from '@/components/waxtree/NodeDetails';
 import { PlantLoader } from '@/components/waxtree/PlantLoader';
@@ -9,7 +10,11 @@ export const Content = ({ state, actions }) => {
   const node = actions.getNode(state.selectedId);
   const [page, setPage] = useState(0);
   useEffect(() => { setPage(0); }, [node?.id]);
-  useEffect(() => { if (node?.loaded && node.data) void actions.fetchBandcamp(node.id, node.data.name || node.name); }, [actions, node?.data, node?.id, node?.loaded, node?.name]);
+  useEffect(() => { if (node?.type !== 'genreYear' && node?.loaded && node.data) void actions.fetchBandcamp(node.id, node.data.name || node.name); }, [actions, node?.data, node?.id, node?.loaded, node?.name, node?.type]);
+
+  if (node?.type === 'genreYear') {
+    return <GenreYearResults node={node} state={state} actions={actions} />;
+  }
 
   if (!node) {
     return (

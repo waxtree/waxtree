@@ -1,4 +1,4 @@
-import { FolderInput, Hash, Pin, X } from 'lucide-react';
+import { FolderInput, Hash, Pin, Tags, X } from 'lucide-react';
 import { useState } from 'react';
 import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
@@ -53,7 +53,7 @@ export const SidebarNode = ({ node, depth, state, actions }) => {
         className={`group relative flex cursor-pointer items-start gap-1.5 border-l-2 py-[7px] pr-2.5 ${node.justAdded ? 'animate-pulse border-primary bg-primary/20' : active ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'} ${dropZone === 'inside' ? 'outline-2 outline-dashed -outline-offset-2 outline-primary' : ''}`}
       >
         {(dropZone === 'before' || dropZone === 'after') && <span className={`absolute inset-x-0 h-0.5 bg-primary ${dropZone === 'before' ? 'top-0' : 'bottom-0'}`} />}
-        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/70">{node.type === 'label' ? <LabelIcon className="size-3.5" /> : <ArtistIcon className="size-3.5" />}</span>
+        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground/70">{node.type === 'label' ? <LabelIcon className="size-3.5" /> : node.type === 'genreYear' ? <Tags className="size-3.5" /> : <ArtistIcon className="size-3.5" />}</span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
             {node.pinned && <span className="size-1.5 rounded-full bg-primary" />}

@@ -1455,6 +1455,12 @@ const st={
   // happened to already be resolved in memory.
   likedTracks:saved?.likedTracks||{},
   q:'',results:[],loading:false,err:'',
+  // Explore-by-genre/year — a second search mode alongside the default
+  // artist/label/track text search, toggled from the same "Explore"
+  // control (see Search.jsx). Transient/session-only, same treatment as
+  // the plain text search's own q/results/loading/err above.
+  exploreMode:'search', // 'search' | 'genreYear' — which input the search bar itself shows
+  exploreStyles:[],exploreYears:[],
   bioOpen:{},renameId:null,renameVal:'',tagNodeId:null,tagVal:'',
   filterOpen:false,filterTitle:'',filterFormat:'all',filterSort:'default',filterGenres:[],
   sbPinFirst:saved?.sbPinFirst||false,sbFilterTag:'',
@@ -1544,6 +1550,21 @@ function paint(){
 
 function getPlaylistTracks(){
   const node=getNode(st.selectedId);
+  // A genreYear node's own data.tracks doesn't exist — data.results is
+  // release SUMMARIES, not tracks, so prev/next has to look elsewhere:
+  // the currently-playing track's OWN release, already sitting in
+  // genreYearReleaseCache from rendering its card. Confirmed live: without
+  // this, prev/next silently did nothing for anything played from a
+  // genre/year results page, since the lookup below always came up empty.
+  if(node?.type==='genreYear'){
+    const trackId=st.nowPlaying?.trackId;
+    if(!trackId)return[];
+    for(const releaseId in genreYearReleaseCache){
+      const tracks=genreYearReleaseCache[releaseId]?.tracks;
+      if(tracks?.some(t=>t.id===trackId))return tracks;
+    }
+    return[];
+  }
   if(!node?.data?.tracks?.length)return[];
   return applyFilters(node.data.tracks);
 }
@@ -2998,10 +3019,21 @@ let rqSharedN=0,rqSharedW=Date.now();
 // unpaced traffic — node exploration AND remix resolution, marked via
 // opts.background — still goes through the pre-emptive counter, since
 // that's the traffic that can actually fire faster than any human could.
+//
+// opts.foreground is the same escape hatch for a non-search path that's
+// STILL a bounded, human-triggered action rather than open-ended
+// automated traffic — e.g. fetchGenreYearReleaseDetails fetching one page
+// (max 15) of release detail right after the user opened or paged
+// through search results. Without it every non-search path defaults to
+// paced (right for fetchArtistData/fetchLabelData's own much larger,
+// automated per-release fetches), which meant just opening the results
+// page could queue for up to 62s behind unrelated exploration traffic —
+// confirmed live as "a long time before any card shows up" despite each
+// individual Discogs call taking well under a second on its own.
 async function dReqRaw(path,p={},_retry=0,opts={}){
   const tok=getToken();
   if(!tok){
-    const isPaced=path!=='/database/search'||opts.background;
+    const isPaced=opts.foreground?false:(path!=='/database/search'||opts.background);
     if(isPaced){
       const now=Date.now();
       if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
@@ -3083,6 +3115,104 @@ async function searchDiscogs(q,{background=false}={}){
       :{id:r.id,type:r.type,title:r.title,thumb:r.thumb,uri:r.uri}
   );
   lsSet('s:'+q,r);return r;
+}
+
+// ── Explore by genre/year ──────────────────────────────────
+// Scoped to Electronic's own sub-genres (Discogs "style") for now — that's
+// the digging focus here, not a general-purpose genre browser. Genre
+// itself is fixed to 'Electronic' rather than user-selectable; styles are
+// its well-known Discogs facet values.
+const EXPLORE_STYLES=['Acid','Acid House','Acid Techno','Ambient','Bassline','Big Beat','Breakbeat','Breakcore','Breaks','Chiptune','Deep House','Disco','Downtempo','Drone','Drum n Bass','Dub','Dub Techno','Dubstep','EBM','Electro','Electro House','Electroclash','Euro House','Eurodance','Footwork','Future Jazz','Gabber','Garage House','Ghetto House','Goa Trance','Grime','Hard House','Hard Techno','Hard Trance','Hardcore','Hardstyle','Hi NRG','House','IDM','Industrial','Italo-Disco','Italo House','Jungle','Leftfield','Minimal','Minimal Techno','New Beat','New Wave','Noise','Nu-Disco','Power Electronics','Progressive House','Progressive Trance','Psy-Trance','Speed Garage','Synth-pop','Tech House','Tech Trance','Techno','Trance','Tribal','Trip Hop','UK Garage','Vaporwave'];
+// Discogs' search API accepts a comma-joined `style` value as a real
+// server-side AND, not just one style per request — confirmed live: item
+// counts of 4900 for "Deep House" alone, 2486 for "Dub" alone, and only
+// 163 for "Deep House,Dub" combined can only be an intersection, not a
+// union (a first attempt queried once per style and intersected the
+// results client-side against each response's top 50 — statistically
+// unreliable, since a release tagged with BOTH styles has no guarantee of
+// landing in either style's own top 50 out of thousands of matches, and
+// in practice usually didn't — confirmed live as "no results" for
+// combinations that genuinely exist). Styles no longer multiply the
+// request count at all now — one request per YEAR selected (years stay
+// OR: a release only ever has one, so AND across years would always be
+// empty), still awaited sequentially (real wall-clock pacing between
+// requests) and deliberately NOT routed through dReqRaw's
+// background-traffic counter, for the same reason the plain text search
+// bar isn't: a human-submitted search shouldn't queue behind unrelated
+// exploration traffic and risk blowing the local 7s-per-request ceiling.
+const GENRE_YEAR_MAX_COMBOS=9; // caps years selected, not styles×years — styles are free
+function toggleExploreStyle(style){
+  st.exploreStyles=st.exploreStyles.includes(style)?st.exploreStyles.filter(s=>s!==style):[...st.exploreStyles,style];
+  rr();
+}
+function addExploreYear(year){
+  const y=parseInt(year,10);
+  if(!y||y<1900||y>new Date().getFullYear()+1||st.exploreYears.includes(y))return;
+  if(st.exploreYears.length>=GENRE_YEAR_MAX_COMBOS)return;
+  st.exploreYears=[...st.exploreYears,y];rr();
+}
+function removeExploreYear(year){st.exploreYears=st.exploreYears.filter(y=>y!==year);rr();}
+// A genre/year search becomes a node, same as any other exploration —
+// persists in the tree (pin/tag/drag/reorder/move-to-branch all already
+// work generically on any node, no special-casing needed), and can be
+// revisited later without re-querying. Mirrors addNode's own shape/flow
+// (foreground, immediately selected, loading state while it fetches).
+function addGenreYearNode(styles,years){
+  const bid=st.activeBranchId;
+  if(!st.isPremium&&st.nodes.filter(n=>n.branchId===bid).length>=FREE_NODE_LIMIT){st.premiumModal=true;rr();return;}
+  const name=[styles.length?styles.join(', '):'Electronic',years.length?years.slice().sort((a,b)=>a-b).join('/'):null].filter(Boolean).join(', ');
+  const id='n'+Date.now();
+  // params kept on the node itself (not just inside .data) so a failed
+  // fetch can still be retried — .data only gets populated on success.
+  const node={id,branchId:bid,type:'genreYear',discogsId:null,name,parentId:null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null,params:{styles,years}};
+  st.nodes=[...st.nodes,node];
+  st.selectedId=id;st.activeBranchId=bid;
+  if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
+  rr();
+  fetchGenreYearResults(id,styles,years);
+}
+function retryGenreYearNode(nodeId){
+  const n=getNode(nodeId);if(!n||n.type!=='genreYear')return;
+  n.error=null;n.loading=true;rr();
+  fetchGenreYearResults(nodeId,n.params?.styles||[],n.params?.years||[]);
+}
+// Up to 3 pages of 100 per year (Discogs' own per_page ceiling) — 300
+// releases per selected year instead of the original 50 total. Stops
+// early once Discogs' own pagination.pages says there's nothing further
+// for that year, so a narrow combination doesn't waste requests paging
+// past its real result count.
+const GENRE_YEAR_PAGES_PER_YEAR=3;
+const GENRE_YEAR_RESULTS_CAP=300;
+async function fetchGenreYearResults(nodeId,styles,years){
+  const yearsList=years.length?years:[null];
+  const seen=new Map();
+  let anySucceeded=false;
+  yearLoop: for(const year of yearsList.slice(0,GENRE_YEAR_MAX_COMBOS)){
+    for(let page=1;page<=GENRE_YEAR_PAGES_PER_YEAR;page++){
+      const params={type:'release',per_page:'100',page:String(page),genre:'Electronic'};
+      if(styles.length)params.style=styles.join(',');
+      if(year)params.year=String(year);
+      try{
+        const data=await Promise.race([
+          dReq('/database/search',params),
+          new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('timeout')),7000)),
+        ]);
+        anySucceeded=true;
+        (data.results||[]).forEach(r=>{
+          if(seen.has(r.id))return;
+          const releaseStyles=r.style||[];
+          seen.set(r.id,{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null,genre:releaseStyles[0]||(r.genre||[])[0]||null,styles:releaseStyles,country:r.country||null,format:(r.format||[]).join(', ')});
+        });
+        if(seen.size>=GENRE_YEAR_RESULTS_CAP)break yearLoop;
+        if(page>=(data.pagination?.pages||1))break; // this year has no more pages — move to the next year
+      }catch{break;/* this year failed — move to the next rather than retrying pages of a dead request */}
+    }
+  }
+  const n=getNode(nodeId);if(!n)return;
+  n.loading=false;
+  if(!anySucceeded)n.error='Search failed — try again';
+  else{n.data={styles,years,results:[...seen.values()].sort((a,b)=>(b.year||0)-(a.year||0))};n.loaded=true;}
+  rr();
 }
 
 // ── Remix-artist resolution ────────────────────────────────
@@ -4228,6 +4358,43 @@ function registerRelatedTrack(card){
   discoveredTracks[card.playId]={id:card.playId,videoId:card.videoId,title:card.title,trackArtistName:card.artist,thumbUrl:card.thumbUrl,duration:null,resolved:card.resolved,discogsUrl:card.discogsUrl,cosineId:card.cosineId};
 }
 function playRelated(card){registerRelatedTrack(card);doPlay(card.playId,card.videoId,card.title,card.artist);}
+// GenreYearResults renders real ReleaseCard/TrackRow rows — same as any
+// artist/label page — instead of a lightweight custom card, so every
+// track gets its own working play button (correctly colored once a video
+// resolves) for free, no bespoke play logic needed here. But a bare
+// search result only ever has release-level summary fields (no
+// tracklist), so this fetches each release's real detail first, same as
+// fetchArtistData/fetchLabelData already do per release, and reuses
+// buildTrackEntries' own parsing rather than re-deriving it. Session-only
+// cache (not persisted), same treatment as bcCacheMap.
+let genreYearReleaseCache={}; // releaseId → {tracks,loading,err}
+async function fetchGenreYearReleaseDetails(releaseIds){
+  const toFetch=releaseIds.filter(id=>!genreYearReleaseCache[id]);
+  if(!toFetch.length)return;
+  toFetch.forEach(id=>{genreYearReleaseCache[id]={tracks:[],loading:true,err:null};});
+  rr();
+  // Same FETCH_BATCH concurrency fetchArtistData already uses for its own
+  // per-release fetches, but marked foreground: this is capped tightly
+  // (max PAGE_SIZE=15 per page, never an open-ended discography walk) and
+  // fires only in direct response to the human opening/paging results —
+  // confirmed live that leaving it on the default paced path made simply
+  // opening the results page queue for up to 62s behind unrelated
+  // exploration traffic despite each Discogs call taking well under a
+  // second on its own.
+  for(let i=0;i<toFetch.length;i+=FETCH_BATCH){
+    const batch=toFetch.slice(i,i+FETCH_BATCH);
+    await Promise.all(batch.map(async id=>{
+      try{
+        const rd=await dReq('/releases/'+id,{},{foreground:true});
+        genreYearReleaseCache[id]={tracks:buildTrackEntries(rd,id,`https://www.discogs.com/release/${id}`,rd.year,null,''),loading:false,err:null};
+      }catch(e){
+        genreYearReleaseCache[id]={tracks:[],loading:false,err:e.message};
+      }
+    }));
+    rr();
+  }
+}
+function getGenreYearReleaseDetail(releaseId){return genreYearReleaseCache[releaseId]||null;}
 function getTrackVideo(track,artistName,nodeName){
   if(track.videoId)return track.videoId;
   if(track.id in ytMatches)return ytMatches[track.id]||null;
@@ -4248,14 +4415,16 @@ function getExploreTargets(trackId,artistName){
 }
 
 export const waxTreeActions={
-  addBranch,addNode,addTag,ancestry,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
+  addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
-  liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,
-  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryNode,scanFollowsForNewReleases,
-  resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleFollow,toggleLike,togglePin,uploadAvatar,
+  liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
+  fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
+  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
+  resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
   baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
+  exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,
 };
