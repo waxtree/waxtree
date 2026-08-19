@@ -3097,30 +3097,32 @@ async function searchDiscogs(q,{background=false}={}){
 // itself is fixed to 'Electronic' rather than user-selectable; styles are
 // its well-known Discogs facet values.
 const EXPLORE_STYLES=['Acid','Acid House','Acid Techno','Ambient','Bassline','Big Beat','Breakbeat','Breakcore','Breaks','Chiptune','Deep House','Disco','Downtempo','Drone','Drum n Bass','Dub','Dub Techno','Dubstep','EBM','Electro','Electro House','Electroclash','Euro House','Eurodance','Footwork','Future Jazz','Gabber','Garage House','Ghetto House','Goa Trance','Grime','Hard House','Hard Techno','Hard Trance','Hardcore','Hardstyle','Hi NRG','House','IDM','Industrial','Italo-Disco','Italo House','Jungle','Leftfield','Minimal','Minimal Techno','New Beat','New Wave','Noise','Nu-Disco','Power Electronics','Progressive House','Progressive Trance','Psy-Trance','Speed Garage','Synth-pop','Tech House','Tech Trance','Techno','Trance','Tribal','Trip Hop','UK Garage','Vaporwave'];
-// Discogs' search API takes one style and one year per request — true
-// multi-select means one request per (style × year) combination, merged
-// after. Capped so a broad selection can't fire an oversized burst on a
-// single submit. Each combo is awaited sequentially (not fired
-// concurrently), which already paces them by real wall-clock time between
-// requests — deliberately NOT routed through dReqRaw's background-traffic
-// counter: that counter is for genuinely unpaced code (a batch iterating
-// with zero delay), and wrongly classifying a human-submitted search as
-// "background" meant it could queue behind unrelated exploration traffic
-// and blow the local 7s-per-request ceiling — confirmed live as a search
-// that simply errored out despite the same query working fine directly
-// against Discogs. Same fix, same reasoning as the plain text search bar's
-// own throttle removal.
-const GENRE_YEAR_MAX_COMBOS=9;
+// Discogs' search API accepts a comma-joined `style` value as a real
+// server-side AND, not just one style per request — confirmed live: item
+// counts of 4900 for "Deep House" alone, 2486 for "Dub" alone, and only
+// 163 for "Deep House,Dub" combined can only be an intersection, not a
+// union (a first attempt queried once per style and intersected the
+// results client-side against each response's top 50 — statistically
+// unreliable, since a release tagged with BOTH styles has no guarantee of
+// landing in either style's own top 50 out of thousands of matches, and
+// in practice usually didn't — confirmed live as "no results" for
+// combinations that genuinely exist). Styles no longer multiply the
+// request count at all now — one request per YEAR selected (years stay
+// OR: a release only ever has one, so AND across years would always be
+// empty), still awaited sequentially (real wall-clock pacing between
+// requests) and deliberately NOT routed through dReqRaw's
+// background-traffic counter, for the same reason the plain text search
+// bar isn't: a human-submitted search shouldn't queue behind unrelated
+// exploration traffic and risk blowing the local 7s-per-request ceiling.
+const GENRE_YEAR_MAX_COMBOS=9; // caps years selected, not styles×years — styles are free
 function toggleExploreStyle(style){
-  const removing=st.exploreStyles.includes(style);
-  const next=removing?st.exploreStyles.filter(s=>s!==style):[...st.exploreStyles,style];
-  if(!removing&&next.length*Math.max(st.exploreYears.length,1)>GENRE_YEAR_MAX_COMBOS)return;
-  st.exploreStyles=next;rr();
+  st.exploreStyles=st.exploreStyles.includes(style)?st.exploreStyles.filter(s=>s!==style):[...st.exploreStyles,style];
+  rr();
 }
 function addExploreYear(year){
   const y=parseInt(year,10);
   if(!y||y<1900||y>new Date().getFullYear()+1||st.exploreYears.includes(y))return;
-  if(Math.max(st.exploreStyles.length,1)*(st.exploreYears.length+1)>GENRE_YEAR_MAX_COMBOS)return;
+  if(st.exploreYears.length>=GENRE_YEAR_MAX_COMBOS)return;
   st.exploreYears=[...st.exploreYears,y];rr();
 }
 function removeExploreYear(year){st.exploreYears=st.exploreYears.filter(y=>y!==year);rr();}
@@ -3149,27 +3151,13 @@ function retryGenreYearNode(nodeId){
   fetchGenreYearResults(nodeId,n.params?.styles||[],n.params?.years||[]);
 }
 async function fetchGenreYearResults(nodeId,styles,years){
-  const stylesList=styles.length?styles:[null];
   const yearsList=years.length?years:[null];
-  // Years stay OR ("any of these years" — a release can only ever have
-  // one anyway, so AND across years would just always be empty). Styles
-  // are AND: each combo still only filters Discogs by ONE style at a
-  // time (its search API doesn't take multiple), but every release it
-  // returns comes back with its own full style tag list — so when more
-  // than one style is selected, a result only survives if ITS OWN style
-  // list is a superset of every style picked, not just the one that
-  // happened to be this particular combo's filter. Querying once per
-  // selected style (rather than just one) still matters even under AND:
-  // it's the only way to find a release whose PRIMARY match is a style
-  // other than whichever one a single query would have picked.
-  const combos=[];
-  stylesList.forEach(style=>yearsList.forEach(year=>combos.push({style,year})));
   const seen=new Map();
   let anySucceeded=false;
-  for(const combo of combos.slice(0,GENRE_YEAR_MAX_COMBOS)){
+  for(const year of yearsList.slice(0,GENRE_YEAR_MAX_COMBOS)){
     const params={type:'release',per_page:'50',genre:'Electronic'};
-    if(combo.style)params.style=combo.style;
-    if(combo.year)params.year=String(combo.year);
+    if(styles.length)params.style=styles.join(',');
+    if(year)params.year=String(year);
     try{
       const data=await Promise.race([
         dReq('/database/search',params),
@@ -3179,10 +3167,9 @@ async function fetchGenreYearResults(nodeId,styles,years){
       (data.results||[]).forEach(r=>{
         if(seen.has(r.id))return;
         const releaseStyles=r.style||[];
-        if(styles.length>1&&!styles.every(s=>releaseStyles.includes(s)))return;
         seen.set(r.id,{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null,genre:releaseStyles[0]||(r.genre||[])[0]||null,styles:releaseStyles,country:r.country||null,format:(r.format||[]).join(', ')});
       });
-    }catch{/* one combo failing shouldn't sink the whole search — the rest still run */}
+    }catch{/* one year failing shouldn't sink the whole search — the rest still run */}
   }
   const n=getNode(nodeId);if(!n)return;
   n.loading=false;

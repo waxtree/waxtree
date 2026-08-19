@@ -7,13 +7,11 @@ export const GenreYearPicker = ({ state, actions }) => {
   const [yearInput, setYearInput] = useState('');
   const styles = state.exploreStyles;
   const years = state.exploreYears;
-  // Mirrors toggleExploreStyle/addExploreYear's own block condition exactly
-  // (one more of this dimension vs. the OTHER dimension's current count,
-  // floored at 1 for "no filter on that axis yet") — so the control
-  // disables at the same instant the action would actually be rejected,
-  // not a step early or late.
-  const atStyleCap = (styles.length + 1) * Math.max(years.length, 1) > actions.exploreGenreYearMaxCombos;
-  const atYearCap = Math.max(styles.length, 1) * (years.length + 1) > actions.exploreGenreYearMaxCombos;
+  // Styles are folded into a single comma-joined param (see
+  // fetchGenreYearResults) — free to select as many as you like, no cap.
+  // Only years actually multiply the request count (one per year), so
+  // that's the only dimension with a limit.
+  const atYearCap = years.length >= actions.exploreGenreYearMaxCombos;
   const summary = [styles.length && `${styles.length} style${styles.length > 1 ? 's' : ''}`, years.length && `${years.length} year${years.length > 1 ? 's' : ''}`].filter(Boolean).join(', ');
   const addYear = () => {
     if (yearInput.trim()) actions.addExploreYear(yearInput.trim());
@@ -46,11 +44,10 @@ export const GenreYearPicker = ({ state, actions }) => {
             <span className="mb-1.5 block text-[10px] font-bold uppercase text-muted-foreground/70">Style</span>
             <select
               value=""
-              disabled={atStyleCap}
               onChange={event => { if (event.target.value) actions.toggleExploreStyle(event.target.value); }}
-              className="w-full rounded-full border border-border bg-secondary px-2.5 py-1 text-[12px] outline-none disabled:opacity-50"
+              className="w-full rounded-full border border-border bg-secondary px-2.5 py-1 text-[12px] outline-none"
             >
-              <option value="">{atStyleCap ? 'Combination limit reached' : 'Add a style…'}</option>
+              <option value="">Add a style…</option>
               {actions.exploreStyles.filter(style => !styles.includes(style)).map(style => <option key={style} value={style}>{style}</option>)}
             </select>
             {styles.length > 0 && (
