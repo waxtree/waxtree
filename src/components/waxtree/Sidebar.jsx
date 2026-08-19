@@ -9,13 +9,17 @@ export const Sidebar = ({ state, actions }) => {
   const children = parentId => filtered.filter(node => node.parentId === parentId).sort((a, b) => state.sbPinFirst ? Number(b.pinned) - Number(a.pinned) : 0);
 
   let shownNodes = 0;
+  // Children render before (above) their own parent, which renders last
+  // (at the bottom of its own block) — a parent is inherently "older" than
+  // anything explored from it, same reasoning as the newest-node-on-top
+  // sibling order, just applied to the parent/child axis too.
   const renderNodes = (parentId = null, depth = 0) => {
     const output = [];
     children(parentId).forEach(node => {
       if (!state.isPremium && shownNodes >= actions.freeNodeLimit) return;
       shownNodes += 1;
-      output.push(<SidebarNode key={node.id} node={node} depth={depth} state={state} actions={actions} />);
       output.push(...renderNodes(node.id, depth + 1));
+      output.push(<SidebarNode key={node.id} node={node} depth={depth} state={state} actions={actions} />);
     });
     return output;
   };
