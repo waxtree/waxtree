@@ -1,12 +1,26 @@
 import { ArrowLeft } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StoreButton } from '@/components/waxtree/StoreButton';
 import { TrackRow } from '@/components/waxtree/TrackRow';
 import { buttonSecondary } from '@/lib/waxtreeUi';
 
+const PAGE_SIZE = 20;
+
 export const BandcampOnlyResults = ({ node, isLabel, state, actions }) => {
   const bcOnly = actions.getBandcampOnly(node.id);
   const [openPlaylist, setOpenPlaylist] = useState(null);
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(bcOnly.releases.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  // Every visible row auto-resolves a YouTube video on mount (TrackRow's
+  // own effect, same as everywhere else in the app) — a prolific artist's
+  // self-released catalog can put 50-70+ releases in this list, and
+  // showing them all at once would fire that many YouTube searches in one
+  // shot. Paginating keeps only the visible page's rows mounted, same
+  // reasoning as NodeDetails' own 50-per-page track list.
+  const pageReleases = bcOnly.releases.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
+  useEffect(() => { setPage(0); }, [node.id]);
 
   return (
     <div className="mt-3">
@@ -25,7 +39,7 @@ export const BandcampOnlyResults = ({ node, isLabel, state, actions }) => {
         <div className="py-8 text-center text-xs text-muted-foreground/70">Nothing found — every Bandcamp release matched something already on Discogs.</div>
       )}
       <div className="flex flex-col gap-[6px]">
-        {bcOnly.releases.map(track => (
+        {pageReleases.map(track => (
           <div key={track.id} className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-[14px] py-[10px]">
             <div className="min-w-0 flex-1">
               <TrackRow
@@ -43,6 +57,13 @@ export const BandcampOnlyResults = ({ node, isLabel, state, actions }) => {
           </div>
         ))}
       </div>
+      {totalPages > 1 && (
+        <div className="mt-5 flex items-center justify-center gap-3">
+          <button type="button" disabled={safePage === 0} onClick={() => setPage(value => value - 1)} className={`${buttonSecondary} disabled:opacity-30`}>← Prev</button>
+          <span className="text-xs text-muted-foreground">Page {safePage + 1} / {totalPages}</span>
+          <button type="button" disabled={safePage >= totalPages - 1} onClick={() => setPage(value => value + 1)} className={`${buttonSecondary} disabled:opacity-30`}>Next →</button>
+        </div>
+      )}
     </div>
   );
 };
