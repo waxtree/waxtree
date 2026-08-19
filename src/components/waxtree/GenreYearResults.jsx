@@ -19,10 +19,11 @@ export const GenreYearResults = ({ node, actions }) => {
       {node.loaded && !node.loading && !node.error && (
         results.length ? (
           <>
-            <div className="grid grid-cols-2 gap-3 min-[1100px]:grid-cols-3">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground/70">{results.length} release{results.length > 1 ? 's' : ''}</p>
+            <div className="grid grid-cols-1 gap-1.5 min-[900px]:grid-cols-2">
               {results.map(release => <GenreYearResultCard key={release.id} release={release} actions={actions} />)}
             </div>
-            {results.length >= 90 && <p className="mt-4 text-center text-xs text-muted-foreground/70">Showing the first {results.length} matches — narrow your styles/years for more precise results.</p>}
+            {results.length >= 300 && <p className="mt-4 text-center text-xs text-muted-foreground/70">Showing the first {results.length} matches — narrow your styles/years for more precise results.</p>}
           </>
         ) : <div className="py-12 text-center text-sm text-muted-foreground/70">No releases found for that combination.</div>
       )}

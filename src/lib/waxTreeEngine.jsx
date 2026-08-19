@@ -3004,10 +3004,19 @@ let rqSharedN=0,rqSharedW=Date.now();
 // unpaced traffic — node exploration AND remix resolution, marked via
 // opts.background — still goes through the pre-emptive counter, since
 // that's the traffic that can actually fire faster than any human could.
+//
+// opts.foreground is the escape hatch for a non-search path that's ALSO a
+// single human-initiated action rather than automated traffic — e.g. the
+// genre/year results' play button fetching one release's detail. Without
+// it, every non-search path defaults to paced (right for the bulk
+// per-release fetches fetchArtistData/fetchLabelData already do), which
+// meant a single Play click could queue for up to 62s behind unrelated
+// exploration traffic despite the actual Discogs call taking well under a
+// second on its own — confirmed live, same bug class as the search bar's.
 async function dReqRaw(path,p={},_retry=0,opts={}){
   const tok=getToken();
   if(!tok){
-    const isPaced=path!=='/database/search'||opts.background;
+    const isPaced=opts.foreground?false:(path!=='/database/search'||opts.background);
     if(isPaced){
       const now=Date.now();
       if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
@@ -3150,26 +3159,37 @@ function retryGenreYearNode(nodeId){
   n.error=null;n.loading=true;rr();
   fetchGenreYearResults(nodeId,n.params?.styles||[],n.params?.years||[]);
 }
+// Up to 3 pages of 100 per year (Discogs' own per_page ceiling) — 300
+// releases per selected year instead of the original 50 total. Stops
+// early once Discogs' own pagination.pages says there's nothing further
+// for that year, so a narrow combination doesn't waste requests paging
+// past its real result count.
+const GENRE_YEAR_PAGES_PER_YEAR=3;
+const GENRE_YEAR_RESULTS_CAP=300;
 async function fetchGenreYearResults(nodeId,styles,years){
   const yearsList=years.length?years:[null];
   const seen=new Map();
   let anySucceeded=false;
-  for(const year of yearsList.slice(0,GENRE_YEAR_MAX_COMBOS)){
-    const params={type:'release',per_page:'50',genre:'Electronic'};
-    if(styles.length)params.style=styles.join(',');
-    if(year)params.year=String(year);
-    try{
-      const data=await Promise.race([
-        dReq('/database/search',params),
-        new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('timeout')),7000)),
-      ]);
-      anySucceeded=true;
-      (data.results||[]).forEach(r=>{
-        if(seen.has(r.id))return;
-        const releaseStyles=r.style||[];
-        seen.set(r.id,{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null,genre:releaseStyles[0]||(r.genre||[])[0]||null,styles:releaseStyles,country:r.country||null,format:(r.format||[]).join(', ')});
-      });
-    }catch{/* one year failing shouldn't sink the whole search — the rest still run */}
+  yearLoop: for(const year of yearsList.slice(0,GENRE_YEAR_MAX_COMBOS)){
+    for(let page=1;page<=GENRE_YEAR_PAGES_PER_YEAR;page++){
+      const params={type:'release',per_page:'100',page:String(page),genre:'Electronic'};
+      if(styles.length)params.style=styles.join(',');
+      if(year)params.year=String(year);
+      try{
+        const data=await Promise.race([
+          dReq('/database/search',params),
+          new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('timeout')),7000)),
+        ]);
+        anySucceeded=true;
+        (data.results||[]).forEach(r=>{
+          if(seen.has(r.id))return;
+          const releaseStyles=r.style||[];
+          seen.set(r.id,{id:r.id,type:'release',title:r.title,thumb:r.thumb,year:r.year||null,label:(r.label||[])[0]||null,genre:releaseStyles[0]||(r.genre||[])[0]||null,styles:releaseStyles,country:r.country||null,format:(r.format||[]).join(', ')});
+        });
+        if(seen.size>=GENRE_YEAR_RESULTS_CAP)break yearLoop;
+        if(page>=(data.pagination?.pages||1))break; // this year has no more pages — move to the next year
+      }catch{break;/* this year failed — move to the next rather than retrying pages of a dead request */}
+    }
   }
   const n=getNode(nodeId);if(!n)return;
   n.loading=false;
@@ -4331,7 +4351,7 @@ function playRelated(card){registerRelatedTrack(card);doPlay(card.playId,card.vi
 // any node, and doPlay's own no-Discogs-video fallback already resolves
 // a YouTube match on the fly exactly as it does for any other track.
 async function playFirstTrackOfRelease(releaseId){
-  const rd=await dReq('/releases/'+releaseId);
+  const rd=await dReq('/releases/'+releaseId,{},{foreground:true});
   const entries=buildTrackEntries(rd,releaseId,`https://www.discogs.com/release/${releaseId}`,rd.year,null,'');
   const first=entries[0];
   if(!first)throw new Error('No playable track found on this release');
