@@ -1550,6 +1550,21 @@ function paint(){
 
 function getPlaylistTracks(){
   const node=getNode(st.selectedId);
+  // A genreYear node's own data.tracks doesn't exist — data.results is
+  // release SUMMARIES, not tracks, so prev/next has to look elsewhere:
+  // the currently-playing track's OWN release, already sitting in
+  // genreYearReleaseCache from rendering its card. Confirmed live: without
+  // this, prev/next silently did nothing for anything played from a
+  // genre/year results page, since the lookup below always came up empty.
+  if(node?.type==='genreYear'){
+    const trackId=st.nowPlaying?.trackId;
+    if(!trackId)return[];
+    for(const releaseId in genreYearReleaseCache){
+      const tracks=genreYearReleaseCache[releaseId]?.tracks;
+      if(tracks?.some(t=>t.id===trackId))return tracks;
+    }
+    return[];
+  }
   if(!node?.data?.tracks?.length)return[];
   return applyFilters(node.data.tracks);
 }
@@ -3004,10 +3019,21 @@ let rqSharedN=0,rqSharedW=Date.now();
 // unpaced traffic — node exploration AND remix resolution, marked via
 // opts.background — still goes through the pre-emptive counter, since
 // that's the traffic that can actually fire faster than any human could.
+//
+// opts.foreground is the same escape hatch for a non-search path that's
+// STILL a bounded, human-triggered action rather than open-ended
+// automated traffic — e.g. fetchGenreYearReleaseDetails fetching one page
+// (max 15) of release detail right after the user opened or paged
+// through search results. Without it every non-search path defaults to
+// paced (right for fetchArtistData/fetchLabelData's own much larger,
+// automated per-release fetches), which meant just opening the results
+// page could queue for up to 62s behind unrelated exploration traffic —
+// confirmed live as "a long time before any card shows up" despite each
+// individual Discogs call taking well under a second on its own.
 async function dReqRaw(path,p={},_retry=0,opts={}){
   const tok=getToken();
   if(!tok){
-    const isPaced=path!=='/database/search'||opts.background;
+    const isPaced=opts.foreground?false:(path!=='/database/search'||opts.background);
     if(isPaced){
       const now=Date.now();
       if(now-rqSharedW>60000){rqSharedN=0;rqSharedW=now;}
@@ -4348,16 +4374,18 @@ async function fetchGenreYearReleaseDetails(releaseIds){
   toFetch.forEach(id=>{genreYearReleaseCache[id]={tracks:[],loading:true,err:null};});
   rr();
   // Same FETCH_BATCH concurrency fetchArtistData already uses for its own
-  // per-release fetches — deliberately left on the default paced path
-  // (no {foreground:true}) despite being human-triggered (opening/paging
-  // through results): unlike the single-release play button this used to
-  // be, this can fire up to FETCH_BATCH requests at once, which is
-  // exactly the unpaced-burst shape the pacing exists to protect against.
+  // per-release fetches, but marked foreground: this is capped tightly
+  // (max PAGE_SIZE=15 per page, never an open-ended discography walk) and
+  // fires only in direct response to the human opening/paging results —
+  // confirmed live that leaving it on the default paced path made simply
+  // opening the results page queue for up to 62s behind unrelated
+  // exploration traffic despite each Discogs call taking well under a
+  // second on its own.
   for(let i=0;i<toFetch.length;i+=FETCH_BATCH){
     const batch=toFetch.slice(i,i+FETCH_BATCH);
     await Promise.all(batch.map(async id=>{
       try{
-        const rd=await dReq('/releases/'+id);
+        const rd=await dReq('/releases/'+id,{},{foreground:true});
         genreYearReleaseCache[id]={tracks:buildTrackEntries(rd,id,`https://www.discogs.com/release/${id}`,rd.year,null,''),loading:false,err:null};
       }catch(e){
         genreYearReleaseCache[id]={tracks:[],loading:false,err:e.message};
