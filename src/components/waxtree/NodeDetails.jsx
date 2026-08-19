@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { BandcampOnlyResults } from '@/components/waxtree/BandcampOnlyResults';
 import { Filters } from '@/components/waxtree/Filters';
 import { RelatedEntities } from '@/components/waxtree/RelatedEntities';
 import { ReleaseCard } from '@/components/waxtree/ReleaseCard';
@@ -6,6 +7,8 @@ import { ReleaseSection } from '@/components/waxtree/ReleaseSection';
 import { buttonSecondary } from '@/lib/waxtreeUi';
 
 export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage }) => {
+  const bcOnly = actions.getBandcampOnly(node.id);
+  const bandcampOnlyView = !!state.bandcampOnlyView[node.id];
   const filtered = actions.applyFilters(data.tracks || []);
   const hasFilter = state.filterTitle || state.filterFormat !== 'all' || state.filterSort !== 'default' || state.filterGenres.length > 0;
   const notOwned = filtered.filter(track => !actions.inDiscogsCollection(track));
@@ -62,20 +65,41 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
       )}
       {data.tracks?.length > 0 && (
         <>
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground/70">{isLabel ? 'RELEASES' : 'TRACKS'} ({data.trackCount} Discogs, {filtered.length} loaded)</p>
-            <button type="button" onClick={() => actions.mutateState(value => { value.filterOpen = !value.filterOpen; })} className={`rounded-full border px-3 py-1 text-xs ${state.filterOpen || hasFilter ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}>⚙ Filter{hasFilter ? ' •' : ''}</button>
-          </div>
-          {state.filterOpen && <Filters state={state} genres={genres} resultCount={filtered.length} actions={actions} onResetPage={() => setPage(0)} />}
-          <div className="mt-3 flex flex-col gap-[6px]">
-            {visibleGroups.length ? visibleGroups.map(group => <ReleaseCard key={group.key} group={group} node={node} isLabel={isLabel} state={state} actions={actions} />) : <div className="py-8 text-center text-xs text-muted-foreground/70">No tracks match the filters.</div>}
-          </div>
-          {totalPages > 1 && (
-            <div className="mt-5 flex items-center justify-center gap-3">
-              <button type="button" disabled={safePage === 0} onClick={() => setPage(value => value - 1)} className={`${buttonSecondary} disabled:opacity-30`}>← Prev</button>
-              <span className="text-xs text-muted-foreground">Page {safePage + 1} / {totalPages}</span>
-              <button type="button" disabled={safePage >= totalPages - 1} onClick={() => setPage(value => value + 1)} className={`${buttonSecondary} disabled:opacity-30`}>Next →</button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded-full border border-border bg-secondary px-2.5 py-1 text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground">
+                {isLabel ? 'Releases' : 'Tracks'} ({data.trackCount} Discogs, {filtered.length} loaded)
+              </span>
+              {bcOnly.status === 'done' && bcOnly.releases.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => actions.mutateState(value => { value.bandcampOnlyView[node.id] = !value.bandcampOnlyView[node.id]; })}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[.06em] transition-colors ${bandcampOnlyView ? 'border-[#1DA0C3] bg-[rgba(29,160,195,.12)] text-[#1DA0C3]' : 'border-[rgba(29,160,195,.5)] text-[#1DA0C3] hover:bg-[rgba(29,160,195,.12)]'}`}
+                >
+                  Only on Bandcamp ({bcOnly.releases.length})
+                </button>
+              )}
             </div>
+            {!bandcampOnlyView && (
+              <button type="button" onClick={() => actions.mutateState(value => { value.filterOpen = !value.filterOpen; })} className={`rounded-full border px-3 py-1 text-xs ${state.filterOpen || hasFilter ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}>⚙ Filter{hasFilter ? ' •' : ''}</button>
+            )}
+          </div>
+          {bandcampOnlyView ? (
+            <BandcampOnlyResults node={node} isLabel={isLabel} state={state} actions={actions} />
+          ) : (
+            <>
+              {state.filterOpen && <Filters state={state} genres={genres} resultCount={filtered.length} actions={actions} onResetPage={() => setPage(0)} />}
+              <div className="mt-3 flex flex-col gap-[6px]">
+                {visibleGroups.length ? visibleGroups.map(group => <ReleaseCard key={group.key} group={group} node={node} isLabel={isLabel} state={state} actions={actions} />) : <div className="py-8 text-center text-xs text-muted-foreground/70">No tracks match the filters.</div>}
+              </div>
+              {totalPages > 1 && (
+                <div className="mt-5 flex items-center justify-center gap-3">
+                  <button type="button" disabled={safePage === 0} onClick={() => setPage(value => value - 1)} className={`${buttonSecondary} disabled:opacity-30`}>← Prev</button>
+                  <span className="text-xs text-muted-foreground">Page {safePage + 1} / {totalPages}</span>
+                  <button type="button" disabled={safePage >= totalPages - 1} onClick={() => setPage(value => value + 1)} className={`${buttonSecondary} disabled:opacity-30`}>Next →</button>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

@@ -1461,7 +1461,7 @@ const st={
   // the plain text search's own q/results/loading/err above.
   exploreMode:'search', // 'search' | 'genreYear' — which input the search bar itself shows
   exploreStyles:[],exploreYears:[],
-  bioOpen:{},renameId:null,renameVal:'',tagNodeId:null,tagVal:'',
+  bioOpen:{},bandcampOnlyView:{},renameId:null,renameVal:'',tagNodeId:null,tagVal:'',
   filterOpen:false,filterTitle:'',filterFormat:'all',filterSort:'default',filterGenres:[],
   sbPinFirst:saved?.sbPinFirst||false,sbFilterTag:'',
   nowPlaying:null,
@@ -1532,6 +1532,7 @@ document.documentElement.classList.toggle('dark',st.theme==='dark');
 // ── UI transient state (not persisted) ─────────────────────
 let tracksPageMap={};  // nodeId → page index (0-based)
 let bcCacheMap={};     // nodeId → {tracks,loading,err}
+let bcOnlyCacheMap={}; // nodeId → {status:'loading'|'unresolved'|'done'|'error',releases,err}
 
 // ── Render ─────────────────────────────────────────────────
 let pending=false,storeVersion=0,engineReady=false;
@@ -3657,6 +3658,42 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
   return nd;
 }
 
+// Full, un-capped release-title listing for one artist/label — separate
+// from fetchArtistData/fetchLabelData's own release fetch above, which
+// stops once it's pulled 200 TRACKS worth of full per-release detail and
+// only ever requests the first page (100 items) of the lightweight
+// release list to begin with. A prolific artist's real Discogs catalog is
+// routinely bigger than that on both counts, and the Bandcamp-only
+// cross-check below comparing against an incomplete title list would turn
+// "not loaded yet" into a false "only on Bandcamp" — exactly the failure
+// mode that check exists to avoid. This only needs title/artist per
+// release, no per-track detail, so it's cheap: same lightweight list
+// endpoint fetchArtistData/fetchLabelData already use, just paginated all
+// the way through instead of stopping at page 1.
+let discogsFullReleasesCache={}; // "type:id" → releases[]
+const BC_ONLY_MAX_PAGES=10; // safety ceiling (1000 releases) — not a real-world expectation
+async function fetchAllDiscogsReleaseTitles(type,discogsId){
+  const cacheKey=type+':'+discogsId;
+  if(discogsFullReleasesCache[cacheKey])return discogsFullReleasesCache[cacheKey];
+  const base=type==='label'?'/labels/':'/artists/';
+  let page=1,all=[];
+  while(page<=BC_ONLY_MAX_PAGES){
+    const relData=await dReq(base+discogsId+'/releases',{per_page:'100',page:String(page),sort:'year',sort_order:'desc'});
+    all.push(...relData.releases);
+    if(page>=(relData.pagination?.pages||1))break;
+    page+=1;
+  }
+  if(type==='artist'){
+    // Same "prefer Main-role credits" filter fetchArtistData applies —
+    // otherwise a remix/compilation-appearance credit with a differently
+    // worded title reads as "missing" noise on this artist's own check.
+    const mainRels=all.filter(r=>r.role==='Main');
+    all=mainRels.length>0?mainRels:all;
+  }
+  discogsFullReleasesCache[cacheKey]=all;
+  return all;
+}
+
 // ── Actions ────────────────────────────────────────────────
 function getNode(id){return st.nodes.find(n=>n.id===id);}
 function getBranch(id){return st.branches.find(b=>b.id===id);}
@@ -3672,6 +3709,110 @@ async function fetchBandcamp(nodeId,artistName){
     bcCacheMap[nodeId]={tracks:data?.tracks||[],loading:false,err:null};
   }catch(e){
     bcCacheMap[nodeId]={tracks:[],loading:false,err:e.message};
+  }
+  rr();
+}
+
+// Deliberately more permissive than findBcMatch's own 0.5 threshold above
+// (which picks ONE specific link to open — a wrong pick there is a bad
+// button click). Here a false "no match" is what creates a false
+// positive ("only on Bandcamp" for a release that's really just worded
+// differently between the two sites — "EP" suffix, remix credit, etc.),
+// so this errs toward finding a match rather than toward precision.
+// normalizeStr already strips exactly that kind of noise (ep/lp/remix/
+// feat/original mix — see its own definition), so both sides are compared
+// post-strip.
+const ROMAN_NUMERAL_VALUE={i:1,ii:2,iii:3,iv:4,v:5,vi:6,vii:7,viii:8,ix:9,x:10,xi:11,xii:12,xiii:13,xiv:14,xv:15};
+// A trailing arabic or roman numeral ("Part III" / "Vol 4") is very often
+// the ONLY thing distinguishing two entries in a series — word-overlap
+// scoring alone treats "the other side part iv" and "the other side part
+// iii" as an 80% match (4 of 5 words in common) and would silently
+// collapse two genuinely different releases into "already on Discogs".
+// Confirmed with a real Bandcamp label catalog before this guard existed.
+function trailingSeriesNumber(words){
+  const last=words[words.length-1];
+  if(/^\d+$/.test(last))return Number(last);
+  return ROMAN_NUMERAL_VALUE[last]??null;
+}
+function bcOnlyMatches(a,b){
+  if(!a||!b)return false;
+  if(a===b)return true;
+  const aw=a.split(' ').filter(w=>w.length>0),bw=b.split(' ').filter(w=>w.length>0);
+  const an=trailingSeriesNumber(aw),bn=trailingSeriesNumber(bw);
+  if(an!==null&&bn!==null&&an!==bn)return false; // "Part III" vs "Part IV" — never the same release
+  if(a.includes(b)||b.includes(a)){
+    const ratio=Math.min(a.length,b.length)/Math.max(a.length,b.length);
+    if(ratio>=0.4)return true;
+  }
+  const awLong=aw.filter(w=>w.length>1),bwLong=bw.filter(w=>w.length>1);
+  if(!awLong.length||!bwLong.length)return false;
+  return awLong.filter(w=>bwLong.includes(w)).length/Math.max(awLong.length,bwLong.length)>=0.4;
+}
+function bcOnlyArtistMatches(bcArtistRaw,discogsArtistNorm){
+  if(!discogsArtistNorm)return false;
+  const bcNames=(bcArtistRaw||'').split(',').map(s=>normalizeStr(stripDiscogsSuffix(s.trim()))).filter(Boolean);
+  return bcNames.some(name=>bcOnlyMatches(name,discogsArtistNorm));
+}
+
+function getBandcampOnly(nodeId){return bcOnlyCacheMap[nodeId]||{status:'idle',releases:[]};}
+
+// Cross-checks an artist/label's real Bandcamp discography (bc-discography,
+// the full catalog — unlike bcCacheMap above, which only ever holds the
+// single verified "home page" hit) against their COMPLETE Discogs release
+// titles (fetchAllDiscogsReleaseTitles, not the capped list
+// fetchArtistData/fetchLabelData load for the track view) to surface
+// releases that exist on Bandcamp but have no corresponding Discogs
+// listing at all — an independent artist's Bandcamp-only self-release,
+// the common real case. Title (and, on a label node, artist credit)
+// matching is heuristic (see bcOnlyMatches) — this can under-flag (a
+// genuinely Bandcamp-only release worded close enough to something on
+// Discogs gets silently excluded) but is tuned to avoid over-flagging,
+// since a false "only on Bandcamp" is the more misleading failure for
+// someone digging for what's actually missing.
+async function fetchBandcampOnly(nodeId){
+  if(bcOnlyCacheMap[nodeId])return;
+  const node=getNode(nodeId);
+  if(!node||(node.type!=='artist'&&node.type!=='label'))return;
+  bcOnlyCacheMap[nodeId]={status:'loading',releases:[]};
+  rr();
+  try{
+    const isLabelNode=node.type==='label';
+    const name=node.data?.name||node.name;
+    const body=isLabelNode?{label:name}:{artist:name};
+    const[{data:bcData,error:bcErr},discogsReleases]=await Promise.all([
+      sb.functions.invoke('bc-discography',{body}),
+      fetchAllDiscogsReleaseTitles(node.type,node.discogsId)
+    ]);
+    if(bcErr)throw new Error(bcErr.message);
+    if(!bcData?.resolved){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
+    const discogsEntries=discogsReleases.map(r=>({
+      title:normalizeStr(r.title||''),
+      artist:isLabelNode?normalizeStr(stripDiscogsSuffix(r.artist||'')):null,
+    }));
+    const onlyOnBc=(bcData.releases||[]).filter(bcRel=>{
+      const bcTitle=normalizeStr(bcRel.title||'');
+      return !discogsEntries.some(d=>{
+        if(!bcOnlyMatches(bcTitle,d.title))return false;
+        return isLabelNode?bcOnlyArtistMatches(bcRel.artist,d.artist):true;
+      });
+    });
+    const releases=onlyOnBc.map(bcRel=>{
+      const id='bconly:'+node.id+':'+bcRel.url;
+      const creditedArtist=isLabelNode?(bcRel.artist||'').split(',')[0].trim()||null:null;
+      const track={
+        id,title:bcRel.title,album:bcRel.title,
+        trackArtistName:isLabelNode?null:name,
+        releaseArtistName:isLabelNode?null:name,
+        label:isLabelNode?creditedArtist:null,
+        videoId:null,duration:null,year:null,genre:null,
+        bcUrl:bcRel.url,
+      };
+      discoveredTracks[id]=track; // so play/like/queue resolve it, same pattern Related Tracks uses
+      return track;
+    });
+    bcOnlyCacheMap[nodeId]={status:'done',releases};
+  }catch(e){
+    bcOnlyCacheMap[nodeId]={status:'error',releases:[],err:e.message};
   }
   rr();
 }
@@ -4435,6 +4576,7 @@ function getExploreTargets(trackId,artistName){
 
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
+  fetchBandcampOnly,getBandcampOnly,
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
