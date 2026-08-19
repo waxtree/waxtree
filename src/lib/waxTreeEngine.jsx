@@ -3683,13 +3683,17 @@ async function fetchAllDiscogsReleaseTitles(type,discogsId){
     if(page>=(relData.pagination?.pages||1))break;
     page+=1;
   }
-  if(type==='artist'){
-    // Same "prefer Main-role credits" filter fetchArtistData applies —
-    // otherwise a remix/compilation-appearance credit with a differently
-    // worded title reads as "missing" noise on this artist's own check.
-    const mainRels=all.filter(r=>r.role==='Main');
-    all=mainRels.length>0?mainRels:all;
-  }
+  // Deliberately NOT filtered to role==='Main' the way fetchArtistData
+  // filters its own (much smaller, display-only) release list — that
+  // filter exists there to keep a prolific remixer's track list from
+  // drowning in one-off remix/compilation credits, but here it would
+  // throw away real Discogs coverage the cross-check depends on. Confirmed
+  // live against Malin Genie's real catalog (112 releases): Main-role
+  // alone was only 36 of them — the other 76 are TrackAppearance/Remix/
+  // Producer/Appearance credits, all real Discogs listings — filtering
+  // them out here manufactured 70+ false "only on Bandcamp" positives for
+  // releases that were on Discogs the whole time, just under a different
+  // role.
   discogsFullReleasesCache[cacheKey]=all;
   return all;
 }

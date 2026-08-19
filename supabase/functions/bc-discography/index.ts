@@ -53,6 +53,75 @@ function verifyHit(hit: BcHit, wantNames: string[]): boolean {
   return wantNames.some((w) => w && (bandN.includes(w) || w.includes(bandN)));
 }
 
+function isBcArtistUrl(url: string) {
+  return url.includes('.bandcamp.com');
+}
+
+// Bandcamp album/track pages consistently title themselves
+// "{Release/Track Title} | {Artist} | {Label}" and a band's own /music or
+// root page titles itself "{Band Name} | {Band Name}" or similar — a
+// single page fetch is enough to verify a candidate URL against the
+// wanted name before trusting it. Same approach as bc-search's own
+// verifyPageTitle, duplicated for the same reason as bcAutocomplete above.
+async function verifyPageTitle(url: string, wantNames: string[]): Promise<boolean> {
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html' } });
+    if (!res.ok) return false;
+    const html = await res.text();
+    const m = html.match(/<title>([^<]*)<\/title>/i);
+    if (!m) return false;
+    const pageTitleN = norm(m[1]);
+    return wantNames.some((w) => w && pageTitleN.includes(w));
+  } catch {
+    return false;
+  }
+}
+
+// Google search via Serper.dev — same fallback bc-search relies on for
+// names bcAutocomplete's own search index doesn't surface a hit for
+// (confirmed live 2026-08-19: "Malin Genie" resolves via bc-search's
+// artist button, which reaches this same fallback tier, but bcAutocomplete
+// alone comes back empty for it).
+async function googleSearch(q: string, serperKey: string): Promise<string | null> {
+  try {
+    const res = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'X-API-KEY': serperKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ q, num: 10, hl: 'en' }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const organic: Array<{ link?: string }> = data?.organic || [];
+    for (const r of organic) {
+      if (r.link && isBcArtistUrl(r.link)) return r.link;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function ddgSearch(q: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, {
+      headers: { 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const re = /uddg=([^&"#\s]+)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      try {
+        const decoded = decodeURIComponent(m[1]).split('?')[0].split('#')[0];
+        if (isBcArtistUrl(decoded)) return decoded;
+      } catch { /* bad encoding */ }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 interface DiscographyRelease {
   title: string;
   artist: string | null;
@@ -72,7 +141,7 @@ interface DiscographyRelease {
 // enough that the initial render already has everything) — both paths are
 // handled below, the second is not a fallback for failure, it's the normal
 // case for anyone with a modest catalog.
-function parseClientItems(html: string): DiscographyRelease[] | null {
+function parseClientItems(html: string, bandUrl: string): DiscographyRelease[] | null {
   const m = html.match(/data-client-items="([^"]*)"\s/);
   if (!m) return null;
   try {
@@ -85,7 +154,17 @@ function parseClientItems(html: string): DiscographyRelease[] | null {
     const items = JSON.parse(raw) as Array<{ title?: string; artist?: string; page_url?: string; type?: string }>;
     return items
       .filter((item) => item.title && item.page_url)
-      .map((item) => ({ title: item.title as string, artist: item.artist || null, url: item.page_url as string, type: item.type || 'album' }));
+      .map((item) => {
+        const url = item.page_url as string;
+        // A label's page carries absolute cross-artist URLs here (confirmed
+        // on hyperdub.bandcamp.com — burial.bandcamp.com/album/..., not a
+        // path); an artist's OWN page instead carries bare paths for its own
+        // releases (confirmed live on malingenie.bandcamp.com — "/album/..."
+        // with no host at all). Both need handling, not just the first one
+        // this was tested against.
+        const absoluteUrl = url.startsWith('http') ? url : bandUrl.replace(/\/$/, '') + (url.startsWith('/') ? url : '/' + url);
+        return { title: item.title as string, artist: item.artist || null, url: absoluteUrl, type: item.type || 'album' };
+      });
   } catch {
     return null;
   }
@@ -123,12 +202,33 @@ Deno.serve(async (req: Request) => {
     if (artistName) {
       const hits = await bcAutocomplete(artistName);
       const hit = hits.find((h) => verifyHit(h, wantNames));
+      debug.push(`bc(artist): ${hit?.item_url_path || 'no verified match'}`);
       if (hit) bandUrlPath = hit.item_url_path;
     }
     if (!bandUrlPath && labelName) {
       const hits = await bcAutocomplete(labelName);
       const hit = hits.find((h) => verifyHit(h, wantNames));
+      debug.push(`bc(label): ${hit?.item_url_path || 'no verified match'}`);
       if (hit) bandUrlPath = hit.item_url_path;
+    }
+    // bcAutocomplete's own search index doesn't have a hit for every real
+    // Bandcamp presence (confirmed live: "Malin Genie" is one) — same
+    // Google/DDG fallback tier bc-search relies on for exactly this case,
+    // reused here for the artist/label's OWN page rather than a specific
+    // release.
+    const serperKey = Deno.env.get('SERPER_API_KEY') || '';
+    if (!bandUrlPath && serperKey) {
+      const q = `${artistName || labelName} site:bandcamp.com`;
+      const url = await googleSearch(q, serperKey);
+      const ok = url ? await verifyPageTitle(url, wantNames) : false;
+      debug.push(`google(name): ${url || 'null'} verified=${ok}`);
+      if (url && ok) bandUrlPath = url;
+    }
+    if (!bandUrlPath) {
+      const url = await ddgSearch(`${artistName || labelName} bandcamp`);
+      const ok = url ? await verifyPageTitle(url, wantNames) : false;
+      debug.push(`ddg: ${url || 'null'} verified=${ok}`);
+      if (url && ok) bandUrlPath = url;
     }
     if (!bandUrlPath) {
       debug.push('no verified band page — cannot check discography');
@@ -148,7 +248,7 @@ Deno.serve(async (req: Request) => {
     }
     const html = await res.text();
 
-    let releases = parseClientItems(html);
+    let releases = parseClientItems(html, bandUrl);
     debug.push(releases ? `data-client-items: ${releases.length} releases` : 'no data-client-items, falling back to visible grid');
     if (!releases) releases = parseVisibleGrid(html, bandUrl);
 
