@@ -79,6 +79,22 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
                   Only on Bandcamp ({bcOnly.releases.length})
                 </button>
               )}
+              {/* Visible even when there's nothing to show — silence here reads
+                  identically to "still loading," "checked, found nothing," and
+                  "the check itself failed," which made a real failure look
+                  indistinguishable from a genuine zero result. */}
+              {bcOnly.status === 'loading' && (
+                <span className="rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground/70">Checking Bandcamp…</span>
+              )}
+              {bcOnly.status === 'unresolved' && (
+                <span className="rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground/70" title="Couldn't verify a Bandcamp page for this name">Bandcamp: no verified page</span>
+              )}
+              {bcOnly.status === 'error' && (
+                <span className="rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground/70" title={bcOnly.err || ''}>Bandcamp check failed</span>
+              )}
+              {bcOnly.status === 'done' && bcOnly.releases.length === 0 && (
+                <span className="rounded-full border border-border px-2.5 py-1 text-[10px] text-muted-foreground/70">Bandcamp: fully covered on Discogs</span>
+              )}
             </div>
             {!bandcampOnlyView && (
               <button type="button" onClick={() => actions.mutateState(value => { value.filterOpen = !value.filterOpen; })} className={`rounded-full border px-3 py-1 text-xs ${state.filterOpen || hasFilter ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}>⚙ Filter{hasFilter ? ' •' : ''}</button>
