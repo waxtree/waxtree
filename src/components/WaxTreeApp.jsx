@@ -1,4 +1,4 @@
-import { ArrowUpRight, Heart, Tag } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, Heart, Tag } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { CookieBanner, ThemeFrame } from '@/components/AppChrome';
 import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
@@ -177,6 +177,7 @@ const LibrariesModal = ({ state, actions }) => {
   // resets the selection instead of silently filtering the new tab against
   // genres that may not even exist in it.
   const [selectedGenres, setSelectedGenres] = useState([]);
+  const [genreMenuOpen, setGenreMenuOpen] = useState(false);
   useEffect(() => { setSelectedGenres([]); }, [state.librariesTab]);
   const close = () => {
     if (state.discogsSyncing) return;
@@ -267,17 +268,31 @@ const LibrariesModal = ({ state, actions }) => {
         <>
           <input value={state.librariesSearch} onChange={event => actions.mutateState(value => { value.librariesSearch = event.target.value; })} className={`${modalInput} my-3`} placeholder="Search artist, release or label…" />
           {allGenres.length > 0 && (
-            <div className="mb-3 flex flex-wrap gap-1.5">
-              {allGenres.map(genre => (
-                <button
-                  key={genre}
-                  type="button"
-                  onClick={() => toggleGenre(genre)}
-                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${selectedGenres.includes(genre) ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary hover:text-primary'}`}
-                >
-                  {genre}
-                </button>
-              ))}
+            <div className="relative mb-3 inline-block">
+              <button
+                type="button"
+                onClick={() => setGenreMenuOpen(value => !value)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors ${selectedGenres.length ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary hover:text-primary'}`}
+              >
+                Select by Genre{selectedGenres.length ? ` (${selectedGenres.length})` : ''}
+                <ChevronDown className="size-3" />
+              </button>
+              {genreMenuOpen && (
+                <div className="absolute left-0 top-[calc(100%+4px)] z-[310] max-h-[280px] w-[320px] overflow-y-auto rounded-lg border border-border bg-card p-2.5 shadow-[var(--wt-shadow)]">
+                  <div className="flex flex-wrap gap-1.5">
+                    {allGenres.map(genre => (
+                      <button
+                        key={genre}
+                        type="button"
+                        onClick={() => toggleGenre(genre)}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${selectedGenres.includes(genre) ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary hover:text-primary'}`}
+                      >
+                        {genre}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <div className="max-h-[420px] overflow-y-auto">
