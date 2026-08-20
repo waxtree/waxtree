@@ -3678,7 +3678,14 @@ async function fetchAllDiscogsReleaseTitles(type,discogsId){
   const base=type==='label'?'/labels/':'/artists/';
   let page=1,all=[];
   while(page<=BC_ONLY_MAX_PAGES){
-    const relData=await dReq(base+discogsId+'/releases',{per_page:'100',page:String(page),sort:'year',sort_order:'desc'});
+    // foreground:true — same escape hatch fetchGenreYearReleaseDetails
+    // uses (see dReqRaw's own comment on it): this is a bounded,
+    // human-triggered fetch (opening an artist/label node), not open-
+    // ended automated traffic, but without it the default pacing left it
+    // queued for up to 62s PER PAGE behind that node's own much larger
+    // background release-detail fetch — confirmed live as "Checking
+    // Bandcamp…" stuck indefinitely instead of just being slow.
+    const relData=await dReq(base+discogsId+'/releases',{per_page:'100',page:String(page),sort:'year',sort_order:'desc'},{foreground:true});
     all.push(...relData.releases);
     if(page>=(relData.pagination?.pages||1))break;
     page+=1;
