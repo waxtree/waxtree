@@ -10,118 +10,6 @@ const respond = (body: unknown, status = 200) =>
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-function norm(s: string): string {
-  return (s || '')
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-interface BcHit {
-  type: string;
-  name: string;
-  band_name: string;
-  item_url_path: string;
-}
-
-// Same structured search + verification pair as bc-search — duplicated
-// rather than shared (this repo has no cross-function shared module; see
-// bc-search/bp-search, which already duplicate this same shape) — this is
-// ONLY used here to find the artist/label's own Bandcamp page (never a
-// specific release), so it's the narrower name-only verifyHit, not the
-// title-aware one bc-search also has.
-async function bcAutocomplete(query: string): Promise<BcHit[]> {
-  try {
-    const res = await fetch('https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic', {
-      method: 'POST',
-      headers: { 'User-Agent': UA, 'Content-Type': 'application/json', Accept: 'application/json', Referer: 'https://bandcamp.com/' },
-      body: JSON.stringify({ search_text: query, search_filter: '', full_page: false, fan_id: null }),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data?.auto?.results || []) as BcHit[];
-  } catch {
-    return [];
-  }
-}
-
-function verifyHit(hit: BcHit, wantNames: string[]): boolean {
-  const bandN = norm(hit.band_name);
-  return wantNames.some((w) => w && (bandN.includes(w) || w.includes(bandN)));
-}
-
-function isBcArtistUrl(url: string) {
-  return url.includes('.bandcamp.com');
-}
-
-// Bandcamp album/track pages consistently title themselves
-// "{Release/Track Title} | {Artist} | {Label}" and a band's own /music or
-// root page titles itself "{Band Name} | {Band Name}" or similar — a
-// single page fetch is enough to verify a candidate URL against the
-// wanted name before trusting it. Same approach as bc-search's own
-// verifyPageTitle, duplicated for the same reason as bcAutocomplete above.
-async function verifyPageTitle(url: string, wantNames: string[]): Promise<boolean> {
-  try {
-    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html' } });
-    if (!res.ok) return false;
-    const html = await res.text();
-    const m = html.match(/<title>([^<]*)<\/title>/i);
-    if (!m) return false;
-    const pageTitleN = norm(m[1]);
-    return wantNames.some((w) => w && pageTitleN.includes(w));
-  } catch {
-    return false;
-  }
-}
-
-// Google search via Serper.dev — same fallback bc-search relies on for
-// names bcAutocomplete's own search index doesn't surface a hit for
-// (confirmed live 2026-08-19: "Malin Genie" resolves via bc-search's
-// artist button, which reaches this same fallback tier, but bcAutocomplete
-// alone comes back empty for it).
-async function googleSearch(q: string, serperKey: string): Promise<string | null> {
-  try {
-    const res = await fetch('https://google.serper.dev/search', {
-      method: 'POST',
-      headers: { 'X-API-KEY': serperKey, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ q, num: 10, hl: 'en' }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const organic: Array<{ link?: string }> = data?.organic || [];
-    for (const r of organic) {
-      if (r.link && isBcArtistUrl(r.link)) return r.link;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function ddgSearch(q: string): Promise<string | null> {
-  try {
-    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, {
-      headers: { 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' },
-    });
-    if (!res.ok) return null;
-    const html = await res.text();
-    const re = /uddg=([^&"#\s]+)/gi;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(html)) !== null) {
-      try {
-        const decoded = decodeURIComponent(m[1]).split('?')[0].split('#')[0];
-        if (isBcArtistUrl(decoded)) return decoded;
-      } catch { /* bad encoding */ }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 interface DiscographyRelease {
   title: string;
   artist: string | null;
@@ -199,65 +87,32 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   try {
-    const { artist, label, knownBandUrl } = await req.json();
-    const artistName = (artist || '').trim();
-    const labelName = (label || '').trim();
-    if (!artistName && !labelName) return respond({ resolved: false, releases: [], error: 'artist or label required' }, 400);
+    const { knownBandUrl } = await req.json();
 
-    const debug: string[] = [];
-    const wantNames = [norm(artistName), norm(labelName)].filter(Boolean);
-
-    // A caller-supplied, already-verified band URL (WaxTree passes Discogs'
-    // own artist/label "urls" field when it has one) skips name-guessing
-    // entirely — genuinely authoritative, unlike bcAutocomplete/Google/DDG
-    // below, which have no way to disambiguate two unrelated acts sharing
-    // a generic name. Confirmed live 2026-08-21: the label "Mosaic"
-    // resolved to an entirely different "Mosaic" on Bandcamp via name
-    // search — Discogs' own urls field already had the real one.
-    let bandUrlPath: string | null = typeof knownBandUrl === 'string' && /^https?:\/\/[^/]+\.bandcamp\.com/i.test(knownBandUrl) ? knownBandUrl : null;
-    if (bandUrlPath) debug.push(`knownBandUrl: ${bandUrlPath}`);
-    if (!bandUrlPath && artistName) {
-      const hits = await bcAutocomplete(artistName);
-      const hit = hits.find((h) => verifyHit(h, wantNames));
-      debug.push(`bc(artist): ${hit?.item_url_path || 'no verified match'}`);
-      if (hit) bandUrlPath = hit.item_url_path;
-    }
-    if (!bandUrlPath && labelName) {
-      const hits = await bcAutocomplete(labelName);
-      const hit = hits.find((h) => verifyHit(h, wantNames));
-      debug.push(`bc(label): ${hit?.item_url_path || 'no verified match'}`);
-      if (hit) bandUrlPath = hit.item_url_path;
-    }
-    // bcAutocomplete's own search index doesn't have a hit for every real
-    // Bandcamp presence (confirmed live: "Malin Genie" is one) — same
-    // Google/DDG fallback tier bc-search relies on for exactly this case,
-    // reused here for the artist/label's OWN page rather than a specific
-    // release.
-    const serperKey = Deno.env.get('SERPER_API_KEY') || '';
-    if (!bandUrlPath && serperKey) {
-      const q = `${artistName || labelName} site:bandcamp.com`;
-      const url = await googleSearch(q, serperKey);
-      const ok = url ? await verifyPageTitle(url, wantNames) : false;
-      debug.push(`google(name): ${url || 'null'} verified=${ok}`);
-      if (url && ok) bandUrlPath = url;
-    }
+    // Deliberately requires a caller-verified band URL — WaxTree passes
+    // Discogs' own artist/label "urls" field, when it has one. Used to
+    // fall back to name-guessing (Bandcamp's own search, then Google/DDG)
+    // when that was missing, but confirmed live 2026-08-21: for a generic
+    // name ("Mosaic"), that fallback confidently resolved to a completely
+    // unrelated act's Bandcamp page — verified only against a page title
+    // containing the search string, which has no way to tell two
+    // different things sharing a name apart. This is a cross-check that
+    // asserts "not on Discogs" about what it finds; a wrong profile isn't
+    // a worse answer, it's actively misleading. Better to report
+    // unresolved (the caller shows nothing) for the — probably common —
+    // case where Discogs doesn't have the link on file, than to guess
+    // confidently wrong.
+    const bandUrlPath: string | null = typeof knownBandUrl === 'string' && /^https?:\/\/[^/]+\.bandcamp\.com/i.test(knownBandUrl) ? knownBandUrl : null;
     if (!bandUrlPath) {
-      const url = await ddgSearch(`${artistName || labelName} bandcamp`);
-      const ok = url ? await verifyPageTitle(url, wantNames) : false;
-      debug.push(`ddg: ${url || 'null'} verified=${ok}`);
-      if (url && ok) bandUrlPath = url;
-    }
-    if (!bandUrlPath) {
-      debug.push('no verified band page — cannot check discography');
-      return respond({ resolved: false, releases: [], debug });
+      return respond({ resolved: false, releases: [], debug: ['no knownBandUrl — Discogs has no Bandcamp link on file for this name, so nothing verified to check'] });
     }
 
-    // item_url_path from autocomplete can point straight at a release
-    // (an artist whose Bandcamp presence is a single album, no /music page
-    // of their own) — normalize down to the band root before appending
-    // /music.
+    // item_url_path can point straight at a release (an artist whose
+    // Bandcamp presence is a single album, no /music page of their own) —
+    // normalize down to the band root before appending /music.
     const bandUrl = bandUrlPath.replace(/^(https?:\/\/[^/]+\.bandcamp\.com).*/i, '$1');
 
+    const debug: string[] = [`knownBandUrl: ${bandUrl}`];
     const res = await fetch(bandUrl + '/music', { headers: { 'User-Agent': UA, Accept: 'text/html' } });
     if (!res.ok) {
       debug.push(`music page fetch failed: ${res.status}`);

@@ -3347,6 +3347,28 @@ function extractBandcampUrl(urls){
   const m=hit.match(/^https?:\/\/([^/?#]+\.bandcamp\.com)/i);
   return m?'https://'+m[1]:null;
 }
+// A dedicated, lightweight lookup (one small Discogs call, just the
+// artist/label record — nothing like fetchArtistData/fetchLabelData's own
+// heavy per-release fan-out) rather than relying on node.data.bandcampUrl —
+// that field only exists on data fetched after this feature shipped, and a
+// node already cached from before it (which is most of anyone's existing
+// tree) would otherwise never pick it up without a full, expensive
+// re-fetch. This runs fresh every time "Only on Bandcamp" is opened —
+// acceptable since it's a deliberate, infrequent action, not something
+// that fires automatically for every node the way fetchArtistData does.
+let bandcampUrlCache={}; // "type:id" → url|null
+async function fetchDiscogsBandcampUrl(type,discogsId){
+  const key=type+':'+discogsId;
+  if(key in bandcampUrlCache)return bandcampUrlCache[key];
+  try{
+    const data=await dReq((type==='label'?'/labels/':'/artists/')+discogsId,{},{foreground:true});
+    const url=extractBandcampUrl(data.urls);
+    bandcampUrlCache[key]=url;
+    return url;
+  }catch{
+    return null; // not cached — a transient failure shouldn't permanently poison this
+  }
+}
 function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='',vinylTitles=null){
   const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.title);
   if(!tracklist.length)return[];
@@ -3825,13 +3847,16 @@ async function fetchBandcampOnly(nodeId){
   try{
     const isLabelNode=node.type==='label';
     const name=node.data?.name||node.name;
-    const body=isLabelNode?{label:name,knownBandUrl:node.data?.bandcampUrl||null}:{artist:name,knownBandUrl:node.data?.bandcampUrl||null};
-    const[{data:bcData,error:bcErr},discogsReleases]=await Promise.all([
-      sb.functions.invoke('bc-discography',{body}),
-      fetchAllDiscogsReleaseTitles(node.type,node.discogsId)
-    ]);
+    // Fetched fresh (not from node.data, which only has this on data
+    // loaded after the field existed — see fetchDiscogsBandcampUrl's own
+    // comment) — and checked BEFORE spending anything else, since bc-
+    // discography now flatly refuses to guess without it.
+    const knownBandUrl=await fetchDiscogsBandcampUrl(node.type,node.discogsId);
+    if(!knownBandUrl){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
+    const{data:bcData,error:bcErr}=await sb.functions.invoke('bc-discography',{body:{knownBandUrl}});
     if(bcErr)throw new Error(bcErr.message);
     if(!bcData?.resolved){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
+    const discogsReleases=await fetchAllDiscogsReleaseTitles(node.type,node.discogsId);
     const discogsEntries=discogsReleases.map(r=>({
       title:normalizeStr(r.title||''),
       artist:isLabelNode?normalizeStr(stripDiscogsSuffix(r.artist||'')):null,
