@@ -1013,7 +1013,18 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=11; // bumped: nd now carries bandcampUrl (Discogs' own artist/label urls field, when it has a Bandcamp link) — an already-cached node from before this never had that field, so the Bandcamp-only check kept guessing by name alone (see extractBandcampUrl's own comment on why that's unreliable for a generic name) even after the fix shipped, until re-fetched
+// NOT bumped for the new bandcampUrl field, deliberately — bumping this
+// triggers a boot-time sweep (see the `_v!==TRACK_DATA_VERSION` re-fetch
+// loop below) that re-fetches EVERY label/artist node already in a user's
+// tree, all at once, no concurrency limit beyond dReqRaw's own shared
+// throttle. Confirmed live 2026-08-21: a tree with a few dozen explored
+// nodes turned that into a multi-minute "stuck on Loading" for the whole
+// app — a self-inflicted rate-limit storm far worse than the thing being
+// fixed (an old node missing one optional field, which just falls back to
+// the pre-existing name-guessing behavior, not an error). A node picks up
+// bandcampUrl naturally the next time it's genuinely re-fetched for any
+// other reason (removed and re-explored, a real cache expiry, etc.).
+const TRACK_DATA_VERSION=10;
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:148,name:'Larry Heard',
