@@ -3828,6 +3828,47 @@ async function fetchBandcampOnly(nodeId){
   rr();
 }
 
+// Each bcOnlyCacheMap release entry is release-level only (one pseudo-
+// track standing in for the whole thing) — "Hedonic Setpoint X" turned
+// out live to be a real 17-track album, not one track, so a card showing
+// only the release title was misrepresenting the release, not just
+// under-detailing it. This fetches the REAL tracklist for a release (via
+// bc-release-detail, keyed by the same bcUrl already known from
+// fetchBandcampOnly) once it's actually visible, same lazy-per-visible-
+// page pattern fetchGenreYearReleaseDetails already uses for the
+// analogous Discogs case — every real track here is a fresh unresolved
+// YouTube lookup, so fetching a whole prolific artist's releases at once
+// would multiply the daily search-quota cost far more than the old
+// one-row-per-release version did.
+let bcOnlyDetailCache={}; // bcUrl → {tracks,loading,err}
+function getBcOnlyReleaseDetail(url){return bcOnlyDetailCache[url]||null;}
+async function fetchBcOnlyReleaseDetails(releases){
+  const toFetch=releases.filter(r=>!bcOnlyDetailCache[r.bcUrl]);
+  if(!toFetch.length)return;
+  toFetch.forEach(r=>{bcOnlyDetailCache[r.bcUrl]={tracks:[],loading:true,err:null};});
+  rr();
+  await Promise.all(toFetch.map(async r=>{
+    try{
+      const{data,error}=await sb.functions.invoke('bc-release-detail',{body:{url:r.bcUrl}});
+      if(error)throw new Error(error.message);
+      const tracks=(data?.tracks||[]).map((t,i)=>{
+        const id='bconlyt:'+r.bcUrl+':'+i;
+        const track={
+          id,title:t.title,album:r.album,duration:t.duration||null,
+          trackArtistName:r.trackArtistName,releaseArtistName:r.releaseArtistName,
+          label:r.label,videoId:null,year:null,genre:null,thumbUrl:r.thumbUrl,
+        };
+        discoveredTracks[id]=track; // so play/like/queue resolve it, same pattern Related Tracks uses
+        return track;
+      });
+      bcOnlyDetailCache[r.bcUrl]={tracks,loading:false,err:null};
+    }catch(e){
+      bcOnlyDetailCache[r.bcUrl]={tracks:[],loading:false,err:e.message};
+    }
+  }));
+  rr();
+}
+
 // Per-node load generation — each node cancels only its OWN previous
 // in-flight fetch (e.g. a fast double retry), never another node's.
 // A single shared counter here previously meant clicking Explore on
@@ -4587,7 +4628,7 @@ function getExploreTargets(trackId,artistName){
 
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
-  fetchBandcampOnly,getBandcampOnly,
+  fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
