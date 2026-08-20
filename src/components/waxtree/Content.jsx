@@ -11,6 +11,7 @@ export const Content = ({ state, actions }) => {
   const [page, setPage] = useState(0);
   useEffect(() => { setPage(0); }, [node?.id]);
   useEffect(() => { if (node?.type !== 'genreYear' && node?.loaded && node.data) void actions.fetchBandcamp(node.id, node.data.name || node.name); }, [actions, node?.data, node?.id, node?.loaded, node?.name, node?.type]);
+  useEffect(() => { if ((node?.type === 'artist' || node?.type === 'label') && node?.loaded && node.data) void actions.fetchBandcampOnly(node.id); }, [actions, node?.data, node?.id, node?.loaded, node?.type]);
 
   if (node?.type === 'genreYear') {
     return <GenreYearResults node={node} state={state} actions={actions} />;
