@@ -2032,14 +2032,21 @@ async function resolveCosineTrackId(np){
   const known=discoveredTracks[np.trackId]?.cosineId;
   if(known){cosineIdMap[np.trackId]=known;saveCosineIdMap(cosineIdMap);return known;}
   const discogsUrl=findTrackAndNode(np.trackId)?.track?.discogsUrl||discoveredTracks[np.trackId]?.discogsUrl||null;
+  const bcUrl=discoveredTracks[np.trackId]?.bcUrl||null; // Bandcamp-only tracks (see fetchBcOnlyReleaseDetails)
   const youtubeUrl=np.videoId?'https://www.youtube.com/watch?v='+np.videoId:null;
-  // Try the YouTube link AND the Discogs release link, not just one —
-  // Cosine may have indexed this recording under a different Discogs
-  // pressing/reissue than the exact release WaxTree's own tree points at,
-  // but the YouTube video actually playing is an exact match either way.
-  // Confirmed live: a track's own YouTube link returned real Cosine
-  // results when its Discogs release URL alone came back empty.
-  const candidates=[youtubeUrl,discogsUrl].filter(Boolean);
+  // Try the YouTube link, the Discogs release link, AND the Bandcamp
+  // release link, not just one — Cosine may have indexed this recording
+  // under a different Discogs pressing/reissue than the exact release
+  // WaxTree's own tree points at, but the YouTube video actually playing
+  // is an exact match either way. Confirmed live: a track's own YouTube
+  // link returned real Cosine results when its Discogs release URL alone
+  // came back empty. The Bandcamp case is its own variant of the same
+  // thing, confirmed live 2026-08-20: WaxTree's own YouTube auto-match for
+  // a self-released Bandcamp track is very often a third-party repost —
+  // not what Cosine has indexed for that same track — but Cosine's own
+  // Bandcamp crawl frequently HAS the release under its own Bandcamp URL
+  // even when the specific YouTube video comes back 404.
+  const candidates=[youtubeUrl,discogsUrl,bcUrl].filter(Boolean);
   if(!candidates.length){cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);return false;}
   let anyFailed=false;
   for(const url of candidates){
@@ -3862,6 +3869,7 @@ async function fetchBcOnlyReleaseDetails(releases){
           id,title:t.title,album:r.album,duration:t.duration||null,
           trackArtistName:r.trackArtistName,releaseArtistName:r.releaseArtistName,
           label:r.label,videoId:t.youtubeId||null,year:null,genre:null,thumbUrl:r.thumbUrl,
+          bcUrl:r.bcUrl, // resolveCosineTrackId's own Bandcamp-release fallback candidate
         };
         discoveredTracks[id]=track; // so play/like/queue resolve it, same pattern Related Tracks uses
         return track;
