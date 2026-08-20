@@ -34,10 +34,14 @@ export const Header = ({ state, session, actions }) => {
         <Button variant="outline" className="h-auto rounded-full px-3 py-1 text-xs text-muted-foreground" onClick={event => { event.stopPropagation(); actions.mutateState(value => { value.profileOpen = !value.profileOpen; }); }}>Profile</Button>
         {state.profileOpen && (
           <div className="absolute right-0 top-[calc(100%+6px)] z-[500] min-w-[185px] overflow-hidden rounded-[14px] border border-border bg-card p-1 shadow-[var(--wt-shadow)]">
-            <div className="mb-1 flex items-center gap-2.5 border-b border-border px-3 py-2">
+            <button
+              type="button"
+              onClick={() => actions.mutateState(value => { value.profileOpen = false; value.profileModal = true; })}
+              className="mb-1 flex w-full items-center gap-2.5 rounded-lg border-b border-border px-3 py-2 text-left hover:bg-muted"
+            >
               {avatar ? <img className="size-9 rounded-full object-cover" src={avatar} alt="" /> : <div className="flex size-9 items-center justify-center rounded-full bg-secondary font-bold text-primary">{username.slice(0, 2).toUpperCase()}</div>}
               <span className="text-xs font-semibold">{username}</span>
-            </div>
+            </button>
             {[['Libraries', 'librariesModal'], ['Settings', 'settingsModal'], ['Likes', 'likesModal'], ['Follows', 'followsModal'], ['History', 'historyModal']].map(([label, key]) => (
               <button key={key} type="button" onClick={() => actions.mutateState(value => { value.profileOpen = false; value[key] = true; })} className="block w-full rounded-lg px-3.5 py-2 text-left text-[13px] hover:bg-muted">{label}</button>
             ))}

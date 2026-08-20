@@ -1081,7 +1081,7 @@ function saveSt(){
   // saved — guardAccountSwitch() (near st's own definition) reads it back
   // on the next boot to tell "my own data" apart from "a different
   // account's leftovers on this same browser". See its own comment.
-  const corePayload=JSON.stringify({ownerId:currentSessionUserId(),branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened});
+  const corePayload=JSON.stringify({ownerId:currentSessionUserId(),branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,favoriteArtists:st.favoriteArtists});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -1194,7 +1194,7 @@ async function pushStateToCloud(){
   // it's cheaply re-fetched on selectNode; only the tree structure itself
   // (which artist/label, which branch, pin/tag state) is irreplaceable.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
-  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,avatarDataUrl:getAvatarUrl()};
+  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,favoriteArtists:st.favoriteArtists,avatarDataUrl:getAvatarUrl()};
   try{
     // Refuse to silently overwrite a real backup with what looks like a
     // wiped local state — confirmed live TWICE now (2026-08-02, 2026-08-03)
@@ -1406,6 +1406,7 @@ async function hydrateFromCloud(){
     if(c.discogsCollSyncedAt)st.discogsCollSyncedAt=c.discogsCollSyncedAt;
     if(c.discogsHeroesSeen)st.discogsHeroesSeen=c.discogsHeroesSeen;
     if(c.alreadyListened)st.alreadyListened=c.alreadyListened;
+    if(c.favoriteArtists)st.favoriteArtists=c.favoriteArtists;
     if(c.avatarDataUrl){try{localStorage.setItem(AVATAR_KEY,c.avatarDataUrl);}catch{}}
     saveSt();
     ensureNodeLoaded(st.selectedId);
@@ -1531,6 +1532,7 @@ const st={
   // to the "Already Listened" section — opt-in, not automatic just because
   // every track happens to be marked played (see releaseCard's own button).
   alreadyListened:saved?.alreadyListened||[],
+  favoriteArtists:saved?.favoriteArtists||[],
 };
 document.documentElement.setAttribute('data-theme',st.theme);
 // Tailwind's dark: variant and every shadcn color token key off a `.dark`
