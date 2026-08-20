@@ -171,6 +171,13 @@ const FollowsModal = ({ state, actions }) => {
 
 const LibrariesModal = ({ state, actions }) => {
   const [scanStatus, setScanStatus] = useState('');
+  // Local to the modal, not persisted state — same treatment as
+  // librariesSearch's own scope, but genres are meaningful per-tab (vinyl
+  // and digital can have entirely different genre sets), so switching tabs
+  // resets the selection instead of silently filtering the new tab against
+  // genres that may not even exist in it.
+  const [selectedGenres, setSelectedGenres] = useState([]);
+  useEffect(() => { setSelectedGenres([]); }, [state.librariesTab]);
   const close = () => {
     if (state.discogsSyncing) return;
     actions.mutateState(value => { value.librariesModal = false; value.welcomeSyncIntro = false; });
@@ -178,8 +185,11 @@ const LibrariesModal = ({ state, actions }) => {
   const vinylEntries = state.discogsCollection.filter(release => release.isVinyl);
   const digitalEntries = actions.getDigitalLibraryEntries();
   const source = state.librariesTab === 'vinyl' ? vinylEntries : digitalEntries;
+  const allGenres = [...new Set(source.flatMap(release => release.genres || []))].sort();
+  const toggleGenre = genre => setSelectedGenres(prev => (prev.includes(genre) ? prev.filter(item => item !== genre) : [...prev, genre]));
   const query = state.librariesSearch.trim().toLowerCase();
-  const filtered = query ? source.filter(release => [release.title, release.artist, release.labelExploreName, ...(release.genres || [])].filter(Boolean).join(' ').toLowerCase().includes(query)) : source;
+  const filtered = (query ? source.filter(release => [release.title, release.artist, release.labelExploreName, ...(release.genres || [])].filter(Boolean).join(' ').toLowerCase().includes(query)) : source)
+    .filter(release => !selectedGenres.length || (release.genres || []).some(genre => selectedGenres.includes(genre)));
   const tabs = [
     ['vinyl', '💽 Vinyl', vinylEntries.length],
     ['digital', '💾 Digital', digitalEntries.length],
@@ -256,6 +266,20 @@ const LibrariesModal = ({ state, actions }) => {
       ) : (
         <>
           <input value={state.librariesSearch} onChange={event => actions.mutateState(value => { value.librariesSearch = event.target.value; })} className={`${modalInput} my-3`} placeholder="Search artist, release or label…" />
+          {allGenres.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {allGenres.map(genre => (
+                <button
+                  key={genre}
+                  type="button"
+                  onClick={() => toggleGenre(genre)}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${selectedGenres.includes(genre) ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary hover:text-primary'}`}
+                >
+                  {genre}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="max-h-[420px] overflow-y-auto">
             {filtered.length ? filtered.map((release, index) => (
               <div key={release.discogsUrl || `${release.title}-${index}`} className="flex items-center gap-2.5 border-b border-border py-2">
