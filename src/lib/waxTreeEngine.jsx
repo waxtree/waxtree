@@ -1013,7 +1013,7 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=10; // bumped: buildTrackEntries now carries master_id as an altId (see its own comment) — a shared/local cache entry from before this fix never had that field, so ownership badges silently kept missing color/pressing variants no matter how many times a user cleared their own local cache, since the shared cross-user cache (getSharedNodeCache) was still serving the pre-fix shape
+const TRACK_DATA_VERSION=11; // bumped: nd now carries bandcampUrl (Discogs' own artist/label urls field, when it has a Bandcamp link) — an already-cached node from before this never had that field, so the Bandcamp-only check kept guessing by name alone (see extractBandcampUrl's own comment on why that's unreliable for a generic name) even after the fix shipped, until re-fetched
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:148,name:'Larry Heard',
@@ -3321,6 +3321,21 @@ function genreColor(g){
 // Discogs suffixes an artist name with " (N)" to disambiguate same-named
 // artists (e.g. "Artist Name (2)") — strip it for display everywhere.
 const stripDiscogsSuffix=n=>(n||'').replace(/\s\(\d+\)$/,'');
+// Discogs' own artist/label "urls" field very often already carries the
+// exact Bandcamp link an editor entered by hand — a directly authoritative
+// source, unlike bcAutocomplete/Google/DDG name-guessing which has no way
+// to disambiguate two unrelated acts sharing a generic name (confirmed
+// live 2026-08-21: the label "Mosaic" resolved to some other "Mosaic" on
+// Bandcamp entirely — the real one, Steve O'Sullivan's London label, is
+// sitting right there in Discogs' own urls array). Normalized down to the
+// band root (no path/query) so it's directly usable as bc-discography's
+// knownBandUrl.
+function extractBandcampUrl(urls){
+  const hit=(urls||[]).find(u=>/\.bandcamp\.com/i.test(u||''));
+  if(!hit)return null;
+  const m=hit.match(/^https?:\/\/([^/?#]+\.bandcamp\.com)/i);
+  return m?'https://'+m[1]:null;
+}
 function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='',vinylTitles=null){
   const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.title);
   if(!tracklist.length)return[];
@@ -3558,6 +3573,7 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:labels,labelStr:labels.length?`Released on: ${labels.join(', ')}`:null},
     correlatedArtists:[],
     tracks,trackCount:relData.pagination.items,
+    bandcampUrl:extractBandcampUrl(artData.urls),
     _v:TRACK_DATA_VERSION
   };
   lsSet('a7:'+discogsId,nd);
@@ -3657,6 +3673,7 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
     country:labData.country||null,
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:artists,artistStr:artists.length?`Artists include: ${artists.slice(0,5).join(', ')}`:null},
     tracks,trackCount:relData.pagination.items,
+    bandcampUrl:extractBandcampUrl(labData.urls),
     _v:TRACK_DATA_VERSION
   };
   lsSet('l8:'+discogsId,nd);
@@ -3722,7 +3739,8 @@ async function fetchBandcamp(nodeId,artistName){
   bcCacheMap[nodeId]={tracks:[],loading:true,err:null};
   rr();
   try{
-    const{data,error}=await sb.functions.invoke('bc-search',{body:{artist:artistName}});
+    const knownBandUrl=getNode(nodeId)?.data?.bandcampUrl||null;
+    const{data,error}=await sb.functions.invoke('bc-search',{body:{artist:artistName,knownBandUrl}});
     if(error)throw new Error(error.message);
     bcCacheMap[nodeId]={tracks:data?.tracks||[],loading:false,err:null};
   }catch(e){
@@ -3796,7 +3814,7 @@ async function fetchBandcampOnly(nodeId){
   try{
     const isLabelNode=node.type==='label';
     const name=node.data?.name||node.name;
-    const body=isLabelNode?{label:name}:{artist:name};
+    const body=isLabelNode?{label:name,knownBandUrl:node.data?.bandcampUrl||null}:{artist:name,knownBandUrl:node.data?.bandcampUrl||null};
     const[{data:bcData,error:bcErr},discogsReleases]=await Promise.all([
       sb.functions.invoke('bc-discography',{body}),
       fetchAllDiscogsReleaseTitles(node.type,node.discogsId)

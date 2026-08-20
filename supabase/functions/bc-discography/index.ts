@@ -199,7 +199,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   try {
-    const { artist, label } = await req.json();
+    const { artist, label, knownBandUrl } = await req.json();
     const artistName = (artist || '').trim();
     const labelName = (label || '').trim();
     if (!artistName && !labelName) return respond({ resolved: false, releases: [], error: 'artist or label required' }, 400);
@@ -207,8 +207,16 @@ Deno.serve(async (req: Request) => {
     const debug: string[] = [];
     const wantNames = [norm(artistName), norm(labelName)].filter(Boolean);
 
-    let bandUrlPath: string | null = null;
-    if (artistName) {
+    // A caller-supplied, already-verified band URL (WaxTree passes Discogs'
+    // own artist/label "urls" field when it has one) skips name-guessing
+    // entirely — genuinely authoritative, unlike bcAutocomplete/Google/DDG
+    // below, which have no way to disambiguate two unrelated acts sharing
+    // a generic name. Confirmed live 2026-08-21: the label "Mosaic"
+    // resolved to an entirely different "Mosaic" on Bandcamp via name
+    // search — Discogs' own urls field already had the real one.
+    let bandUrlPath: string | null = typeof knownBandUrl === 'string' && /^https?:\/\/[^/]+\.bandcamp\.com/i.test(knownBandUrl) ? knownBandUrl : null;
+    if (bandUrlPath) debug.push(`knownBandUrl: ${bandUrlPath}`);
+    if (!bandUrlPath && artistName) {
       const hits = await bcAutocomplete(artistName);
       const hit = hits.find((h) => verifyHit(h, wantNames));
       debug.push(`bc(artist): ${hit?.item_url_path || 'no verified match'}`);
