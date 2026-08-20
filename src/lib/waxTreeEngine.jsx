@@ -3816,7 +3816,7 @@ async function fetchBandcampOnly(nodeId){
         releaseArtistName:isLabelNode?null:name,
         label:isLabelNode?creditedArtist:null,
         videoId:null,duration:null,year:null,genre:null,
-        bcUrl:bcRel.url,
+        bcUrl:bcRel.url,thumbUrl:bcRel.thumbUrl||null,
       };
       discoveredTracks[id]=track; // so play/like/queue resolve it, same pattern Related Tracks uses
       return track;

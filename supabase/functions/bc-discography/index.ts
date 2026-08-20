@@ -127,7 +127,15 @@ interface DiscographyRelease {
   artist: string | null;
   url: string;
   type: string;
+  thumbUrl: string | null;
 }
+
+// f4.bcbits.com/img/a{art_id}_{size}.jpg is Bandcamp's own stable art CDN
+// pattern — confirmed live 2026-08-19 by cross-referencing an art_id from
+// data-client-items against the actual <img> src Bandcamp itself renders
+// for that same grid thumbnail (size code 2, ~100px, the size the grid
+// itself uses — matches what a small release-card thumbnail needs).
+const artUrl = (artId: number | string | null | undefined): string | null => (artId ? `https://f4.bcbits.com/img/a${artId}_2.jpg` : null);
 
 // Bandcamp's /music page only renders the first page (~16-20 items) of
 // <li> elements server-side for a big catalog — the rest is hydrated
@@ -151,7 +159,7 @@ function parseClientItems(html: string, bandUrl: string): DiscographyRelease[] |
       .replace(/&#39;/g, "'")
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>');
-    const items = JSON.parse(raw) as Array<{ title?: string; artist?: string; page_url?: string; type?: string }>;
+    const items = JSON.parse(raw) as Array<{ title?: string; artist?: string; page_url?: string; type?: string; art_id?: number }>;
     return items
       .filter((item) => item.title && item.page_url)
       .map((item) => {
@@ -163,7 +171,7 @@ function parseClientItems(html: string, bandUrl: string): DiscographyRelease[] |
         // with no host at all). Both need handling, not just the first one
         // this was tested against.
         const absoluteUrl = url.startsWith('http') ? url : bandUrl.replace(/\/$/, '') + (url.startsWith('/') ? url : '/' + url);
-        return { title: item.title as string, artist: item.artist || null, url: absoluteUrl, type: item.type || 'album' };
+        return { title: item.title as string, artist: item.artist || null, url: absoluteUrl, type: item.type || 'album', thumbUrl: artUrl(item.art_id) };
       });
   } catch {
     return null;
@@ -181,7 +189,8 @@ function parseVisibleGrid(html: string, bandUrl: string): DiscographyRelease[] {
     const titleMatch = item.match(/<p class="title">\s*([^<]+?)\s*(?:<|$)/s);
     if (!hrefMatch || !titleMatch) continue;
     const href = hrefMatch[1].startsWith('http') ? hrefMatch[1] : bandUrl.replace(/\/$/, '') + hrefMatch[1];
-    out.push({ title: titleMatch[1].trim(), artist: null, url: href, type: typeMatch?.[1] || 'album' });
+    const imgMatch = item.match(/<img src="([^"]+)"/);
+    out.push({ title: titleMatch[1].trim(), artist: null, url: href, type: typeMatch?.[1] || 'album', thumbUrl: imgMatch?.[1] || null });
   }
   return out;
 }

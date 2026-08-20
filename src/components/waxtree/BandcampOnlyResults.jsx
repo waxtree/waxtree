@@ -40,8 +40,14 @@ export const BandcampOnlyResults = ({ node, isLabel, state, actions }) => {
       )}
       <div className="flex flex-col gap-[6px]">
         {pageReleases.map(track => (
-          <div key={track.id} className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-[14px] py-[10px]">
-            <div className="min-w-0 flex-1">
+          <article key={track.id} className="flex items-start gap-3 rounded-[10px] border border-border bg-card px-[14px] py-[10px] transition-colors hover:border-[color-mix(in_srgb,var(--primary)_35%,var(--border))]">
+            {track.thumbUrl ? (
+              <img className="size-10 shrink-0 rounded-[6px] border border-border object-cover" src={track.thumbUrl} alt="" loading="lazy" />
+            ) : (
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-[6px] border border-border bg-secondary text-[17px] text-muted-foreground/70">♫</div>
+            )}
+            <div className="min-w-0 flex-1 pt-0.5">
+              {isLabel && track.label && <p className="mb-0.5 truncate text-[11px] text-muted-foreground">{track.label}</p>}
               <TrackRow
                 track={track}
                 node={node}
@@ -53,8 +59,10 @@ export const BandcampOnlyResults = ({ node, isLabel, state, actions }) => {
                 setPlaylistOpen={open => setOpenPlaylist(open ? track.id : null)}
               />
             </div>
-            <StoreButton source="bc" directUrl={track.bcUrl} releaseTitle={track.title} artist={isLabel ? track.label : node.name} label={isLabel ? node.name : null} isLabel={isLabel} actions={actions} />
-          </div>
+            <div className="shrink-0 pt-0.5">
+              <StoreButton source="bc" directUrl={track.bcUrl} releaseTitle={track.title} artist={isLabel ? track.label : node.name} label={isLabel ? node.name : null} isLabel={isLabel} actions={actions} />
+            </div>
+          </article>
         ))}
       </div>
       {totalPages > 1 && (
