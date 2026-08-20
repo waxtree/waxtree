@@ -67,13 +67,17 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded-full border border-border bg-secondary px-2.5 py-1 text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => actions.mutateState(value => { value.bandcampOnlyView[node.id] = false; })}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[.06em] transition-colors ${!bandcampOnlyView ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-secondary text-muted-foreground hover:border-primary hover:text-primary'}`}
+              >
                 {isLabel ? 'Releases' : 'Tracks'} ({data.trackCount} Discogs, {filtered.length} loaded)
-              </span>
+              </button>
               {bcOnly.status === 'done' && bcOnly.releases.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => actions.mutateState(value => { value.bandcampOnlyView[node.id] = !value.bandcampOnlyView[node.id]; })}
+                  onClick={() => actions.mutateState(value => { value.bandcampOnlyView[node.id] = true; })}
                   className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[.06em] transition-colors ${bandcampOnlyView ? 'border-[#1DA0C3] bg-[rgba(29,160,195,.12)] text-[#1DA0C3]' : 'border-[rgba(29,160,195,.5)] text-[#1DA0C3] hover:bg-[rgba(29,160,195,.12)]'}`}
                 >
                   Only on Bandcamp ({bcOnly.releases.length})

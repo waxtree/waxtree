@@ -1,16 +1,13 @@
-import { ArrowLeft } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { StoreButton } from '@/components/waxtree/StoreButton';
 import { TrackRow } from '@/components/waxtree/TrackRow';
 import { buttonSecondary } from '@/lib/waxtreeUi';
 
-// Smaller than a normal track-list page (NodeDetails uses 50, the old flat
-// version of this used 20) — each entry here now expands into its real
-// tracklist (see fetchBcOnlyReleaseDetails' own comment), so a page can
-// mean dozens of fresh YouTube lookups rather than one per row. Keeping
-// the page small keeps that under the user's own control instead of
-// firing all at once.
-const PAGE_SIZE = 6;
+// Each entry here expands into its real tracklist (see
+// fetchBcOnlyReleaseDetails' own comment), so a page can mean dozens of
+// fresh YouTube lookups rather than one per row — kept below NodeDetails'
+// own 50-per-page so opening a page doesn't fire everything at once.
+const PAGE_SIZE = 10;
 
 export const BandcampOnlyResults = ({ node, isLabel, state, actions }) => {
   const bcOnly = actions.getBandcampOnly(node.id);
@@ -25,12 +22,6 @@ export const BandcampOnlyResults = ({ node, isLabel, state, actions }) => {
 
   return (
     <div className="mt-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground/70">Only on Bandcamp ({bcOnly.releases.length})</p>
-        <button type="button" onClick={() => actions.mutateState(value => { value.bandcampOnlyView[node.id] = false; })} className={`${buttonSecondary} gap-1`}>
-          <ArrowLeft className="size-3" /> Back to Discogs tracks
-        </button>
-      </div>
       <p className="mb-3 text-[11.5px] leading-5 text-muted-foreground/70">
         Releases on {node.name}'s Bandcamp page with no confident match in their Discogs catalog. Title matching is heuristic, not exact — false positives can happen.
       </p>

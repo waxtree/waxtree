@@ -3854,9 +3854,14 @@ async function fetchBcOnlyReleaseDetails(releases){
       const tracks=(data?.tracks||[]).map((t,i)=>{
         const id='bconlyt:'+r.bcUrl+':'+i;
         const track={
+          // A Bandcamp-embedded YouTube reference, when present, is a
+          // direct authoritative match — skips the fuzzy YouTube search
+          // entirely for this track (TrackRow only searches when videoId
+          // is falsy). Rare (verified against several real releases,
+          // including a well-known label's), but zero-cost to use.
           id,title:t.title,album:r.album,duration:t.duration||null,
           trackArtistName:r.trackArtistName,releaseArtistName:r.releaseArtistName,
-          label:r.label,videoId:null,year:null,genre:null,thumbUrl:r.thumbUrl,
+          label:r.label,videoId:t.youtubeId||null,year:null,genre:null,thumbUrl:r.thumbUrl,
         };
         discoveredTracks[id]=track; // so play/like/queue resolve it, same pattern Related Tracks uses
         return track;

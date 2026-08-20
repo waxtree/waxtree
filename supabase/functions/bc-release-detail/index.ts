@@ -22,6 +22,8 @@ interface TrackinfoItem {
   title?: string;
   track_num?: number;
   duration?: number;
+  video_source_type?: string | null;
+  video_source_id?: string | null;
 }
 
 Deno.serve(async (req: Request) => {
@@ -53,10 +55,20 @@ Deno.serve(async (req: Request) => {
       .replace(/&gt;/g, '>');
     const data = JSON.parse(raw) as { trackinfo?: TrackinfoItem[] };
     const trackinfo = data.trackinfo || [];
+    // A track can carry its own official video reference — when it's a
+    // YouTube one, that's a direct, zero-ambiguity, zero-quota-cost match
+    // (no search needed at all), strictly better than anything the fuzzy
+    // resolver could find. Rare in practice (checked several real releases,
+    // including a well-known label's — null on every track), but free to
+    // check and use when it's there.
     const tracks = trackinfo
       .filter((t) => t.title)
       .sort((a, b) => (a.track_num || 0) - (b.track_num || 0))
-      .map((t) => ({ title: t.title as string, duration: secondsToDuration(t.duration || 0) }));
+      .map((t) => ({
+        title: t.title as string,
+        duration: secondsToDuration(t.duration || 0),
+        youtubeId: t.video_source_type === 'youtube' && t.video_source_id ? t.video_source_id : null,
+      }));
 
     return respond({ tracks });
   } catch (err) {
