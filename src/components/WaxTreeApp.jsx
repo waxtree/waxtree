@@ -129,11 +129,6 @@ const ProfileModal = ({ state, session, actions }) => {
   const [artistQuery, setArtistQuery] = useState('');
   const [artistResults, setArtistResults] = useState([]);
   const artistSearchTimer = useRef(null);
-  // Total nodes across every branch, not search-bar use — see addNode's
-  // own comment in waxTreeEngine.jsx for why.
-  const nodeCount = state.nodes.length;
-  const level = actions.getLevelFromCount(nodeCount);
-  const progress = actions.getProgressToNext(nodeCount);
   // Vinyl specifically, not vinyl+digital combined — matches what the user
   // actually means by "my collection" (My Libraries' own Vinyl count) and
   // what they're counting by hand ("805 records, 200+ are Dub Techno") when
@@ -192,13 +187,6 @@ const ProfileModal = ({ state, session, actions }) => {
           )}
         </div>
       </div>
-      <div className="border-b border-border py-4 text-center"><strong className="block text-xl">{level.title}</strong><span className="mt-1 block text-[13px] text-muted-foreground">{level.tagline}</span></div>
-      {level.level < 15 && (
-        <>
-          <div className="mt-3.5 h-1.5 overflow-hidden rounded bg-secondary"><div style={{ width: `${progress}%` }} className="h-full rounded bg-primary" /></div>
-          <p className="mt-1 text-[11px] text-muted-foreground">{progress}% to next level</p>
-        </>
-      )}
       <div className="mt-4">
         <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Top Genres</span>
         {topGenres.length > 0 ? (
