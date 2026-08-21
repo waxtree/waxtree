@@ -1486,7 +1486,7 @@ const st={
   // playlistDropId/exploreDropKey above.
   trackHelpDropId:null,
   profileOpen:false,
-  likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,discogsSyncing:false,
+  likesModal:false,historyModal:false,settingsModal:false,profileModal:false,levelsModal:false,followsModal:false,discogsSyncing:false,
   likesGenreOpen:new Set(), // which genre sections are expanded in My Likes — transient, not persisted
   follows:saved?.follows||[],
   // type+':'+discogs_id -> array of release ids already seen for that
@@ -3137,6 +3137,15 @@ async function searchDiscogs(q,{background=false}={}){
   );
   lsSet('s:'+q,r);return r;
 }
+// Favorite Artists search — same underlying search bar backs both (real
+// Discogs matches, same 7s ceiling, same shared cache), filtered to
+// artist-only results since that's the only thing a Favorite Artists pick
+// can be.
+async function searchArtistsForFavorites(q){
+  if(!q.trim())return[];
+  const results=await searchDiscogs(q.trim());
+  return results.filter(r=>r.type==='artist');
+}
 
 // ── Explore by genre/year ──────────────────────────────────
 // Scoped to Electronic's own sub-genres (Discogs "style") for now — that's
@@ -4698,7 +4707,7 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
+  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,

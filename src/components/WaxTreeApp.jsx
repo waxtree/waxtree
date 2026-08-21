@@ -1,5 +1,5 @@
 import { ArrowUpRight, ChevronDown, Heart, Tag } from 'lucide-react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { CookieBanner, ThemeFrame } from '@/components/AppChrome';
 import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
@@ -71,6 +71,7 @@ const ModalLayer = ({ state, session, actions }) => {
   if (state.librariesModal) return <LibrariesModal state={state} actions={actions} />;
   if (state.followsModal) return <FollowsModal state={state} actions={actions} />;
   if (state.profileModal) return <ProfileModal state={state} session={session} actions={actions} />;
+  if (state.levelsModal) return <LevelsModal state={state} actions={actions} />;
   if (state.settingsModal) return <SettingsModal state={state} session={session} actions={actions} />;
   if (state.heroesModal) return <HeroesModal state={state} actions={actions} />;
   if (state.newReleasesModal) return <NewReleasesModal state={state} actions={actions} />;
@@ -125,7 +126,9 @@ const ProfileModal = ({ state, session, actions }) => {
   const close = () => actions.mutateState(value => { value.profileModal = false; });
   const username = session?.user?.user_metadata?.username || session?.user?.email?.split('@')[0] || 'Profile';
   const avatar = actions.getAvatarUrl();
-  const [newArtist, setNewArtist] = useState('');
+  const [artistQuery, setArtistQuery] = useState('');
+  const [artistResults, setArtistResults] = useState([]);
+  const artistSearchTimer = useRef(null);
   // Total nodes across every branch, not search-bar use — see addNode's
   // own comment in waxTreeEngine.jsx for why.
   const nodeCount = state.nodes.length;
@@ -140,17 +143,54 @@ const ProfileModal = ({ state, session, actions }) => {
     return result;
   }, {});
   const topGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  const addFavoriteArtist = () => {
-    const name = newArtist.trim();
-    if (!name || state.favoriteArtists.includes(name)) return;
-    actions.mutateState(value => { value.favoriteArtists = [...value.favoriteArtists, name]; });
-    setNewArtist('');
+  const updateArtistQuery = event => {
+    const q = event.target.value;
+    setArtistQuery(q);
+    clearTimeout(artistSearchTimer.current);
+    if (!q.trim()) { setArtistResults([]); return; }
+    // Same debounced-live-search shape as the main search bar (Search.jsx's
+    // own liveSearchTick) — separate local state here rather than reusing
+    // state.q/state.results, which back the actual search bar and would
+    // otherwise collide with it.
+    artistSearchTimer.current = setTimeout(() => { actions.searchArtistsForFavorites(q).then(setArtistResults); }, 300);
+  };
+  const pickFavoriteArtist = result => {
+    setArtistQuery('');
+    setArtistResults([]);
+    if (state.favoriteArtists.some(artist => artist.discogsId === result.id)) return;
+    actions.mutateState(value => { value.favoriteArtists = [...value.favoriteArtists, { name: result.title, discogsId: result.id }]; });
   };
   return (
     <Modal title="🌲 My Profile" close={close}>
       <div className="flex flex-col items-center gap-2 border-b border-border py-4">
         {avatar ? <img className="size-20 rounded-full object-cover" src={avatar} alt="" /> : <div className="flex size-20 items-center justify-center rounded-full bg-secondary text-2xl font-bold text-primary">{username.slice(0, 2).toUpperCase()}</div>}
         <strong className="text-base">{username}</strong>
+      </div>
+      <div className="border-b border-border pb-4">
+        <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Favorite Artists</span>
+        {state.favoriteArtists.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {state.favoriteArtists.map(artist => (
+              <span key={artist.discogsId} className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground">
+                {artist.name}
+                <button type="button" onClick={() => actions.mutateState(value => { value.favoriteArtists = value.favoriteArtists.filter(item => item.discogsId !== artist.discogsId); })} className="text-muted-foreground/70 hover:text-destructive">×</button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="relative">
+          <input value={artistQuery} onChange={updateArtistQuery} placeholder="Add an artist..." className={modalInput} />
+          {artistResults.length > 0 && (
+            <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-[310] max-h-[220px] overflow-y-auto rounded-lg border border-border bg-card shadow-[var(--wt-shadow)]">
+              {artistResults.slice(0, 10).map(result => (
+                <button key={result.id} type="button" onClick={() => pickFavoriteArtist(result)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-muted">
+                  {result.thumb ? <img className="size-7 shrink-0 rounded object-cover" src={result.thumb} alt="" /> : <div className="flex size-7 shrink-0 items-center justify-center rounded bg-secondary text-muted-foreground"><ArtistIcon className="size-3.5" /></div>}
+                  <span className="truncate text-[12.5px]">{result.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
       <div className="border-b border-border py-4 text-center"><strong className="block text-xl">{level.title}</strong><span className="mt-1 block text-[13px] text-muted-foreground">{level.tagline}</span></div>
       {level.level < 15 && (
@@ -159,37 +199,41 @@ const ProfileModal = ({ state, session, actions }) => {
           <p className="mt-1 text-[11px] text-muted-foreground">{progress}% to next level</p>
         </>
       )}
-      {topGenres.length > 0 && (
-        <div className="mt-4 border-b border-border pb-4">
-          <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Top Genres</span>
+      <div className="mt-4">
+        <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Top Genres</span>
+        {topGenres.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {topGenres.map(([genre, count]) => {
               const color = actions.genreColor(genre);
               return <span key={genre} style={{ backgroundColor: `${color}1A`, borderColor: `${color}66`, color }} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[10px] border px-2 py-1 text-[11px] font-bold">{genre}<span className="opacity-70">· {count}</span></span>;
             })}
           </div>
-        </div>
-      )}
-      <div className="mt-4 border-b border-border pb-4">
-        <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Favorite Artists</span>
-        {state.favoriteArtists.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {state.favoriteArtists.map(name => (
-              <span key={name} className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground">
-                {name}
-                <button type="button" onClick={() => actions.mutateState(value => { value.favoriteArtists = value.favoriteArtists.filter(item => item !== name); })} className="text-muted-foreground/70 hover:text-destructive">×</button>
-              </span>
-            ))}
-          </div>
+        ) : (
+          <p className="text-[11.5px] leading-5 text-muted-foreground/70">
+            {state.discogsCollection.some(release => release.isVinyl) ? "Your synced collection doesn't have genre data yet — hit Sync now in My Libraries to refresh it." : 'Sync your Discogs vinyl collection to see your top genres.'}
+          </p>
         )}
-        <input
-          value={newArtist}
-          onChange={event => setNewArtist(event.target.value)}
-          onKeyDown={event => { if (event.key === 'Enter') addFavoriteArtist(); }}
-          placeholder="Add an artist..."
-          className={modalInput}
-        />
       </div>
+    </Modal>
+  );
+};
+
+const LevelsModal = ({ state, actions }) => {
+  const close = () => actions.mutateState(value => { value.levelsModal = false; });
+  // Total nodes across every branch, not search-bar use — see addNode's
+  // own comment in waxTreeEngine.jsx for why.
+  const nodeCount = state.nodes.length;
+  const level = actions.getLevelFromCount(nodeCount);
+  const progress = actions.getProgressToNext(nodeCount);
+  return (
+    <Modal title="🌳 Digging Levels" close={close}>
+      <div className="border-b border-border py-4 text-center"><strong className="block text-xl">{level.title}</strong><span className="mt-1 block text-[13px] text-muted-foreground">{level.tagline}</span></div>
+      {level.level < 15 && (
+        <>
+          <div className="mt-3.5 h-1.5 overflow-hidden rounded bg-secondary"><div style={{ width: `${progress}%` }} className="h-full rounded bg-primary" /></div>
+          <p className="mt-1 text-[11px] text-muted-foreground">{progress}% to next level</p>
+        </>
+      )}
       <div className="mt-4 flex flex-col gap-1.5">
         {Array.from({ length: 15 }, (_, index) => index + 1).map(number => {
           const item = actions.getLevelFromCount(number === 15 ? 10001 : [0, 21, 61, 121, 201, 351, 501, 751, 1001, 1501, 2001, 3001, 4501, 6501, 10001][number - 1]);
