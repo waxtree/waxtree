@@ -1,5 +1,5 @@
-import { ArrowUpRight, Heart, Tag } from 'lucide-react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { ArrowUpRight, ChevronDown, Heart, Tag } from 'lucide-react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { CookieBanner, ThemeFrame } from '@/components/AppChrome';
 import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
@@ -70,7 +70,8 @@ const ModalLayer = ({ state, session, actions }) => {
   if (state.historyModal) return <HistoryModal state={state} actions={actions} />;
   if (state.librariesModal) return <LibrariesModal state={state} actions={actions} />;
   if (state.followsModal) return <FollowsModal state={state} actions={actions} />;
-  if (state.profileModal) return <ProfileModal state={state} actions={actions} />;
+  if (state.profileModal) return <ProfileModal state={state} session={session} actions={actions} />;
+  if (state.levelsModal) return <LevelsModal state={state} actions={actions} />;
   if (state.settingsModal) return <SettingsModal state={state} session={session} actions={actions} />;
   if (state.heroesModal) return <HeroesModal state={state} actions={actions} />;
   if (state.newReleasesModal) return <NewReleasesModal state={state} actions={actions} />;
@@ -121,15 +122,99 @@ const HistoryModal = ({ state, actions }) => {
   );
 };
 
-const ProfileModal = ({ state, actions }) => {
+const ProfileModal = ({ state, session, actions }) => {
   const close = () => actions.mutateState(value => { value.profileModal = false; });
+  const username = session?.user?.user_metadata?.username || session?.user?.email?.split('@')[0] || 'Profile';
+  const avatar = actions.getAvatarUrl();
+  const [artistQuery, setArtistQuery] = useState('');
+  const [artistResults, setArtistResults] = useState([]);
+  const artistSearchTimer = useRef(null);
+  // Vinyl specifically, not vinyl+digital combined — matches what the user
+  // actually means by "my collection" (My Libraries' own Vinyl count) and
+  // what they're counting by hand ("805 records, 200+ are Dub Techno") when
+  // judging whether this reflects their real taste.
+  const genreCounts = state.discogsCollection.filter(release => release.isVinyl).reduce((result, release) => {
+    (release.genres || []).forEach(genre => { result[genre] = (result[genre] || 0) + 1; });
+    return result;
+  }, {});
+  const topGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const updateArtistQuery = event => {
+    const q = event.target.value;
+    setArtistQuery(q);
+    clearTimeout(artistSearchTimer.current);
+    if (!q.trim()) { setArtistResults([]); return; }
+    // Same debounced-live-search shape as the main search bar (Search.jsx's
+    // own liveSearchTick) — separate local state here rather than reusing
+    // state.q/state.results, which back the actual search bar and would
+    // otherwise collide with it.
+    artistSearchTimer.current = setTimeout(() => { actions.searchArtistsForFavorites(q).then(setArtistResults); }, 300);
+  };
+  const pickFavoriteArtist = result => {
+    setArtistQuery('');
+    setArtistResults([]);
+    if (state.favoriteArtists.some(artist => artist.discogsId === result.id)) return;
+    actions.mutateState(value => { value.favoriteArtists = [...value.favoriteArtists, { name: result.title, discogsId: result.id }]; });
+  };
+  return (
+    <Modal title="🌲 My Profile" close={close}>
+      <div className="flex flex-col items-center gap-2 border-b border-border py-4">
+        {avatar ? <img className="size-20 rounded-full object-cover" src={avatar} alt="" /> : <div className="flex size-20 items-center justify-center rounded-full bg-secondary text-2xl font-bold text-primary">{username.slice(0, 2).toUpperCase()}</div>}
+        <strong className="text-base">{username}</strong>
+      </div>
+      <div className="border-b border-border pb-4">
+        <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Favorite Artists</span>
+        {state.favoriteArtists.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {state.favoriteArtists.map(artist => (
+              <span key={artist.discogsId} className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground">
+                {artist.name}
+                <button type="button" onClick={() => actions.mutateState(value => { value.favoriteArtists = value.favoriteArtists.filter(item => item.discogsId !== artist.discogsId); })} className="text-muted-foreground/70 hover:text-destructive">×</button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="relative">
+          <input value={artistQuery} onChange={updateArtistQuery} placeholder="Add an artist..." className={modalInput} />
+          {artistResults.length > 0 && (
+            <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-[310] max-h-[220px] overflow-y-auto rounded-lg border border-border bg-card shadow-[var(--wt-shadow)]">
+              {artistResults.slice(0, 10).map(result => (
+                <button key={result.id} type="button" onClick={() => pickFavoriteArtist(result)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-muted">
+                  {result.thumb ? <img className="size-7 shrink-0 rounded object-cover" src={result.thumb} alt="" /> : <div className="flex size-7 shrink-0 items-center justify-center rounded bg-secondary text-muted-foreground"><ArtistIcon className="size-3.5" /></div>}
+                  <span className="truncate text-[12.5px]">{result.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="mt-4">
+        <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Top Genres</span>
+        {topGenres.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {topGenres.map(([genre, count]) => {
+              const color = actions.genreColor(genre);
+              return <span key={genre} style={{ backgroundColor: `${color}1A`, borderColor: `${color}66`, color }} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[10px] border px-2 py-1 text-[11px] font-bold">{genre}<span className="opacity-70">· {count}</span></span>;
+            })}
+          </div>
+        ) : (
+          <p className="text-[11.5px] leading-5 text-muted-foreground/70">
+            {state.discogsCollection.some(release => release.isVinyl) ? "Your synced collection doesn't have genre data yet — hit Sync now in My Libraries to refresh it." : 'Sync your Discogs vinyl collection to see your top genres.'}
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
+const LevelsModal = ({ state, actions }) => {
+  const close = () => actions.mutateState(value => { value.levelsModal = false; });
   // Total nodes across every branch, not search-bar use — see addNode's
   // own comment in waxTreeEngine.jsx for why.
   const nodeCount = state.nodes.length;
   const level = actions.getLevelFromCount(nodeCount);
   const progress = actions.getProgressToNext(nodeCount);
   return (
-    <Modal title="🌲 My Profile" close={close}>
+    <Modal title="🌳 Digging Levels" close={close}>
       <div className="border-b border-border py-4 text-center"><strong className="block text-xl">{level.title}</strong><span className="mt-1 block text-[13px] text-muted-foreground">{level.tagline}</span></div>
       {level.level < 15 && (
         <>
@@ -171,6 +256,14 @@ const FollowsModal = ({ state, actions }) => {
 
 const LibrariesModal = ({ state, actions }) => {
   const [scanStatus, setScanStatus] = useState('');
+  // Local to the modal, not persisted state — same treatment as
+  // librariesSearch's own scope, but genres are meaningful per-tab (vinyl
+  // and digital can have entirely different genre sets), so switching tabs
+  // resets the selection instead of silently filtering the new tab against
+  // genres that may not even exist in it.
+  const [selectedGenres, setSelectedGenres] = useState([]);
+  const [genreMenuOpen, setGenreMenuOpen] = useState(false);
+  useEffect(() => { setSelectedGenres([]); }, [state.librariesTab]);
   const close = () => {
     if (state.discogsSyncing) return;
     actions.mutateState(value => { value.librariesModal = false; value.welcomeSyncIntro = false; });
@@ -178,8 +271,11 @@ const LibrariesModal = ({ state, actions }) => {
   const vinylEntries = state.discogsCollection.filter(release => release.isVinyl);
   const digitalEntries = actions.getDigitalLibraryEntries();
   const source = state.librariesTab === 'vinyl' ? vinylEntries : digitalEntries;
+  const allGenres = [...new Set(source.flatMap(release => release.genres || []))].sort();
+  const toggleGenre = genre => setSelectedGenres(prev => (prev.includes(genre) ? prev.filter(item => item !== genre) : [...prev, genre]));
   const query = state.librariesSearch.trim().toLowerCase();
-  const filtered = query ? source.filter(release => [release.title, release.artist, release.labelExploreName, ...(release.genres || [])].filter(Boolean).join(' ').toLowerCase().includes(query)) : source;
+  const filtered = (query ? source.filter(release => [release.title, release.artist, release.labelExploreName, ...(release.genres || [])].filter(Boolean).join(' ').toLowerCase().includes(query)) : source)
+    .filter(release => !selectedGenres.length || (release.genres || []).some(genre => selectedGenres.includes(genre)));
   const tabs = [
     ['vinyl', '💽 Vinyl', vinylEntries.length],
     ['digital', '💾 Digital', digitalEntries.length],
@@ -256,6 +352,34 @@ const LibrariesModal = ({ state, actions }) => {
       ) : (
         <>
           <input value={state.librariesSearch} onChange={event => actions.mutateState(value => { value.librariesSearch = event.target.value; })} className={`${modalInput} my-3`} placeholder="Search artist, release or label…" />
+          {allGenres.length > 0 && (
+            <div className="relative mb-3 inline-block">
+              <button
+                type="button"
+                onClick={() => setGenreMenuOpen(value => !value)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors ${selectedGenres.length ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary hover:text-primary'}`}
+              >
+                Select by Genre{selectedGenres.length ? ` (${selectedGenres.length})` : ''}
+                <ChevronDown className="size-3" />
+              </button>
+              {genreMenuOpen && (
+                <div className="absolute left-0 top-[calc(100%+4px)] z-[310] max-h-[280px] w-[320px] overflow-y-auto rounded-lg border border-border bg-card p-2.5 shadow-[var(--wt-shadow)]">
+                  <div className="flex flex-wrap gap-1.5">
+                    {allGenres.map(genre => (
+                      <button
+                        key={genre}
+                        type="button"
+                        onClick={() => toggleGenre(genre)}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${selectedGenres.includes(genre) ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary hover:text-primary'}`}
+                      >
+                        {genre}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div className="max-h-[420px] overflow-y-auto">
             {filtered.length ? filtered.map((release, index) => (
               <div key={release.discogsUrl || `${release.title}-${index}`} className="flex items-center gap-2.5 border-b border-border py-2">

@@ -1013,7 +1013,18 @@ const FREE_NODE_LIMIT=15;
 // their old node.data forever otherwise (the a7/l8-style API-response
 // cache bump alone doesn't reach nodes a user already added; selectNode()
 // and the boot sweep below re-fetch them once each).
-const TRACK_DATA_VERSION=10; // bumped: buildTrackEntries now carries master_id as an altId (see its own comment) — a shared/local cache entry from before this fix never had that field, so ownership badges silently kept missing color/pressing variants no matter how many times a user cleared their own local cache, since the shared cross-user cache (getSharedNodeCache) was still serving the pre-fix shape
+// NOT bumped for the new bandcampUrl field, deliberately — bumping this
+// triggers a boot-time sweep (see the `_v!==TRACK_DATA_VERSION` re-fetch
+// loop below) that re-fetches EVERY label/artist node already in a user's
+// tree, all at once, no concurrency limit beyond dReqRaw's own shared
+// throttle. Confirmed live 2026-08-21: a tree with a few dozen explored
+// nodes turned that into a multi-minute "stuck on Loading" for the whole
+// app — a self-inflicted rate-limit storm far worse than the thing being
+// fixed (an old node missing one optional field, which just falls back to
+// the pre-existing name-guessing behavior, not an error). A node picks up
+// bandcampUrl naturally the next time it's genuinely re-fetched for any
+// other reason (removed and re-explored, a real cache expiry, etc.).
+const TRACK_DATA_VERSION=10;
 const DEMO_BRANCHES=[{id:'b1',name:'Branch 1'}];
 const DEMO_NODES=[{
   id:'d1',branchId:'b1',type:'artist',discogsId:148,name:'Larry Heard',
@@ -1070,7 +1081,7 @@ function saveSt(){
   // saved — guardAccountSwitch() (near st's own definition) reads it back
   // on the next boot to tell "my own data" apart from "a different
   // account's leftovers on this same browser". See its own comment.
-  const corePayload=JSON.stringify({ownerId:currentSessionUserId(),branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened});
+  const corePayload=JSON.stringify({ownerId:currentSessionUserId(),branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,favoriteArtists:st.favoriteArtists});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -1183,7 +1194,7 @@ async function pushStateToCloud(){
   // it's cheaply re-fetched on selectNode; only the tree structure itself
   // (which artist/label, which branch, pin/tag state) is irreplaceable.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
-  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,avatarDataUrl:getAvatarUrl()};
+  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,favoriteArtists:st.favoriteArtists,avatarDataUrl:getAvatarUrl()};
   try{
     // Refuse to silently overwrite a real backup with what looks like a
     // wiped local state — confirmed live TWICE now (2026-08-02, 2026-08-03)
@@ -1395,6 +1406,7 @@ async function hydrateFromCloud(){
     if(c.discogsCollSyncedAt)st.discogsCollSyncedAt=c.discogsCollSyncedAt;
     if(c.discogsHeroesSeen)st.discogsHeroesSeen=c.discogsHeroesSeen;
     if(c.alreadyListened)st.alreadyListened=c.alreadyListened;
+    if(c.favoriteArtists)st.favoriteArtists=c.favoriteArtists;
     if(c.avatarDataUrl){try{localStorage.setItem(AVATAR_KEY,c.avatarDataUrl);}catch{}}
     saveSt();
     ensureNodeLoaded(st.selectedId);
@@ -1474,7 +1486,7 @@ const st={
   // playlistDropId/exploreDropKey above.
   trackHelpDropId:null,
   profileOpen:false,
-  likesModal:false,historyModal:false,settingsModal:false,profileModal:false,followsModal:false,discogsSyncing:false,
+  likesModal:false,historyModal:false,settingsModal:false,profileModal:false,levelsModal:false,followsModal:false,discogsSyncing:false,
   likesGenreOpen:new Set(), // which genre sections are expanded in My Likes — transient, not persisted
   follows:saved?.follows||[],
   // type+':'+discogs_id -> array of release ids already seen for that
@@ -1520,6 +1532,7 @@ const st={
   // to the "Already Listened" section — opt-in, not automatic just because
   // every track happens to be marked played (see releaseCard's own button).
   alreadyListened:saved?.alreadyListened||[],
+  favoriteArtists:saved?.favoriteArtists||[],
 };
 document.documentElement.setAttribute('data-theme',st.theme);
 // Tailwind's dark: variant and every shadcn color token key off a `.dark`
@@ -3124,6 +3137,15 @@ async function searchDiscogs(q,{background=false}={}){
   );
   lsSet('s:'+q,r);return r;
 }
+// Favorite Artists search — same underlying search bar backs both (real
+// Discogs matches, same 7s ceiling, same shared cache), filtered to
+// artist-only results since that's the only thing a Favorite Artists pick
+// can be.
+async function searchArtistsForFavorites(q){
+  if(!q.trim())return[];
+  const results=await searchDiscogs(q.trim());
+  return results.filter(r=>r.type==='artist');
+}
 
 // ── Explore by genre/year ──────────────────────────────────
 // Scoped to Electronic's own sub-genres (Discogs "style") for now — that's
@@ -3321,6 +3343,43 @@ function genreColor(g){
 // Discogs suffixes an artist name with " (N)" to disambiguate same-named
 // artists (e.g. "Artist Name (2)") — strip it for display everywhere.
 const stripDiscogsSuffix=n=>(n||'').replace(/\s\(\d+\)$/,'');
+// Discogs' own artist/label "urls" field very often already carries the
+// exact Bandcamp link an editor entered by hand — a directly authoritative
+// source, unlike bcAutocomplete/Google/DDG name-guessing which has no way
+// to disambiguate two unrelated acts sharing a generic name (confirmed
+// live 2026-08-21: the label "Mosaic" resolved to some other "Mosaic" on
+// Bandcamp entirely — the real one, Steve O'Sullivan's London label, is
+// sitting right there in Discogs' own urls array). Normalized down to the
+// band root (no path/query) so it's directly usable as bc-discography's
+// knownBandUrl.
+function extractBandcampUrl(urls){
+  const hit=(urls||[]).find(u=>/\.bandcamp\.com/i.test(u||''));
+  if(!hit)return null;
+  const m=hit.match(/^https?:\/\/([^/?#]+\.bandcamp\.com)/i);
+  return m?'https://'+m[1]:null;
+}
+// A dedicated, lightweight lookup (one small Discogs call, just the
+// artist/label record — nothing like fetchArtistData/fetchLabelData's own
+// heavy per-release fan-out) rather than relying on node.data.bandcampUrl —
+// that field only exists on data fetched after this feature shipped, and a
+// node already cached from before it (which is most of anyone's existing
+// tree) would otherwise never pick it up without a full, expensive
+// re-fetch. This runs fresh every time "Only on Bandcamp" is opened —
+// acceptable since it's a deliberate, infrequent action, not something
+// that fires automatically for every node the way fetchArtistData does.
+let bandcampUrlCache={}; // "type:id" → url|null
+async function fetchDiscogsBandcampUrl(type,discogsId){
+  const key=type+':'+discogsId;
+  if(key in bandcampUrlCache)return bandcampUrlCache[key];
+  try{
+    const data=await dReq((type==='label'?'/labels/':'/artists/')+discogsId,{},{foreground:true});
+    const url=extractBandcampUrl(data.urls);
+    bandcampUrlCache[key]=url;
+    return url;
+  }catch{
+    return null; // not cached — a transient failure shouldn't permanently poison this
+  }
+}
 function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='',vinylTitles=null){
   const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.title);
   if(!tracklist.length)return[];
@@ -3558,6 +3617,7 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:labels,labelStr:labels.length?`Released on: ${labels.join(', ')}`:null},
     correlatedArtists:[],
     tracks,trackCount:relData.pagination.items,
+    bandcampUrl:extractBandcampUrl(artData.urls),
     _v:TRACK_DATA_VERSION
   };
   lsSet('a7:'+discogsId,nd);
@@ -3657,6 +3717,7 @@ async function fetchLabelData(discogsId,isCancelled=()=>false){
     country:labData.country||null,
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:artists,artistStr:artists.length?`Artists include: ${artists.slice(0,5).join(', ')}`:null},
     tracks,trackCount:relData.pagination.items,
+    bandcampUrl:extractBandcampUrl(labData.urls),
     _v:TRACK_DATA_VERSION
   };
   lsSet('l8:'+discogsId,nd);
@@ -3722,7 +3783,8 @@ async function fetchBandcamp(nodeId,artistName){
   bcCacheMap[nodeId]={tracks:[],loading:true,err:null};
   rr();
   try{
-    const{data,error}=await sb.functions.invoke('bc-search',{body:{artist:artistName}});
+    const knownBandUrl=getNode(nodeId)?.data?.bandcampUrl||null;
+    const{data,error}=await sb.functions.invoke('bc-search',{body:{artist:artistName,knownBandUrl}});
     if(error)throw new Error(error.message);
     bcCacheMap[nodeId]={tracks:data?.tracks||[],loading:false,err:null};
   }catch(e){
@@ -3796,13 +3858,16 @@ async function fetchBandcampOnly(nodeId){
   try{
     const isLabelNode=node.type==='label';
     const name=node.data?.name||node.name;
-    const body=isLabelNode?{label:name}:{artist:name};
-    const[{data:bcData,error:bcErr},discogsReleases]=await Promise.all([
-      sb.functions.invoke('bc-discography',{body}),
-      fetchAllDiscogsReleaseTitles(node.type,node.discogsId)
-    ]);
+    // Fetched fresh (not from node.data, which only has this on data
+    // loaded after the field existed — see fetchDiscogsBandcampUrl's own
+    // comment) — and checked BEFORE spending anything else, since bc-
+    // discography now flatly refuses to guess without it.
+    const knownBandUrl=await fetchDiscogsBandcampUrl(node.type,node.discogsId);
+    if(!knownBandUrl){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
+    const{data:bcData,error:bcErr}=await sb.functions.invoke('bc-discography',{body:{knownBandUrl}});
     if(bcErr)throw new Error(bcErr.message);
     if(!bcData?.resolved){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
+    const discogsReleases=await fetchAllDiscogsReleaseTitles(node.type,node.discogsId);
     const discogsEntries=discogsReleases.map(r=>({
       title:normalizeStr(r.title||''),
       artist:isLabelNode?normalizeStr(stripDiscogsSuffix(r.artist||'')):null,
@@ -4642,7 +4707,7 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,
+  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,

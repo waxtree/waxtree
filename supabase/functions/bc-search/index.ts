@@ -159,7 +159,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
   try {
-    const { artist, label, title, release } = await req.json();
+    const { artist, label, title, release, knownBandUrl } = await req.json();
     if (!artist?.trim() && !label?.trim()) return respond({ tracks: [], error: 'artist or label required' }, 400);
 
     const debug: string[] = [];
@@ -170,6 +170,16 @@ Deno.serve(async (req: Request) => {
     const labelN = norm(labelName);
     const keywordN = norm(keyword);
     const wantNames = [artistN, labelN].filter(Boolean);
+    // Discogs' own artist/label "urls" field, when WaxTree has it — see
+    // bc-discography's own comment on the same addition. A generic name
+    // ("Mosaic") has no way to be disambiguated by name-matching alone;
+    // knowing the real domain up front fixes that at its root instead of
+    // hoping a stricter text match happens to land right.
+    const knownDomain = typeof knownBandUrl === 'string' ? (knownBandUrl.match(/^https?:\/\/([^/]+\.bandcamp\.com)/i)?.[1] || null) : null;
+    if (knownDomain && !keyword) {
+      debug.push(`knownBandUrl: https://${knownDomain}`);
+      return respond({ tracks: [{ url: `https://${knownDomain}`, title: null, artist: null, album: null, released: null, thumb: null }], debug });
+    }
 
     // Enriched with real title/artist/album whenever the match came from a
     // structured bcAutocomplete hit (the common case now that strategy 1/2
@@ -185,10 +195,18 @@ Deno.serve(async (req: Request) => {
       thumb: null,
     }];
 
+    // A known domain doesn't just skip name-matching (see the no-keyword
+    // shortcut above) — it also gates every remaining strategy below: a
+    // candidate is only trusted if it's actually ON that domain, name
+    // match or not. Without this, a generic name like "Mosaic" could still
+    // pass verifyHit against the wrong "Mosaic" entirely even with the
+    // real domain known.
+    const onKnownDomain = (path: string) => !knownDomain || path.includes(knownDomain);
+
     // Strategy 1: Bandcamp's own search, artist + release/track title.
     if (artistName && keyword) {
       const hits = await bcAutocomplete(`${artistName} ${keyword}`);
-      const hit = hits.find((h) => verifyHit(h, wantNames, keywordN));
+      const hit = hits.find((h) => verifyHit(h, wantNames, keywordN) && onKnownDomain(h.item_url_path));
       debug.push(`bc(artist+kw): ${hit?.item_url_path || 'no verified match'}`);
       if (hit) return respond({ tracks: push(hit.item_url_path, hit), debug });
     }
@@ -199,7 +217,7 @@ Deno.serve(async (req: Request) => {
     // strategy 1 alone would miss.
     if (labelName && keyword) {
       const hits = await bcAutocomplete(`${labelName} ${keyword}`);
-      const hit = hits.find((h) => verifyHit(h, wantNames, keywordN));
+      const hit = hits.find((h) => verifyHit(h, wantNames, keywordN) && onKnownDomain(h.item_url_path));
       debug.push(`bc(label+kw): ${hit?.item_url_path || 'no verified match'}`);
       if (hit) return respond({ tracks: push(hit.item_url_path, hit), debug });
     }
@@ -209,13 +227,13 @@ Deno.serve(async (req: Request) => {
     // match on the credited name, which beats a generic search page.
     if (artistName) {
       const hits = await bcAutocomplete(artistName);
-      const hit = hits.find((h) => verifyHit(h, wantNames, ''));
+      const hit = hits.find((h) => verifyHit(h, wantNames, '') && onKnownDomain(h.item_url_path));
       debug.push(`bc(artist): ${hit?.item_url_path || 'no verified match'}`);
       if (hit) return respond({ tracks: push(hit.item_url_path, hit), debug });
     }
     if (labelName) {
       const hits = await bcAutocomplete(labelName);
-      const hit = hits.find((h) => verifyHit(h, wantNames, ''));
+      const hit = hits.find((h) => verifyHit(h, wantNames, '') && onKnownDomain(h.item_url_path));
       debug.push(`bc(label): ${hit?.item_url_path || 'no verified match'}`);
       if (hit) return respond({ tracks: push(hit.item_url_path, hit), debug });
     }
@@ -226,24 +244,25 @@ Deno.serve(async (req: Request) => {
     // pages consistently title themselves "Title | Artist | Label".
     // Without this, these were the strategies most likely to redirect to
     // an unrelated page: rank order alone is not correspondence.
+    const siteScope = knownDomain || 'bandcamp.com';
     const serperKey = Deno.env.get('SERPER_API_KEY') || '';
     if (keyword && serperKey) {
-      const q = `${artistName || labelName} ${keyword} site:bandcamp.com`;
+      const q = `${artistName || labelName} ${keyword} site:${siteScope}`;
       const url = await googleSearch(q, serperKey);
-      const ok = url ? await verifyPageTitle(url, wantNames, keywordN) : false;
+      const ok = url ? (onKnownDomain(url) && await verifyPageTitle(url, wantNames, keywordN)) : false;
       debug.push(`google(kw): ${url || 'null'} verified=${ok}`);
       if (url && ok) return respond({ tracks: push(url), debug });
     }
     if (serperKey) {
-      const q = `${artistName || labelName} site:bandcamp.com`;
+      const q = `${artistName || labelName} site:${siteScope}`;
       const url = await googleSearch(q, serperKey);
-      const ok = url ? await verifyPageTitle(url, wantNames, '') : false;
+      const ok = url ? (onKnownDomain(url) && await verifyPageTitle(url, wantNames, '')) : false;
       debug.push(`google(name): ${url || 'null'} verified=${ok}`);
       if (url && ok) return respond({ tracks: push(url), debug });
     }
     const ddgQ = keyword ? `${artistName || labelName} ${keyword} bandcamp` : `${artistName || labelName} bandcamp`;
     const ddgUrl = await ddgSearch(ddgQ);
-    const ddgOk = ddgUrl ? await verifyPageTitle(ddgUrl, wantNames, keywordN) : false;
+    const ddgOk = ddgUrl ? (onKnownDomain(ddgUrl) && await verifyPageTitle(ddgUrl, wantNames, keywordN)) : false;
     debug.push(`ddg: ${ddgUrl || 'null'} verified=${ddgOk}`);
     if (ddgUrl && ddgOk) return respond({ tracks: push(ddgUrl), debug });
 
