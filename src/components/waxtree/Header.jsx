@@ -1,4 +1,4 @@
-import { ListMusic, Moon, Sprout, Sun, User } from 'lucide-react';
+import { Moon, Sun, Tag, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Search } from '@/components/waxtree/Search';
@@ -22,14 +22,13 @@ export const Header = ({ state, session, actions }) => {
       <div className="flex-1" />
       <Button
         variant="outline"
-        title="Playlists"
         className={`h-auto gap-1 rounded-full px-3 py-1 text-xs ${playlistCount ? 'border-primary text-primary' : 'text-muted-foreground'}`}
         onClick={() => actions.mutateState(value => { value.playlistsModal = true; })}
       >
-        <ListMusic className="size-3.5" />{playlistCount > 0 && <span className="font-bold">{playlistCount}</span>}
+        <Tag className="size-3.5" /> Playlists{playlistCount > 0 && <span className="font-bold">{playlistCount}</span>}
       </Button>
       <Badge asChild className="h-auto cursor-pointer rounded-full border border-primary bg-primary/10 px-3 py-1 text-[11px] text-primary">
-        <button type="button" title={level.title} onClick={() => actions.mutateState(value => { value.levelsModal = true; })}><Sprout className="size-3.5" /></button>
+        <button type="button" onClick={() => actions.mutateState(value => { value.levelsModal = true; })}>{level.title}</button>
       </Badge>
       <div className="relative">
         <Button variant="outline" size="icon" title="Profile" className="h-auto rounded-full p-1.5 text-muted-foreground" onClick={event => { event.stopPropagation(); actions.mutateState(value => { value.profileOpen = !value.profileOpen; }); }}><User className="size-3.5" /></Button>
