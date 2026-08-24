@@ -1006,8 +1006,8 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 // ── Demo data ──────────────────────────────────────────────
-const FREE_WOOD_LIMIT=3;
-const FREE_NODE_LIMIT=15;
+const FREE_WOOD_LIMIT=2;
+const FREE_NODE_LIMIT=12;
 // Bump whenever buildTrackEntries/fetchArtistData/fetchLabelData's
 // per-track output shape changes — already-added artist/label nodes carry
 // their old node.data forever otherwise (the a7/l8-style API-response
