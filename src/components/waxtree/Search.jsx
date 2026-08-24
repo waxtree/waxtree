@@ -67,17 +67,34 @@ export const Search = ({ state, actions }) => {
         <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[300] hidden max-h-[280px] w-max min-w-full max-w-[540px] overflow-y-auto rounded-xl border border-border bg-card p-2.5 shadow-[var(--wt-shadow)] group-hover:block group-focus-within:block">
           <span className="mb-1.5 block text-[10px] font-bold uppercase text-muted-foreground/70">Recent Searches</span>
           <div className="flex flex-wrap gap-1.5">
-            {state.chips.map(name => (
-              <button
-                key={name}
-                type="button"
-                onClick={() => { const existing = state.nodes.find(node => node.name === name); if (existing) actions.selectNode(existing.id); else actions.mutateState(value => { value.q = name; actions.doSearch(); }); }}
-                className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground hover:border-primary"
-              >
-                <span>{name}</span>
-                <span onClick={event => { event.stopPropagation(); actions.removeChip(name); }} className="text-muted-foreground/70">×</span>
-              </button>
-            ))}
+            {state.chips.map(chip => {
+              // Legacy chips saved before this change are bare strings —
+              // treat those as plain search chips, same as before.
+              const isGenreYear = typeof chip === 'object' && chip.type === 'genreYear';
+              const name = typeof chip === 'string' ? chip : chip.name;
+              const handleClick = () => {
+                if (isGenreYear) {
+                  const existing = state.nodes.find(node => node.type === 'genreYear' && node.name === name);
+                  if (existing) actions.selectNode(existing.id);
+                  else actions.addGenreYearNode(chip.styles || [], chip.years || []);
+                } else {
+                  const existing = state.nodes.find(node => node.name === name);
+                  if (existing) actions.selectNode(existing.id);
+                  else actions.mutateState(value => { value.q = name; actions.doSearch(); });
+                }
+              };
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={handleClick}
+                  className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground hover:border-primary"
+                >
+                  <span>{name}</span>
+                  <span onClick={event => { event.stopPropagation(); actions.removeChip(name); }} className="text-muted-foreground/70">×</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

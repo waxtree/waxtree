@@ -1063,7 +1063,11 @@ function saveSt(){
   // pushStateToCloud() already does keeps this local write small; nodes
   // reload their .data on demand via ensureNodeLoaded(), same mechanism
   // already used after a cloud restore.
-  const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
+  // params (genreYear nodes only — their style/year query, since they have
+  // no discogsId to refetch by) has to survive this strip too, or
+  // ensureNodeLoaded()'s post-restore refetch runs with nothing to query —
+  // see retryNode's own comment on the bug this caused live.
+  const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags,params:n.params}));
   // discogsCollection/discogsWantlist (the full release lists, hundreds of
   // entries for an active collector) live in their own keys so a quota
   // issue there can never block saving the core app state below.
@@ -1193,7 +1197,9 @@ async function pushStateToCloud(){
   // Strip the heavy cached Discogs payload (bio, images, full tracklists) —
   // it's cheaply re-fetched on selectNode; only the tree structure itself
   // (which artist/label, which branch, pin/tag state) is irreplaceable.
-  const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags}));
+  // params (genreYear nodes' style/year query) has to survive this strip
+  // too — see the identical comment on pushLocal's own lightNodes above.
+  const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags,params:n.params}));
   const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,favoriteArtists:st.favoriteArtists,avatarDataUrl:getAvatarUrl()};
   try{
     // Refuse to silently overwrite a real backup with what looks like a
@@ -3182,6 +3188,14 @@ function addExploreYear(year){
   st.exploreYears=[...st.exploreYears,y];rr();
 }
 function removeExploreYear(year){st.exploreYears=st.exploreYears.filter(y=>y!==year);rr();}
+// Recent Searches chips carry {name,type,...} now, not a bare name string —
+// a genreYear chip needs its styles/years to reopen correctly (see Bug 1,
+// 2026-08-24: clicking it used to always fall through to a plain text
+// search, which can't find anything for a query like "Dub, Deep House,
+// 2012"). Existing users still have plain-string chips saved from before
+// this change, so every read site goes through this instead of assuming
+// the object shape.
+const chipName=c=>typeof c==='string'?c:c.name;
 // A genre/year search becomes a node, same as any other exploration —
 // persists in the tree (pin/tag/drag/reorder/move-to-branch all already
 // work generically on any node, no special-casing needed), and can be
@@ -3197,7 +3211,7 @@ function addGenreYearNode(styles,years){
   const node={id,branchId:bid,type:'genreYear',discogsId:null,name,parentId:null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null,params:{styles,years}};
   st.nodes=[node,...st.nodes]; // newest at the top — see addNode's own comment on the same change
   st.selectedId=id;st.activeBranchId=bid;
-  if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
+  if(!st.chips.some(c=>chipName(c)===name))st.chips=[{name,type:'genreYear',styles,years},...st.chips.slice(0,11)];
   rr();
   fetchGenreYearResults(id,styles,years);
 }
@@ -4008,7 +4022,7 @@ function addNode(type,discogsId,name,parentId,branchId,opts={}){
   }
   const newLvl=getLevelFromCount(st.nodes.length);
   if(newLvl.level>prevLvl.level)showLevelUpToast(newLvl);
-  if(!st.chips.includes(name))st.chips=[name,...st.chips.slice(0,11)];
+  if(!st.chips.some(c=>chipName(c)===name))st.chips=[{name,type:'search'},...st.chips.slice(0,11)];
   rr();
   const cancelled=startNodeLoad(id);
   const fn=type==='label'?fetchLabelData:fetchArtistData;
@@ -4023,6 +4037,16 @@ function addNode(type,discogsId,name,parentId,branchId,opts={}){
 }
 function retryNode(nodeId){
   const node=getNode(nodeId);if(!node)return;
+  // A genreYear node has no discogsId and isn't an artist/label — falling
+  // through to fetchArtistData(null,...) below (confirmed live 2026-08-24:
+  // that 404s, then a manual "Try again" on the resulting error re-ran
+  // through here again since node.params was also being dropped on
+  // save/restore — see the lightNodes fix — producing an unfiltered
+  // genre=Electronic search instead of the node's real style/year query).
+  // ensureNodeLoaded() calls this generically for any never-loaded node
+  // (boot restore, cloud restore), so the type check has to live here,
+  // not just at that one call site.
+  if(node.type==='genreYear'){retryGenreYearNode(nodeId);return;}
   node.error=null;
   // A cache hit applies instantly, no loading flash at all — previously
   // this always set loading=true first and let fetchArtistData/
@@ -4156,7 +4180,7 @@ function toggleLike(id){
   }
   rr();
 }
-function removeChip(name){st.chips=st.chips.filter(c=>c!==name);rr();}
+function removeChip(name){st.chips=st.chips.filter(c=>chipName(c)!==name);rr();}
 function addBranch(){if(!st.isPremium&&st.branches.length>=FREE_WOOD_LIMIT){st.premiumModal=true;rr();return;}const id='b'+Date.now();st.branches=[...st.branches,{id,name:'Branch '+(st.branches.length+1)}];st.activeBranchId=id;rr();}
 function removeBranch(id){
   if(st.branches.length<=1)return;
