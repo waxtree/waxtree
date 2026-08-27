@@ -46,6 +46,11 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
   const releaseTitle = first.album || first.title;
   const bandcampDirect = actions.findBcMatch(node.id, releaseTitle) || tracks.map(track => actions.findBcMatch(node.id, track.title)).find(Boolean);
   const digitalOnly = tracks.some(track => track.digital) && !tracks.some(track => track.hasVinyl);
+  // Same artist-vs-label field swap StoreButton already relies on below —
+  // on a label node, first.label actually holds the (repurposed) artist
+  // name, see buildTrackEntries's own comment on trueLabelId.
+  const releaseArtist = isLabel ? first.label : node.name;
+  const hardwax = actions.getHardwaxComment(releaseArtist, releaseTitle, first.catno);
 
   const exploreItem = item => {
     if (item.id) actions.addNode(item.type, item.id, item.name, node.id, node.branchId, { background: true });
@@ -80,6 +85,11 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
               return <span key={genre} style={{ backgroundColor: `${color}1A`, borderColor: `${color}66`, color }} className="inline-block shrink-0 whitespace-nowrap rounded-[10px] border px-[7px] py-px text-[10px] font-bold leading-[1.6]">{genre}</span>;
             })}
           </div>
+        )}
+        {hardwax && (
+          <p className="mt-1.5 text-[11px] italic leading-snug text-muted-foreground/80">
+            “{hardwax.comment}” <a href={hardwax.url} target="_blank" rel="noreferrer" className="not-italic font-semibold text-muted-foreground/60 hover:text-primary">— Hard Wax</a>
+          </p>
         )}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-[5px]">

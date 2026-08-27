@@ -3873,6 +3873,64 @@ function bcOnlyArtistMatches(bcArtistRaw,discogsArtistNorm){
 
 function getBandcampOnly(nodeId){return bcOnlyCacheMap[nodeId]||{status:'idle',releases:[]};}
 
+// Hard Wax (hardwax.com, the Berlin record store) writes a short editorial
+// blurb on every release they stock — e.g. "Minimal, stripped back techno"
+// — surfaced on the release card when a real match is confirmed. The edge
+// function (hardwax-match) is a dumb scrape only — it returns every
+// candidate the search page rendered, unfiltered — matching happens here,
+// reusing the SAME fuzzy-match helpers already tuned for the Bandcamp-only
+// cross-check (bcOnlyMatches/bcOnlyArtistMatches) rather than duplicating
+// that judgment call server-side. See bcOnlyMatches's own history: a
+// confident-but-wrong match (the "Mosaic" Bandcamp incident) is worse than
+// no match at all, so a result is only ever shown when BOTH title and
+// artist pass. Cached locally (release-level, not per-node — the same
+// release matched from an artist node or its label node shares one entry)
+// since the comment never changes and re-scraping on every visit would be
+// both wasteful and needlessly heavy on hardwax.com's own traffic.
+const hardwaxInFlight=new Set();
+function hardwaxCacheKey(artist,title,catno){
+  return catno?'hw:cat:'+normalizeStr(catno):'hw:at:'+normalizeStr(stripDiscogsSuffix(artist||''))+'|'+normalizeStr(title||'');
+}
+async function fetchHardwaxComment(ck,artist,title,catno){
+  hardwaxInFlight.add(ck);
+  try{
+    const titleNorm=normalizeStr(title);
+    const artistNorm=normalizeStr(stripDiscogsSuffix(artist||''));
+    const tryQuery=async query=>{
+      const{data,error}=await sb.functions.invoke('hardwax-match',{body:{query}});
+      if(error)throw new Error(error.message);
+      return(data?.results||[]).find(r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&bcOnlyArtistMatches(r.artist,artistNorm));
+    };
+    // Catalog number first when the release has one — effectively unique
+    // on its own, and Hard Wax's own search handles it precisely (a plain
+    // "ML-2247" search came back with exactly the right single release,
+    // confirmed live 2026-08-27). Falls back to artist+title when there's
+    // no catno yet (release detail still loading) or that search misses.
+    let hit=catno?await tryQuery(catno):null;
+    if(!hit&&artist&&title)hit=await tryQuery(`${artist} ${title}`);
+    const result=hit?{comment:hit.comment,url:hit.url}:null;
+    lsSet(ck,result===null?false:result); // lsGet/lsSet can't store a bare null — false means "confirmed no match", same convention as getResolvedRemixArtist
+    rr();
+  }catch{
+    // Network/edge-function failure — leave uncached (not "confirmed no
+    // match") so a later render can retry instead of failing permanently.
+  }finally{
+    hardwaxInFlight.delete(ck);
+  }
+}
+// Synchronous cache lookup for use inside ReleaseCard's render — same
+// self-triggering pattern as getResolvedRemixArtist: kicks off the
+// background fetch on first sight of a release and returns undefined
+// (nothing to show yet) until it settles and triggers a re-render.
+function getHardwaxComment(artist,title,catno){
+  if(!title)return null;
+  const ck=hardwaxCacheKey(artist,title,catno);
+  const cached=lsGet(ck);
+  if(cached!==null)return cached||null; // false (confirmed no match) -> null
+  if(!hardwaxInFlight.has(ck))fetchHardwaxComment(ck,artist,title,catno);
+  return undefined;
+}
+
 // Cross-checks an artist/label's real Bandcamp discography (bc-discography,
 // the full catalog — unlike bcCacheMap above, which only ever holds the
 // single verified "home page" hit) against their COMPLETE Discogs release
@@ -4761,7 +4819,7 @@ export const waxTreeActions={
   playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
-  baseTitleKey,extractRemixCandidate,getResolvedRemixArtist,normalizeStr,
+  baseTitleKey,extractRemixCandidate,getHardwaxComment,getResolvedRemixArtist,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,
