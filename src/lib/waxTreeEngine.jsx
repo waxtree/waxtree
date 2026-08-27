@@ -3856,7 +3856,15 @@ function bcOnlyMatches(a,b){
   if(a===b)return true;
   const aw=a.split(' ').filter(w=>w.length>0),bw=b.split(' ').filter(w=>w.length>0);
   const an=trailingSeriesNumber(aw),bn=trailingSeriesNumber(bw);
-  if(an!==null&&bn!==null&&an!==bn)return false; // "Part III" vs "Part IV" — never the same release
+  // "Part III" vs "Part IV" — never the same release. Also catches the
+  // asymmetric case: a BARE title vs one WITH a trailing series number
+  // ("Phylyps Trak" vs "Phylyps Trak II") is just as much two different
+  // releases, but has no number to disagree with on the bare side — the
+  // substring/ratio check below would otherwise happily match "phylyps
+  // trak" as a 80%-length prefix of "phylyps trak ii". Confirmed live
+  // 2026-08-27: this collapsed Basic Channel's actual "Phylyps Trak" onto
+  // the Hard Wax entry for "Phylyps Trak II", surfacing the wrong comment.
+  if((an!==null||bn!==null)&&an!==bn)return false;
   if(a.includes(b)||b.includes(a)){
     const ratio=Math.min(a.length,b.length)/Math.max(a.length,b.length);
     if(ratio>=0.4)return true;
@@ -3896,18 +3904,44 @@ async function fetchHardwaxComment(ck,artist,title,catno){
   try{
     const titleNorm=normalizeStr(title);
     const artistNorm=normalizeStr(stripDiscogsSuffix(artist||''));
-    const tryQuery=async query=>{
-      const{data,error}=await sb.functions.invoke('hardwax-match',{body:{query}});
+    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&bcOnlyArtistMatches(r.artist,artistNorm);
+    const runQuery=async body=>{
+      const{data,error}=await sb.functions.invoke('hardwax-match',{body});
       if(error)throw new Error(error.message);
-      return(data?.results||[]).find(r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&bcOnlyArtistMatches(r.artist,artistNorm));
+      return data?.results||[];
+    };
+    let hit,actUrl;
+    const tryFind=async body=>{
+      const r=await runQuery(body);
+      hit=r.find(matches);
+      if(!hit)actUrl=actUrl||r.find(x=>bcOnlyArtistMatches(x.artist,artistNorm))?.actUrl;
     };
     // Catalog number first when the release has one — effectively unique
     // on its own, and Hard Wax's own search handles it precisely (a plain
     // "ML-2247" search came back with exactly the right single release,
-    // confirmed live 2026-08-27). Falls back to artist+title when there's
-    // no catno yet (release detail still loading) or that search misses.
-    let hit=catno?await tryQuery(catno):null;
-    if(!hit&&artist&&title)hit=await tryQuery(`${artist} ${title}`);
+    // confirmed live 2026-08-27).
+    if(catno)await tryFind({query:catno});
+    // Combined artist+title text search.
+    if(!hit&&artist&&title)await tryFind({query:`${artist} ${title}`});
+    // Artist name alone — a combined query can come back completely EMPTY
+    // for reasons that have nothing to do with whether the release is
+    // really in Hard Wax's catalog: confirmed live 2026-08-27,
+    // "Basic Channel Q 1.1" returns zero results outright (the "1.1"
+    // seemingly trips up their own search), while "Basic Channel" alone
+    // finds ten results — "Q 1.1" itself among them. Also the most
+    // reliable single query for discovering the artist's own act page
+    // when nothing above has yet.
+    if(!hit&&!actUrl&&artist)await tryFind({query:artist});
+    // Last resort: the artist's own full discography page (one page,
+    // every release, comment included) rather than trusting Hard Wax's
+    // own search ranking further — confirmed live 2026-08-27: a real,
+    // correctly-catalogued release ("Basic Channel: Radiance") never
+    // appeared at all for a fresh-session "Basic Channel Radiance"
+    // search, which surfaced only an unrelated compilation instead.
+    if(!hit&&actUrl){
+      const actResults=await runQuery({actUrl});
+      hit=actResults.find(matches);
+    }
     const result=hit?{comment:hit.comment,url:hit.url}:null;
     lsSet(ck,result===null?false:result); // lsGet/lsSet can't store a bare null — false means "confirmed no match", same convention as getResolvedRemixArtist
     rr();
