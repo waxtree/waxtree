@@ -85,6 +85,13 @@ export const Search = ({ state, actions }) => {
                 const existingGenreYearNode = state.nodes.find(node => node.type === 'genreYear' && node.name === name);
                 if (existingGenreYearNode) { actions.selectNode(existingGenreYearNode.id); return; }
                 if (isGenreYear) { actions.addGenreYearNode(chip.styles || [], chip.years || []); return; }
+                // Legacy chip AND the node it came from is gone too (deleted,
+                // or never survived a save from before params were kept) —
+                // last resort: reconstruct styles/years from the chip's own
+                // display name rather than silently misrouting to a text
+                // search that can't possibly match a query like this.
+                const parsed = typeof chip === 'string' ? actions.parseGenreYearChipName(name) : null;
+                if (parsed) { actions.addGenreYearNode(parsed.styles, parsed.years); return; }
                 const existing = state.nodes.find(node => node.name === name);
                 if (existing) actions.selectNode(existing.id);
                 else actions.mutateState(value => { value.q = name; actions.doSearch(); });

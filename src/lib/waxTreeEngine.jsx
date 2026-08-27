@@ -3220,6 +3220,29 @@ function retryGenreYearNode(nodeId){
   n.error=null;n.loading=true;rr();
   fetchGenreYearResults(nodeId,n.params?.styles||[],n.params?.years||[]);
 }
+// Recent Searches chips saved before genreYear chips carried real
+// {styles,years} data (see addGenreYearNode's own chip push) are just the
+// bare display name — if the node itself is also gone (deleted, or never
+// survived a save from before params were persisted), there's nothing left
+// to look up by. This reverses addGenreYearNode's own name format (styles
+// joined by ', ', then a '/'-joined year list) so a legacy chip can still
+// recreate the right search instead of the click falling through to a
+// plain text search — confirmed live 2026-08-24 this was still happening
+// for a chip old enough to predate both. Only fires when the trailing
+// segment is entirely plausible years — a real artist/label/track chip
+// essentially never has that shape, so this stays a safe last resort, not
+// the primary path (the exact-name node lookup above always wins first).
+function parseGenreYearChipName(name){
+  const parts=name.split(', ');
+  const last=parts[parts.length-1];
+  const yearTokens=last.split('/');
+  const maxYear=new Date().getFullYear()+1;
+  const looksLikeYears=yearTokens.every(t=>/^\d{4}$/.test(t)&&+t>=1900&&+t<=maxYear);
+  if(!looksLikeYears)return null;
+  const years=yearTokens.map(Number);
+  const styles=parts.slice(0,-1).filter(s=>s&&s!=='Electronic');
+  return{styles,years};
+}
 // Up to 3 pages of 100 per year (Discogs' own per_page ceiling) — 300
 // releases per selected year instead of the original 50 total. Stops
 // early once Discogs' own pagination.pages says there's nothing further
@@ -4733,7 +4756,7 @@ export const waxTreeActions={
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
   findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
-  liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
+  liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
   playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
