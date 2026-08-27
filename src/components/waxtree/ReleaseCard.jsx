@@ -44,7 +44,6 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
     if (resolved && !explore.some(item => item.type === 'artist' && item.id === resolved.id)) explore.push({ label: `Explore remix artist: ${resolved.name}`, type: 'artist', id: resolved.id, name: resolved.name });
   });
   const releaseTitle = first.album || first.title;
-  const bandcampDirect = actions.findBcMatch(node.id, releaseTitle) || tracks.map(track => actions.findBcMatch(node.id, track.title)).find(Boolean);
   const digitalOnly = tracks.some(track => track.digital) && !tracks.some(track => track.hasVinyl);
   // Same artist-vs-label field swap StoreButton already relies on below —
   // on a label node, first.label actually holds the (repurposed) artist
@@ -53,6 +52,12 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
   const releaseLabel = isLabel ? node.name : first.label;
   const hardwax = actions.getHardwaxComment(releaseArtist, releaseTitle, first.catno);
   const beatportDirect = actions.getBeatportDirect(releaseArtist, releaseLabel, releaseTitle);
+  // findBcMatch is cheap (already-fetched bulk catalog for THIS artist
+  // node, just a local scan) but only ever covers that one artist's own
+  // Bandcamp page — getBandcampDirect is the fallback for a release
+  // that's actually hosted elsewhere (a co-artist's page, or the label's),
+  // same gap getBeatportDirect exists to close for Beatport.
+  const bandcampDirect = actions.findBcMatch(node.id, releaseTitle) || tracks.map(track => actions.findBcMatch(node.id, track.title)).find(Boolean) || actions.getBandcampDirect(releaseArtist, releaseLabel, releaseTitle);
 
   const exploreItem = item => {
     if (item.id) actions.addNode(item.type, item.id, item.name, node.id, node.branchId, { background: true });
