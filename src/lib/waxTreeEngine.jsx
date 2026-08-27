@@ -3896,8 +3896,22 @@ function getBandcampOnly(nodeId){return bcOnlyCacheMap[nodeId]||{status:'idle',r
 // since the comment never changes and re-scraping on every visit would be
 // both wasteful and needlessly heavy on hardwax.com's own traffic.
 const hardwaxInFlight=new Set();
+// v2 — every release the user tried during the first couple of matching-
+// logic rounds (px-class drop, the Phylyps Trak/Trak II collapse, the
+// dead-end "artist title" query) got permanently cached client-side as
+// "confirmed no match" (false, same convention getResolvedRemixArtist
+// uses) — a real fix to the MATCHING logic doesn't invalidate that; a
+// user with those entries already sitting in localStorage would keep
+// getting the same stale null forever, indistinguishable from "genuinely
+// not on Hard Wax". Confirmed live 2026-08-27: the exact releases already
+// fixed and re-verified against the deployed function still showed no
+// comment for the user after the fix shipped. Bumping the key version
+// just makes every old entry a cache miss — re-fetched lazily, on the
+// next normal render, same as any other miss; no boot-time sweep needed
+// since this cache (unlike node.data) is only ever read from inside
+// ReleaseCard's own render.
 function hardwaxCacheKey(artist,title,catno){
-  return catno?'hw:cat:'+normalizeStr(catno):'hw:at:'+normalizeStr(stripDiscogsSuffix(artist||''))+'|'+normalizeStr(title||'');
+  return catno?'hw:v2:cat:'+normalizeStr(catno):'hw:v2:at:'+normalizeStr(stripDiscogsSuffix(artist||''))+'|'+normalizeStr(title||'');
 }
 async function fetchHardwaxComment(ck,artist,title,catno){
   hardwaxInFlight.add(ck);
