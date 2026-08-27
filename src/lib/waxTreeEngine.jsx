@@ -4797,6 +4797,96 @@ async function resolveStoreUrl(source,{isLabel,artist,label,title}){
     return data?.tracks?.[0]?.url||fallback;
   }catch(error){console.error(`[${source.toUpperCase()} error]`,error?.message||error);return fallback;}
 }
+// The Bandcamp store button already highlights itself when findBcMatch
+// found a real, cross-verified release URL (see ReleaseCard's own
+// bandcampDirect) — Beatport had no equivalent: its button always looked
+// the same whether the click was about to land on the exact release or
+// fall through to a generic beatport.com search, because resolveStoreUrl()
+// only ever runs reactively, on click. This makes the same check
+// (same full cascade, Serper included — bp-search has no independent way
+// to verify a candidate the way bc-search cross-checks against Discogs, so
+// a weaker free-only proactive check would routinely disagree with what
+// clicking actually finds; confirmed live 2026-08-27 on the exact release
+// this feature was requested for) run proactively too, so the button can
+// look different beforehand, not just after clicking. Serper is a paid
+// API and this now runs per release card rendered, not per click — kept
+// affordable by caching hard: 30 days (lsGet/lsSet's own CT2_TTL_MS), so
+// a given release is only ever searched once per browser per month.
+const beatportInFlight=new Set();
+function beatportCacheKey(artist,label,title){
+  return 'bp:v1:'+normalizeStr(artist||'')+'|'+normalizeStr(label||'')+'|'+normalizeStr(title||'');
+}
+async function fetchBeatportDirect(ck,artist,label,title){
+  beatportInFlight.add(ck);
+  try{
+    const{data,error}=await sb.functions.invoke('bp-search',{body:{artist,label,title,release:title}});
+    if(error)throw new Error(error.message);
+    const url=data?.tracks?.[0]?.url||null;
+    lsSet(ck,url||false); // lsGet/lsSet can't store a bare null — false means "checked, nothing found", same convention as getResolvedRemixArtist
+    rr();
+  }catch{
+    // Network/edge-function failure — leave uncached so a later render
+    // can retry instead of failing permanently.
+  }finally{
+    beatportInFlight.delete(ck);
+  }
+}
+// Synchronous cache lookup for use inside ReleaseCard's render — same
+// self-triggering pattern as getResolvedRemixArtist/getHardwaxComment.
+function getBeatportDirect(artist,label,title){
+  if(!title||(!artist&&!label))return null;
+  const ck=beatportCacheKey(artist,label,title);
+  const cached=lsGet(ck);
+  if(cached!==null)return cached||null; // false -> null
+  if(!beatportInFlight.has(ck))fetchBeatportDirect(ck,artist,label,title);
+  return null; // still checking — the button just shows its plain, non-highlighted state until this resolves and rr() re-renders
+}
+// findBcMatch (ReleaseCard's own bandcampDirect) only ever checks ONE
+// artist's own Bandcamp catalog — whichever artist node bcCacheMap was
+// bulk-fetched for — so a multi-artist collab release hosted under the
+// OTHER credited artist's Bandcamp page (or under the label's own page)
+// is invisible to it no matter how good the local fuzzy matching is, even
+// though clicking the button still finds it fine (resolveStoreUrl's
+// on-click bc-search call checks BOTH artist and label, same as
+// bp-search does for Beatport). Confirmed live 2026-08-27: "Malin Genie,
+// Frits Wentink - Demiurge EP", browsed from Malin Genie's own node —
+// findBcMatch comes back empty (fritswentink.bandcamp.com isn't in
+// Malin Genie's own catalog fetch), but the exact same artist+label+title
+// query that resolveStoreUrl already runs on click finds it immediately.
+// This is the same gap getBeatportDirect exists to close, and the fix is
+// the same shape — a proactive per-release check as a fallback once the
+// cheap bulk-cache lookup comes up empty. Unlike Beatport this one is
+// free (bc-search uses Bandcamp's own public autocomplete API, no paid
+// search), so no cost trade-off to weigh here.
+const bandcampInFlight=new Set();
+function bandcampCacheKey(artist,label,title){
+  return 'bc:v1:'+normalizeStr(artist||'')+'|'+normalizeStr(label||'')+'|'+normalizeStr(title||'');
+}
+async function fetchBandcampDirect(ck,artist,label,title){
+  bandcampInFlight.add(ck);
+  try{
+    const{data,error}=await sb.functions.invoke('bc-search',{body:{artist,label,title,release:title}});
+    if(error)throw new Error(error.message);
+    const url=data?.tracks?.[0]?.url||null;
+    lsSet(ck,url||false); // false = "checked, nothing found", same convention as getResolvedRemixArtist
+    rr();
+  }catch{
+    // Network/edge-function failure — leave uncached so a later render
+    // can retry instead of failing permanently.
+  }finally{
+    bandcampInFlight.delete(ck);
+  }
+}
+// Only called once findBcMatch (the cheap, already-fetched bulk-cache
+// lookup) has already come up empty — see ReleaseCard's own bandcampDirect.
+function getBandcampDirect(artist,label,title){
+  if(!title||(!artist&&!label))return null;
+  const ck=bandcampCacheKey(artist,label,title);
+  const cached=lsGet(ck);
+  if(cached!==null)return cached||null; // false -> null
+  if(!bandcampInFlight.has(ck))fetchBandcampDirect(ck,artist,label,title);
+  return null;
+}
 function registerRelatedTrack(card){
   discoveredTracks[card.playId]={id:card.playId,videoId:card.videoId,title:card.title,trackArtistName:card.artist,thumbUrl:card.thumbUrl,duration:null,resolved:card.resolved,discogsUrl:card.discogsUrl,cosineId:card.cosineId};
 }
@@ -4860,7 +4950,7 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,searchArtistsForFavorites,
+  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,

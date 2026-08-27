@@ -105,6 +105,10 @@ Deno.serve(async (req: Request) => {
 
     const push = (url: string) => [{ url, title: null, artist: null, album: null, released: null, thumb: null }];
 
+    // Also called proactively now (not just on click) to decide whether the
+    // Beatport button gets highlighted — see fetchBeatportDirect in
+    // waxTreeEngine.jsx, which caches each result for 30 days so a given
+    // release is only ever searched once per browser per month.
     const serperKey = Deno.env.get('SERPER_API_KEY') || '';
 
     // Strategy 1: artist + release/track title, restricted to Beatport's
