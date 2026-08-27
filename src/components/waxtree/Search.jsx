@@ -67,17 +67,47 @@ export const Search = ({ state, actions }) => {
         <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[300] hidden max-h-[280px] w-max min-w-full max-w-[540px] overflow-y-auto rounded-xl border border-border bg-card p-2.5 shadow-[var(--wt-shadow)] group-hover:block group-focus-within:block">
           <span className="mb-1.5 block text-[10px] font-bold uppercase text-muted-foreground/70">Recent Searches</span>
           <div className="flex flex-wrap gap-1.5">
-            {state.chips.map(name => (
-              <button
-                key={name}
-                type="button"
-                onClick={() => { const existing = state.nodes.find(node => node.name === name); if (existing) actions.selectNode(existing.id); else actions.mutateState(value => { value.q = name; actions.doSearch(); }); }}
-                className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground hover:border-primary"
-              >
-                <span>{name}</span>
-                <span onClick={event => { event.stopPropagation(); actions.removeChip(name); }} className="text-muted-foreground/70">×</span>
-              </button>
-            ))}
+            {state.chips.map(chip => {
+              // Legacy chips saved before this change are bare strings —
+              // treat those as plain search chips by default, same as
+              // before. But a genre/year search still in the tree is
+              // findable by name regardless of the chip's own shape, so
+              // that check always runs first — otherwise a chip saved
+              // before this fix (or any chip whose text happens to match
+              // an existing genreYear node) would still route through the
+              // wrong, plain-text path even though the real node is right
+              // there. Confirmed live 2026-08-24: a pre-existing "Dub, Deep
+              // House, 2012" chip kept opening as a text search after this
+              // fix shipped, purely because that chip predated it.
+              const isGenreYear = typeof chip === 'object' && chip.type === 'genreYear';
+              const name = typeof chip === 'string' ? chip : chip.name;
+              const handleClick = () => {
+                const existingGenreYearNode = state.nodes.find(node => node.type === 'genreYear' && node.name === name);
+                if (existingGenreYearNode) { actions.selectNode(existingGenreYearNode.id); return; }
+                if (isGenreYear) { actions.addGenreYearNode(chip.styles || [], chip.years || []); return; }
+                // Legacy chip AND the node it came from is gone too (deleted,
+                // or never survived a save from before params were kept) —
+                // last resort: reconstruct styles/years from the chip's own
+                // display name rather than silently misrouting to a text
+                // search that can't possibly match a query like this.
+                const parsed = typeof chip === 'string' ? actions.parseGenreYearChipName(name) : null;
+                if (parsed) { actions.addGenreYearNode(parsed.styles, parsed.years); return; }
+                const existing = state.nodes.find(node => node.name === name);
+                if (existing) actions.selectNode(existing.id);
+                else actions.mutateState(value => { value.q = name; actions.doSearch(); });
+              };
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={handleClick}
+                  className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground hover:border-primary"
+                >
+                  <span>{name}</span>
+                  <span onClick={event => { event.stopPropagation(); actions.removeChip(name); }} className="text-muted-foreground/70">×</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
