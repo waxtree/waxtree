@@ -15,7 +15,7 @@ export const StoreButton = ({ source, directUrl, releaseTitle, artist, label, is
   };
   const sourceStyle = isBandcamp
     ? directUrl ? 'border-[rgba(29,160,195,.5)] text-[#1DA0C3] hover:border-[#1DA0C3] hover:bg-[rgba(29,160,195,.12)]' : 'border-border hover:border-[#1DA0C3] hover:text-[#1DA0C3]'
-    : 'border-border hover:border-[#01E47C] hover:text-[#01E47C]';
+    : directUrl ? 'border-[rgba(1,228,124,.5)] text-[#01E47C] hover:border-[#01E47C] hover:bg-[rgba(1,228,124,.12)]' : 'border-border hover:border-[#01E47C] hover:text-[#01E47C]';
 
   return (
     <button type="button" disabled={loading} onClick={open} className={`inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-[20px] border-[1.5px] px-[11px] py-[5px] text-[11px] text-muted-foreground transition-colors disabled:opacity-50 ${sourceStyle}`}>

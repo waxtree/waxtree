@@ -50,7 +50,9 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
   // on a label node, first.label actually holds the (repurposed) artist
   // name, see buildTrackEntries's own comment on trueLabelId.
   const releaseArtist = isLabel ? first.label : node.name;
+  const releaseLabel = isLabel ? node.name : first.label;
   const hardwax = actions.getHardwaxComment(releaseArtist, releaseTitle, first.catno);
+  const beatportDirect = actions.getBeatportDirect(releaseArtist, releaseLabel, releaseTitle);
 
   const exploreItem = item => {
     if (item.id) actions.addNode(item.type, item.id, item.name, node.id, node.branchId, { background: true });
@@ -116,8 +118,8 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
           </div>
         )}
         <div className="flex items-center justify-end gap-[5px]">
-          <StoreButton source="bc" directUrl={bandcampDirect} releaseTitle={releaseTitle} artist={isLabel ? first.label : node.name} label={isLabel ? node.name : first.label} isLabel={isLabel} actions={actions} />
-          <StoreButton source="bp" releaseTitle={releaseTitle} artist={isLabel ? first.label : node.name} label={isLabel ? node.name : first.label} isLabel={isLabel} actions={actions} />
+          <StoreButton source="bc" directUrl={bandcampDirect} releaseTitle={releaseTitle} artist={releaseArtist} label={releaseLabel} isLabel={isLabel} actions={actions} />
+          <StoreButton source="bp" directUrl={beatportDirect} releaseTitle={releaseTitle} artist={releaseArtist} label={releaseLabel} isLabel={isLabel} actions={actions} />
           {first.discogsUrl && !digitalOnly && <a href={first.discogsUrl} target="_blank" rel="noreferrer" className={`${actionButton} gap-0.5 border-border hover:border-primary hover:text-primary`}>Discogs<ArrowUpRight className="size-3" /></a>}
         </div>
       </div>
