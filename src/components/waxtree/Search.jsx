@@ -69,19 +69,25 @@ export const Search = ({ state, actions }) => {
           <div className="flex flex-wrap gap-1.5">
             {state.chips.map(chip => {
               // Legacy chips saved before this change are bare strings —
-              // treat those as plain search chips, same as before.
+              // treat those as plain search chips by default, same as
+              // before. But a genre/year search still in the tree is
+              // findable by name regardless of the chip's own shape, so
+              // that check always runs first — otherwise a chip saved
+              // before this fix (or any chip whose text happens to match
+              // an existing genreYear node) would still route through the
+              // wrong, plain-text path even though the real node is right
+              // there. Confirmed live 2026-08-24: a pre-existing "Dub, Deep
+              // House, 2012" chip kept opening as a text search after this
+              // fix shipped, purely because that chip predated it.
               const isGenreYear = typeof chip === 'object' && chip.type === 'genreYear';
               const name = typeof chip === 'string' ? chip : chip.name;
               const handleClick = () => {
-                if (isGenreYear) {
-                  const existing = state.nodes.find(node => node.type === 'genreYear' && node.name === name);
-                  if (existing) actions.selectNode(existing.id);
-                  else actions.addGenreYearNode(chip.styles || [], chip.years || []);
-                } else {
-                  const existing = state.nodes.find(node => node.name === name);
-                  if (existing) actions.selectNode(existing.id);
-                  else actions.mutateState(value => { value.q = name; actions.doSearch(); });
-                }
+                const existingGenreYearNode = state.nodes.find(node => node.type === 'genreYear' && node.name === name);
+                if (existingGenreYearNode) { actions.selectNode(existingGenreYearNode.id); return; }
+                if (isGenreYear) { actions.addGenreYearNode(chip.styles || [], chip.years || []); return; }
+                const existing = state.nodes.find(node => node.name === name);
+                if (existing) actions.selectNode(existing.id);
+                else actions.mutateState(value => { value.q = name; actions.doSearch(); });
               };
               return (
                 <button
