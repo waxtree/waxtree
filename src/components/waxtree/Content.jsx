@@ -35,7 +35,7 @@ export const Content = ({ state, actions }) => {
   const followed = state.follows.some(item => item.discogs_id === node.discogsId && item.type === node.type);
 
   return (
-    <main className="min-w-0 overflow-y-auto px-7 pb-28 pt-7 max-sm:px-3.5 max-sm:pb-24">
+    <main className="min-w-0 overflow-y-auto px-7 pb-28 pt-7 max-sm:px-3.5 max-sm:pb-56">
       {chain.length > 1 && (
         <div className="mb-2.5 flex items-center gap-1 text-xs text-muted-foreground">
           {chain.map((item, index) => (

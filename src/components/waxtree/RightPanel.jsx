@@ -20,9 +20,25 @@ export const RightPanel = ({ state, actions }) => {
   const fallbackUrl = playing ? `https://www.youtube.com/results?search_query=${encodeURIComponent(`${playing.artistName} ${playing.title}`)}` : '';
   const openTarget = target => { actions.addNode(target.type, target.id, target.name, null, state.activeBranchId); setExploreOpen(false); };
   const liked = playing && !!state.likes[playing.trackId];
+  // Below sm this whole panel used to just be display:none (max-[900px]:
+  // hidden, same rule that also drops it for tablet widths) — including
+  // the div the YouTube player itself attaches to (#yt-iframe-host,
+  // synced in the effect above), so pressing play looked like it did
+  // nothing at all: there was nowhere for the player to mount. Now it
+  // becomes a small fixed bottom bar instead of disappearing, but ONLY
+  // while something is actually playing — Related Tracks stays out
+  // (still too wide a feature for this size screen for now, per explicit
+  // request) and so does tablet's existing hidden-regardless-of-playing
+  // behavior (untouched: max-sm is a narrower range than max-[900px], so
+  // this override never reaches into the 640–899px tier).
+  // display:none (from max-[900px]:hidden above) beats a plain max-sm:fixed
+  // otherwise — position and display are independent properties, so
+  // switching position alone doesn't bring it back on screen; !flex is
+  // the one override that actually needs !important here.
+  const mobilePlayerBar = playing ? 'max-sm:!flex max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:top-auto max-sm:z-40 max-sm:max-h-[70vh] max-sm:w-full max-sm:border-l-0 max-sm:border-t max-sm:pb-[env(safe-area-inset-bottom)] max-sm:shadow-[0_-4px_16px_rgba(0,0,0,.18)]' : '';
 
   return (
-    <aside id="right-panel" className="flex min-h-0 flex-col border-l border-border bg-card max-[900px]:hidden">
+    <aside id="right-panel" className={`flex min-h-0 flex-col border-l border-border bg-card max-[900px]:hidden ${mobilePlayerBar}`}>
       {!playing ? (
         <div className="px-3 py-[18px] text-center text-xs text-muted-foreground/70">▶&nbsp;&nbsp;Nothing playing</div>
       ) : (
@@ -33,11 +49,14 @@ export const RightPanel = ({ state, actions }) => {
           </div>
           {playing.videoId && !state.ytError ? (
             <>
-              <div className="aspect-video w-full bg-black"><div id="yt-iframe-host" className="h-full w-full" /></div>
-              {playing.fromDiscogs && <YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} />}
+              <div className="aspect-video w-full bg-black max-sm:mx-auto max-sm:w-[220px]"><div id="yt-iframe-host" className="h-full w-full" /></div>
+              {/* The full-width desktop panel has room for this extra
+                  scrub-bar overlay; the mobile bar is deliberately just
+                  the essentials (see this component's own top comment). */}
+              {playing.fromDiscogs && <div className="max-sm:hidden"><YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} /></div>}
             </>
           ) : (
-            <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-secondary p-4 text-center">
+            <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-secondary p-4 text-center max-sm:aspect-auto max-sm:py-3">
               <p className="text-xs text-muted-foreground">{state.ytError?.message || 'No video in Discogs data'}</p>
               <a className={`${buttonSecondary} inline-flex items-center gap-0.5`} href={state.ytError?.url || fallbackUrl} target="_blank" rel="noreferrer">{(state.ytError?.linkText || 'Search on YouTube ↗').replace(' ↗', '')}<ArrowUpRight className="size-3" /></a>
             </div>
@@ -69,7 +88,7 @@ export const RightPanel = ({ state, actions }) => {
           </div>
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3 max-sm:hidden">
         <span className="mb-2 block border-b border-border pb-2 text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground/70">Related Tracks</span>
         {related.cards.length ? related.cards.map(card => <RelatedCard key={card.playId} card={card} state={state} actions={actions} />) : <span className="mt-6 block text-center text-[10px] font-semibold uppercase tracking-[.08em] text-muted-foreground/70 opacity-50">{related.status}</span>}
       </div>

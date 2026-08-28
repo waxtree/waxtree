@@ -18,17 +18,25 @@ export const Header = ({ state, session, actions, onMenuClick }) => {
       </Button>
       <div className="flex shrink-0 items-center gap-3 max-sm:gap-1.5">
         <img className="h-10 w-10 object-contain max-sm:h-8 max-sm:w-8" src="/logo.svg" alt="" />
-        <span className="text-2xl font-bold text-primary max-sm:text-lg">WaxTree</span>
+        <span className="text-2xl font-bold text-primary max-sm:hidden">WaxTree</span>
         <span className="self-end pb-1 text-[13px] font-medium text-muted-foreground/70 max-sm:hidden">Beta v.1</span>
       </div>
+      {/* Search needs real room to actually be usable — on mobile that
+          means dropping everything else that isn't essential: the
+          wordmark above, and Playlists/Level here (Playlists moves into
+          the Profile menu below instead; Level was already summary-only
+          gamification, not core nav, so it just goes). Confirmed live
+          2026-08-28: with all of these still in the flex row, Search had
+          so little room left that its actual text input was invisible —
+          only the "Explore" mode pill showed. */}
       <Search state={state} actions={actions} />
       <div className="flex-1 max-sm:hidden" />
       <Button
         variant="outline"
-        className={`h-auto gap-1 rounded-full px-3 py-1 text-xs max-sm:p-1.5 ${playlistCount ? 'border-primary text-primary' : 'text-muted-foreground'}`}
+        className={`h-auto gap-1 rounded-full px-3 py-1 text-xs max-sm:hidden ${playlistCount ? 'border-primary text-primary' : 'text-muted-foreground'}`}
         onClick={() => actions.mutateState(value => { value.playlistsModal = true; })}
       >
-        <Tag className="size-3.5" /> <span className="max-sm:hidden">Playlists{playlistCount > 0 && <span className="font-bold">{playlistCount}</span>}</span>
+        <Tag className="size-3.5" /> Playlists{playlistCount > 0 && <span className="font-bold">{playlistCount}</span>}
       </Button>
       <Badge asChild className="h-auto cursor-pointer rounded-full border border-primary bg-primary/10 px-3 py-1 text-[11px] text-primary max-sm:hidden">
         <button type="button" onClick={() => actions.mutateState(value => { value.levelsModal = true; })}>{level.title}</button>
@@ -45,6 +53,10 @@ export const Header = ({ state, session, actions, onMenuClick }) => {
               {avatar ? <img className="size-9 rounded-full object-cover" src={avatar} alt="" /> : <div className="flex size-9 items-center justify-center rounded-full bg-secondary font-bold text-primary">{username.slice(0, 2).toUpperCase()}</div>}
               <span className="text-xs font-semibold">{username}</span>
             </button>
+            {/* Mobile-only — the header's own Playlists button is hidden
+                below sm to leave Search room to breathe (see Header's
+                own comment), so it needs a way in from here instead. */}
+            <button type="button" onClick={() => actions.mutateState(value => { value.profileOpen = false; value.playlistsModal = true; })} className="hidden w-full rounded-lg px-3.5 py-2 text-left text-[13px] hover:bg-muted max-sm:block">Playlists{playlistCount > 0 && ` (${playlistCount})`}</button>
             {[['Libraries', 'librariesModal'], ['Settings', 'settingsModal'], ['Likes', 'likesModal'], ['Follows', 'followsModal'], ['History', 'historyModal']].map(([label, key]) => (
               <button key={key} type="button" onClick={() => actions.mutateState(value => { value.profileOpen = false; value[key] = true; })} className="block w-full rounded-lg px-3.5 py-2 text-left text-[13px] hover:bg-muted">{label}</button>
             ))}
