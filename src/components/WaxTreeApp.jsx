@@ -23,6 +23,10 @@ export const WaxTreeApp = ({ engine }) => {
     const saved = Number(localStorage.getItem('wt-sb-w'));
     return saved >= 160 && saved <= 520 ? saved : 252;
   });
+  // Mobile-only: the sidebar (branches + node tree) becomes a slide-in
+  // drawer below the sm breakpoint instead of a fixed grid column — desktop
+  // never sets or reads this, see Sidebar's own max-sm: classes.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = state.theme;
@@ -44,9 +48,9 @@ export const WaxTreeApp = ({ engine }) => {
   return (
     <ThemeFrame theme={state.theme} className="h-dvh overflow-hidden text-sm">
       <div className="flex h-dvh flex-col overflow-hidden" translate="no">
-        <Header state={state} session={session} actions={actions} />
-        <div style={{ '--wt-app-columns': `${sidebarWidth}px 4px minmax(0,1fr) 260px` }} className="grid min-h-0 flex-1 grid-cols-[var(--wt-app-columns)] overflow-hidden max-[900px]:grid-cols-[210px_3px_minmax(0,1fr)]">
-          <Sidebar state={state} actions={actions} />
+        <Header state={state} session={session} actions={actions} onMenuClick={() => setMobileSidebarOpen(value => !value)} />
+        <div style={{ '--wt-app-columns': `${sidebarWidth}px 4px minmax(0,1fr) 260px` }} className="grid min-h-0 flex-1 grid-cols-[var(--wt-app-columns)] overflow-hidden max-[900px]:grid-cols-[210px_3px_minmax(0,1fr)] max-sm:grid-cols-1">
+          <Sidebar state={state} actions={actions} mobileOpen={mobileSidebarOpen} onCloseMobile={() => setMobileSidebarOpen(false)} />
           <SidebarResize width={sidebarWidth} onResize={setSidebarWidth} />
           <Content state={state} actions={actions} />
           <RightPanel state={state} actions={actions} />

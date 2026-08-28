@@ -35,7 +35,7 @@ export const Content = ({ state, actions }) => {
   const followed = state.follows.some(item => item.discogs_id === node.discogsId && item.type === node.type);
 
   return (
-    <main className="min-w-0 overflow-y-auto px-7 pb-28 pt-7">
+    <main className="min-w-0 overflow-y-auto px-7 pb-28 pt-7 max-sm:px-3.5 max-sm:pb-24">
       {chain.length > 1 && (
         <div className="mb-2.5 flex items-center gap-1 text-xs text-muted-foreground">
           {chain.map((item, index) => (
@@ -47,8 +47,8 @@ export const Content = ({ state, actions }) => {
         </div>
       )}
       <div className="mb-1 flex items-center gap-3">
-        {data?.imageUrl ? <img className="size-[52px] rounded-[10px] border border-border object-cover" src={data.imageUrl} alt={node.name} /> : <div className="flex size-[52px] items-center justify-center rounded-[10px] border border-border bg-secondary text-muted-foreground">{isLabel ? <LabelIcon className="size-6" /> : <ArtistIcon className="size-6" />}</div>}
-        <h1 className="min-w-0 flex-1 truncate text-[26px] font-bold">{node.name}</h1>
+        {data?.imageUrl ? <img className="size-[52px] shrink-0 rounded-[10px] border border-border object-cover max-sm:size-11" src={data.imageUrl} alt={node.name} /> : <div className="flex size-[52px] shrink-0 items-center justify-center rounded-[10px] border border-border bg-secondary text-muted-foreground max-sm:size-11">{isLabel ? <LabelIcon className="size-6" /> : <ArtistIcon className="size-6" />}</div>}
+        <h1 className="min-w-0 flex-1 truncate text-[26px] font-bold max-sm:text-xl">{node.name}</h1>
         <button
           type="button"
           onClick={() => actions.toggleFollow(node)}

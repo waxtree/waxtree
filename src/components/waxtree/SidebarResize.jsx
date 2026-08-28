@@ -14,5 +14,8 @@ export const SidebarResize = ({ width, onResize }) => {
     document.addEventListener('mouseup', finish);
   };
 
-  return <div role="separator" aria-orientation="vertical" title="Resize sidebar" onMouseDown={begin} className="cursor-col-resize bg-border transition-colors hover:bg-primary" />;
+  // The sidebar is a fixed-position drawer on mobile (see Sidebar's own
+  // max-sm: classes), not a grid column — dragging to resize it makes no
+  // sense there, and the grid itself drops this track below sm anyway.
+  return <div role="separator" aria-orientation="vertical" title="Resize sidebar" onMouseDown={begin} className="cursor-col-resize bg-border transition-colors hover:bg-primary max-sm:hidden" />;
 };

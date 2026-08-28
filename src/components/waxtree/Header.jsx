@@ -1,9 +1,9 @@
-import { Moon, Sun, Tag, User } from 'lucide-react';
+import { Menu, Moon, Sun, Tag, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Search } from '@/components/waxtree/Search';
 
-export const Header = ({ state, session, actions }) => {
+export const Header = ({ state, session, actions, onMenuClick }) => {
   const username = session?.user?.user_metadata?.username || session?.user?.email?.split('@')[0] || 'Profile';
   // Total nodes across every branch, not search-bar use — see addNode's
   // own comment in waxTreeEngine.jsx for why.
@@ -12,22 +12,25 @@ export const Header = ({ state, session, actions }) => {
   const avatar = actions.getAvatarUrl();
 
   return (
-    <header className="flex h-[50px] shrink-0 items-center gap-3.5 border-b border-border bg-card px-[18px]">
-      <div className="flex shrink-0 items-center gap-3">
-        <img className="h-10 w-10 object-contain" src="/logo.svg" alt="" />
-        <span className="text-2xl font-bold text-primary">WaxTree</span>
-        <span className="self-end pb-1 text-[13px] font-medium text-muted-foreground/70">Beta v.1</span>
+    <header className="flex h-[50px] shrink-0 items-center gap-3.5 border-b border-border bg-card px-[18px] max-sm:gap-2 max-sm:px-2.5">
+      <Button variant="outline" size="icon" title="Branches" className="hidden h-auto shrink-0 rounded-full p-1.5 text-muted-foreground max-sm:flex" onClick={onMenuClick}>
+        <Menu className="size-4" />
+      </Button>
+      <div className="flex shrink-0 items-center gap-3 max-sm:gap-1.5">
+        <img className="h-10 w-10 object-contain max-sm:h-8 max-sm:w-8" src="/logo.svg" alt="" />
+        <span className="text-2xl font-bold text-primary max-sm:text-lg">WaxTree</span>
+        <span className="self-end pb-1 text-[13px] font-medium text-muted-foreground/70 max-sm:hidden">Beta v.1</span>
       </div>
       <Search state={state} actions={actions} />
-      <div className="flex-1" />
+      <div className="flex-1 max-sm:hidden" />
       <Button
         variant="outline"
-        className={`h-auto gap-1 rounded-full px-3 py-1 text-xs ${playlistCount ? 'border-primary text-primary' : 'text-muted-foreground'}`}
+        className={`h-auto gap-1 rounded-full px-3 py-1 text-xs max-sm:p-1.5 ${playlistCount ? 'border-primary text-primary' : 'text-muted-foreground'}`}
         onClick={() => actions.mutateState(value => { value.playlistsModal = true; })}
       >
-        <Tag className="size-3.5" /> Playlists{playlistCount > 0 && <span className="font-bold">{playlistCount}</span>}
+        <Tag className="size-3.5" /> <span className="max-sm:hidden">Playlists{playlistCount > 0 && <span className="font-bold">{playlistCount}</span>}</span>
       </Button>
-      <Badge asChild className="h-auto cursor-pointer rounded-full border border-primary bg-primary/10 px-3 py-1 text-[11px] text-primary">
+      <Badge asChild className="h-auto cursor-pointer rounded-full border border-primary bg-primary/10 px-3 py-1 text-[11px] text-primary max-sm:hidden">
         <button type="button" onClick={() => actions.mutateState(value => { value.levelsModal = true; })}>{level.title}</button>
       </Badge>
       <div className="relative">

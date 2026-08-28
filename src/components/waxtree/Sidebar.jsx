@@ -1,8 +1,17 @@
+import { X } from 'lucide-react';
+import { useEffect } from 'react';
 import { SidebarNode } from '@/components/waxtree/SidebarNode';
 import { Button } from '@/components/ui/button';
 import { hScrollThin } from '@/lib/waxtreeUi';
 
-export const Sidebar = ({ state, actions }) => {
+export const Sidebar = ({ state, actions, mobileOpen, onCloseMobile }) => {
+  // Tapping a node in the mobile drawer should show its content AND close
+  // the drawer, same as any mobile nav pattern — this is cheaper than
+  // threading an onSelect callback through SidebarNode's own click handler
+  // (shared with desktop, where it must stay a plain selectNode call), and
+  // mobileOpen is always false on desktop (nothing ever sets it there), so
+  // this never fires there.
+  useEffect(() => { if (mobileOpen) onCloseMobile(); }, [state.selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
   const allTags = [...new Set(state.nodes.flatMap(node => node.tags || []))].sort();
   const branchNodes = state.nodes.filter(node => node.branchId === state.activeBranchId);
   const filtered = state.sbFilterTag ? branchNodes.filter(node => node.tags?.includes(state.sbFilterTag)) : branchNodes;
@@ -25,7 +34,15 @@ export const Sidebar = ({ state, actions }) => {
   };
 
   return (
-    <aside className="flex min-h-0 flex-col overflow-hidden border-r border-border bg-card">
+    <>
+      {/* Backdrop only exists in the DOM while the mobile drawer is open —
+          zero desktop footprint (mobileOpen is always false there). */}
+      {mobileOpen && <div className="fixed inset-0 z-40 bg-black/50 sm:hidden" onClick={onCloseMobile} />}
+      <aside className={`flex min-h-0 flex-col overflow-hidden border-r border-border bg-card max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-50 max-sm:w-[82vw] max-sm:max-w-[300px] max-sm:shadow-2xl max-sm:transition-transform max-sm:duration-200 ${mobileOpen ? 'max-sm:translate-x-0' : 'max-sm:-translate-x-full'}`}>
+        <div className="hidden shrink-0 items-center justify-between border-b border-border px-3 py-2.5 max-sm:flex">
+          <span className="text-xs font-bold uppercase tracking-[.06em] text-muted-foreground">Branches</span>
+          <button type="button" onClick={onCloseMobile} className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
+        </div>
       <div className={`flex shrink-0 items-end gap-0.5 border-b border-border px-2 pt-2 ${hScrollThin}`}>
         {state.branches.map(item => (
           <div
@@ -90,6 +107,7 @@ export const Sidebar = ({ state, actions }) => {
           </Button>
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 };
