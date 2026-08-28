@@ -68,7 +68,7 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
   const highlightedExplore = explore.some(item => item.highlighted);
 
   return (
-    <article data-release-key={group.key} className="flex items-start gap-3 rounded-[10px] border border-border bg-card px-[14px] py-[10px] transition-colors hover:border-[color-mix(in_srgb,var(--primary)_35%,var(--border))]">
+    <article data-release-key={group.key} className="flex items-start gap-3 rounded-[10px] border border-border bg-card px-[14px] py-[10px] transition-colors hover:border-[color-mix(in_srgb,var(--primary)_35%,var(--border))] max-sm:flex-wrap max-sm:gap-x-2.5 max-sm:gap-y-2 max-sm:px-3 max-sm:py-2.5">
       <div className="flex shrink-0 flex-col items-center gap-[6px]">
         {first.thumbUrl ? <img className="size-10 rounded-[6px] border border-border object-cover" src={first.thumbUrl} alt="" loading="lazy" /> : <div className="flex size-10 items-center justify-center rounded-[6px] border border-border bg-secondary text-[17px] text-muted-foreground/70">♫</div>}
         {(listened || allPlayed) && (
@@ -82,7 +82,12 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
           </button>
         )}
       </div>
-      <div className="w-[200px] min-w-0 flex-[0_1_200px] pt-0.5">
+      {/* On mobile the card reflows into rows via flex-wrap instead of
+          this row's fixed 200px columns: thumb + this block share the
+          first row (both keep their natural/flexible width), tracks and
+          the explore/store row below each force themselves onto their
+          own full-width row via max-sm:basis-full. */}
+      <div className="w-[200px] min-w-0 flex-[0_1_200px] pt-0.5 max-sm:w-auto max-sm:flex-1">
         <h3 className="truncate text-sm font-bold">{releaseTitle}</h3>
         {yearLabel && <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{yearLabel}</p>}
         {genres.length > 0 && (
@@ -99,14 +104,14 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
           </p>
         )}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-[5px]">
+      <div className="flex min-w-0 flex-1 flex-col gap-[5px] max-sm:basis-full">
         {tracks.map(track => (
           <TrackRow key={track.id} track={track} node={node} isLabel={isLabel} primaryArtist={primaryArtist} state={state} actions={actions} playlistOpen={openPlaylist === track.id} setPlaylistOpen={open => setOpenPlaylist(open ? track.id : null)} />
         ))}
       </div>
-      <div className="flex max-w-[370px] shrink-0 flex-col items-end gap-[5px]">
+      <div className="flex max-w-[370px] shrink-0 flex-col items-end gap-[5px] max-sm:max-w-none max-sm:basis-full max-sm:items-start">
         {explore.length > 0 && (
-          <div className="flex flex-wrap items-center justify-end gap-[5px]">
+          <div className="flex flex-wrap items-center justify-end gap-[5px] max-sm:justify-start">
             {explore.length === 1 && <button type="button" onClick={() => exploreItem(explore[0])} className={`${actionButton} ${explore[0].highlighted ? exploreHighlighted : exploreDefault}`}>{explore[0].label} ›</button>}
             {explore.length > 1 && (
               <div className="relative shrink-0">
@@ -122,7 +127,7 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
             )}
           </div>
         )}
-        <div className="flex items-center justify-end gap-[5px]">
+        <div className="flex flex-wrap items-center justify-end gap-[5px] max-sm:justify-start">
           <StoreButton source="bc" directUrl={bandcampDirect} releaseTitle={releaseTitle} artist={releaseArtist} label={releaseLabel} isLabel={isLabel} actions={actions} />
           <StoreButton source="bp" directUrl={beatportDirect} releaseTitle={releaseTitle} artist={releaseArtist} label={releaseLabel} isLabel={isLabel} actions={actions} />
           {first.discogsUrl && !digitalOnly && <a href={first.discogsUrl} target="_blank" rel="noreferrer" className={`${actionButton} gap-0.5 border-border hover:border-primary hover:text-primary`}>Discogs<ArrowUpRight className="size-3" /></a>}
