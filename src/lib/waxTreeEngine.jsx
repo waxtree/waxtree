@@ -499,8 +499,17 @@ function isOwned(trackTitle,trackArtist,trackDuration){
 // WaxTree; it's the same matching isOwned() already does for the "In your
 // digital library" badge, just aggregated across every explored node.
 function getDigitalLibraryEntries(){
-  const seen=new Set();
-  const out=[];
+  // Keyed and grouped by release (not pushed once per owned track) — a
+  // release with several owned tracks used to only ever show the FIRST
+  // one found (every later track for the same discogsUrl silently lost
+  // to the old seen-Set dedup), with the row itself only ever showing the
+  // release/album title regardless — so which specific tracks the user
+  // actually has was invisible. trackTitles collects every one instead.
+  const byRelease=new Map();
+  const addTrackTitle=(key,title)=>{
+    const entry=byRelease.get(key);
+    if(entry&&title&&!entry.trackTitles.includes(title))entry.trackTitles.push(title);
+  };
   st.nodes.forEach(n=>{
     const tracks=n.data?.tracks;
     if(!tracks)return;
@@ -509,37 +518,41 @@ function getDigitalLibraryEntries(){
       const artistDisplay=isLabelNode?t.label:n.name;
       if(!isOwned(t.title,artistDisplay,t.duration))return;
       const key=t.discogsUrl||String(t.id);
-      if(seen.has(key))return;
-      seen.add(key);
-      out.push({
-        title:t.album||t.title,
-        artist:artistDisplay,
-        year:t.year,
-        thumb:t.thumbUrl,
-        discogsUrl:t.discogsUrl,
-        artistExploreId:isLabelNode?t.exploreId:n.discogsId,
-        artistExploreName:isLabelNode?t.exploreName:n.name,
-        artistExploreType:isLabelNode?(t.exploreType||'artist'):'artist',
-        labelExploreId:isLabelNode?n.discogsId:t.labelId,
-        labelExploreName:isLabelNode?n.name:t.label,
-        genres:t.genre?t.genre.split(' · '):[],
-      });
+      if(!byRelease.has(key)){
+        byRelease.set(key,{
+          title:t.album||t.title,
+          artist:artistDisplay,
+          year:t.year,
+          thumb:t.thumbUrl,
+          discogsUrl:t.discogsUrl,
+          artistExploreId:isLabelNode?t.exploreId:n.discogsId,
+          artistExploreName:isLabelNode?t.exploreName:n.name,
+          artistExploreType:isLabelNode?(t.exploreType||'artist'):'artist',
+          labelExploreId:isLabelNode?n.discogsId:t.labelId,
+          labelExploreName:isLabelNode?n.name:t.label,
+          genres:t.genre?t.genre.split(' · '):[],
+          trackTitles:[],
+        });
+      }
+      addTrackTitle(key,t.title);
     });
   });
   // Add anything matchLibraryWithDiscogs() found for artists/releases not
   // already reachable through an explored node
   Object.values(loadDigitalMatches()).forEach(m=>{
     const key=m.discogsUrl||(m.title+'|'+m.artist);
-    if(seen.has(key))return;
-    seen.add(key);
-    out.push({
-      title:m.title,artist:m.artist,year:m.year,thumb:m.thumb,discogsUrl:m.discogsUrl,
-      artistExploreId:m.artistExploreId,artistExploreName:m.artistExploreName,artistExploreType:'artist',
-      labelExploreId:m.labelExploreId,labelExploreName:m.labelExploreName,
-      genres:m.genre?m.genre.split(' · '):[],
-    });
+    if(!byRelease.has(key)){
+      byRelease.set(key,{
+        title:m.title,artist:m.artist,year:m.year,thumb:m.thumb,discogsUrl:m.discogsUrl,
+        artistExploreId:m.artistExploreId,artistExploreName:m.artistExploreName,artistExploreType:'artist',
+        labelExploreId:m.labelExploreId,labelExploreName:m.labelExploreName,
+        genres:m.genre?m.genre.split(' · '):[],
+        trackTitles:[],
+      });
+    }
+    addTrackTitle(key,m.trackTitle); // older cached matches (pre-trackTitle) fall back to no track name below
   });
-  return out;
+  return[...byRelease.values()];
 }
 
 function saveOwnedTracks(list){
@@ -778,7 +791,7 @@ async function matchLibraryWithDiscogs(){
             const found=pickTrackMatch(t,data.tracks);
             if(found){
               matches[t.titleNorm+'|'+t.artistNorm]={
-                title:found.album||found.title,artist:data.name,year:found.year,thumb:found.thumbUrl,
+                title:found.album||found.title,trackTitle:found.title,artist:data.name,year:found.year,thumb:found.thumbUrl,
                 discogsUrl:found.discogsUrl,
                 artistExploreId:data.id,artistExploreName:data.name,
                 labelExploreId:found.labelId,labelExploreName:found.label,
@@ -817,7 +830,7 @@ async function matchLibraryWithDiscogs(){
             const found=pickTrackMatch(t,entries);
             if(found&&artistTokensOverlap(t.artistNorm,[...relArtists,found.trackArtistName||''])){
               verdict={match:{
-                title:found.album||found.title,artist:found.trackArtistName||relArtists.join(', '),
+                title:found.album||found.title,trackTitle:found.title,artist:found.trackArtistName||relArtists.join(', '),
                 year:found.year,thumb:found.thumbUrl,discogsUrl:found.discogsUrl,
                 artistExploreId:found.trackArtistId||rd.artists?.[0]?.id||null,
                 artistExploreName:found.trackArtistName||relArtists[0]||'',
