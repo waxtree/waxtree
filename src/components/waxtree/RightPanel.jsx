@@ -50,10 +50,16 @@ export const RightPanel = ({ state, actions }) => {
           {playing.videoId && !state.ytError ? (
             <>
               <div className="aspect-video w-full bg-black max-sm:mx-auto max-sm:w-[220px]"><div id="yt-iframe-host" className="h-full w-full" /></div>
-              {/* The full-width desktop panel has room for this extra
-                  scrub-bar overlay; the mobile bar is deliberately just
-                  the essentials (see this component's own top comment). */}
-              {playing.fromDiscogs && <div className="max-sm:hidden"><YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} /></div>}
+              {/* Used to be gated on playing.fromDiscogs — auto-matched
+                  tracks got YouTube's native controls instead of this bar,
+                  which just read as "the transport bar randomly isn't
+                  there" depending on the track (confirmed live
+                  2026-08-28). createYtPlayer now always creates the
+                  player with controls:0, so this always has something to
+                  control. Still desktop-only: the mobile bar is
+                  deliberately just the essentials (see this component's
+                  own top comment). */}
+              <div className="max-sm:hidden"><YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} /></div>
             </>
           ) : (
             <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-secondary p-4 text-center max-sm:aspect-auto max-sm:py-3">

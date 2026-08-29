@@ -2730,16 +2730,19 @@ function createYtPlayer(){
   if(!window.YT?.Player||ytPlayer)return;
   const host=document.getElementById('yt-iframe-host');if(!host)return;
   ytTid=st.nowPlaying.trackId;ytTitle=st.nowPlaying.title||'';ytArtist=st.nowPlaying.artistName||'';
-  // Discogs-confirmed videos get our own transport bar (controls:0 hides
-  // YouTube's native one, an officially supported player param — the video
-  // itself stays visible, satisfying the API terms). Auto-matched videos
-  // keep the native YouTube controls, same split as before the React
-  // migration, just re-ported (see YtCustomControls.jsx for the UI).
-  const custom=!!st.nowPlaying.fromDiscogs;
+  // Every video gets our own transport bar (controls:0 hides YouTube's
+  // native one, an officially supported player param — the video itself
+  // stays visible, satisfying the API terms) — used to be Discogs-
+  // confirmed videos only, auto-matched ones kept native YouTube controls
+  // instead (same split as before the React migration, just re-ported).
+  // Confirmed live 2026-08-28: that split just read as "the transport bar
+  // randomly isn't there" depending on which track you clicked, not as a
+  // meaningful distinction — now every track gets the same bar (see
+  // YtCustomControls.jsx for the UI).
   ytPlayer=new YT.Player('yt-iframe-host',{
     host:'https://www.youtube-nocookie.com',
     height:'191',width:'340',videoId:st.nowPlaying.videoId,
-    playerVars:{autoplay:1,modestbranding:1,rel:0,fs:0,...(custom?{controls:0,disablekb:1,iv_load_policy:3}:{})},
+    playerVars:{autoplay:1,modestbranding:1,rel:0,fs:0,controls:0,disablekb:1,iv_load_policy:3},
     events:{
       onReady(){},
       onStateChange(e){
@@ -2791,9 +2794,12 @@ function ytTogglePlayPause(){
 }
 function doPlay(trackId,videoId,title,artistName){
   killYt();
-  // Only a video Discogs itself already had gets the custom transport bar —
-  // ytMatches only ever contains entries the auto-match feature resolved
-  // (see resolveTrackVideoId()), so a track already in there is auto-matched
+  // No longer drives the custom-vs-native player controls split (every
+  // track gets the custom bar now, see createYtPlayer's own comment) —
+  // kept as plain metadata on nowPlaying (Discogs' own video vs. WaxTree's
+  // auto-match) in case something wants that distinction later. ytMatches
+  // only ever contains entries the auto-match feature resolved (see
+  // resolveTrackVideoId()), so a track already in there is auto-matched
   // even if its videoId has since been persisted onto the track too.
   const fromDiscogs=!!videoId&&!(trackId in ytMatches);
   st.ytError=null;
