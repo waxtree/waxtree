@@ -246,14 +246,17 @@ const FollowsModal = ({ state, actions }) => {
   const close = () => actions.mutateState(value => { value.followsModal = false; });
   return (
     <Modal title="Following" close={close}>
-      {state.follows.length ? state.follows.map(follow => (
-        <div key={`${follow.type}-${follow.discogs_id}`} className="flex items-center gap-2.5 border-b border-border py-2">
-          {follow.image_url ? <img className="size-10 rounded-lg object-cover" src={follow.image_url} alt="" /> : <div className="flex size-10 items-center justify-center rounded-lg bg-secondary text-muted-foreground">{follow.type === 'label' ? <LabelIcon className="size-4" /> : <ArtistIcon className="size-4" />}</div>}
-          <strong className="min-w-0 flex-1 truncate text-[13px]">{follow.name}</strong>
-          <button type="button" className={buttonSecondary} onClick={() => { const existing = state.nodes.find(node => node.discogsId === follow.discogs_id && node.branchId === state.activeBranchId); if (existing) actions.selectNode(existing.id); else actions.addNode(follow.type, follow.discogs_id, follow.name, null, state.activeBranchId); close(); }}>Open ›</button>
-          <button type="button" className="text-destructive" onClick={() => actions.toggleFollow({ discogsId: follow.discogs_id, type: follow.type, name: follow.name })}>×</button>
-        </div>
-      )) : <p className="py-8 text-center text-xs text-muted-foreground/70">No followed artists or labels yet</p>}
+      {state.follows.length ? state.follows.map(follow => {
+        const thumb = actions.getFollowThumb(follow);
+        return (
+          <div key={`${follow.type}-${follow.discogs_id}`} className="flex items-center gap-2.5 border-b border-border py-2">
+            {thumb ? <img className="size-10 rounded-lg object-cover" src={thumb} alt="" /> : <div className="flex size-10 items-center justify-center rounded-lg bg-secondary text-muted-foreground">{follow.type === 'label' ? <LabelIcon className="size-4" /> : <ArtistIcon className="size-4" />}</div>}
+            <strong className="min-w-0 flex-1 truncate text-[13px]">{follow.name}</strong>
+            <button type="button" className={buttonSecondary} onClick={() => { const existing = state.nodes.find(node => node.discogsId === follow.discogs_id && node.branchId === state.activeBranchId); if (existing) actions.selectNode(existing.id); else actions.addNode(follow.type, follow.discogs_id, follow.name, null, state.activeBranchId); close(); }}>Open ›</button>
+            <button type="button" className="text-destructive" onClick={() => actions.toggleFollow({ discogsId: follow.discogs_id, type: follow.type, name: follow.name })}>×</button>
+          </div>
+        );
+      }) : <p className="py-8 text-center text-xs text-muted-foreground/70">No followed artists or labels yet</p>}
     </Modal>
   );
 };

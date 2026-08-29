@@ -4466,6 +4466,48 @@ function toggleFollow(node){
   }
   saveSt();rr();
 }
+// thumb only ever gets set from node.data?.imageUrl at the moment of
+// following (see toggleFollow above) — if that node's data hadn't
+// finished loading yet at that exact moment (or was followed via a path
+// that never loads the full node, e.g. Follow Your Heroes), thumb is
+// null forever, with no way for the Following list to ever pick it up
+// later — confirmed live 2026-08-28: every row in it showed the generic
+// icon fallback, not because no image existed, but because the field the
+// list read (image_url) was never the field toggleFollow actually
+// writes (thumb) in the first place. Fixing that read alone helps going
+// forward; this backfills the ones already missing it, with a single
+// cheap /artists or /labels call for just the image field — not the full
+// fetchArtistData/fetchLabelData pass, which pulls the entire
+// discography just to get a profile photo nobody asked for here.
+const followThumbInFlight=new Set();
+async function fetchFollowThumb(followId,discogsId,type){
+  followThumbInFlight.add(followId);
+  try{
+    const cached=getCachedNodeData(type,discogsId);
+    let imageUrl=cached?.imageUrl||null;
+    if(!imageUrl){
+      const data=await dReq(type==='label'?'/labels/'+discogsId:'/artists/'+discogsId,{},{foreground:true});
+      imageUrl=data.images?.find(i=>i.type==='primary')?.uri||data.images?.[0]?.uri||null;
+    }
+    if(imageUrl){
+      const f=st.follows.find(x=>x.id===followId);
+      if(f){f.thumb=imageUrl;saveSt();rr();}
+    }
+  }catch{
+    // Non-fatal — the row just keeps showing the generic icon fallback;
+    // nothing marks this "confirmed no image" so a later modal open can
+    // still retry instead of failing permanently.
+  }finally{
+    followThumbInFlight.delete(followId);
+  }
+}
+// Synchronous cache lookup for use inside FollowsModal's render — same
+// self-triggering pattern as getResolvedRemixArtist/getHardwaxComment.
+function getFollowThumb(follow){
+  if(follow.thumb)return follow.thumb;
+  if(!followThumbInFlight.has(follow.id))fetchFollowThumb(follow.id,follow.discogs_id,follow.type);
+  return null;
+}
 
 // ── Follow scan (new releases) ───────────────────────────────
 // Light version, deliberately: checks run at login and every 20 minutes
@@ -4950,7 +4992,7 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,searchArtistsForFavorites,
+  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getFollowThumb,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
