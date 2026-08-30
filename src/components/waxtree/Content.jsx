@@ -46,13 +46,16 @@ export const Content = ({ state, actions }) => {
           ))}
         </div>
       )}
-      <div className="mb-1 flex items-center gap-3">
-        {data?.imageUrl ? <img className="size-[52px] shrink-0 rounded-[10px] border border-border object-cover max-sm:size-11" src={data.imageUrl} alt={node.name} /> : <div className="flex size-[52px] shrink-0 items-center justify-center rounded-[10px] border border-border bg-secondary text-muted-foreground max-sm:size-11">{isLabel ? <LabelIcon className="size-6" /> : <ArtistIcon className="size-6" />}</div>}
-        <h1 className="min-w-0 flex-1 truncate text-[26px] font-bold max-sm:text-xl">{node.name}</h1>
+      <div className="mb-5 flex items-center gap-4">
+        {data?.imageUrl ? <img className="size-20 shrink-0 rounded-2xl border border-border object-cover max-sm:size-14" src={data.imageUrl} alt={node.name} /> : <div className="flex size-20 shrink-0 items-center justify-center rounded-2xl border border-border bg-secondary text-muted-foreground max-sm:size-14">{isLabel ? <LabelIcon className="size-8" /> : <ArtistIcon className="size-8" />}</div>}
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-[28px] font-bold leading-tight max-sm:text-xl">{node.name}</h1>
+          {data && <p className="mt-0.5 text-[13px] text-muted-foreground">{isLabel ? 'Label' : 'Artist'} · {data.trackCount} releases</p>}
+        </div>
         <button
           type="button"
           onClick={() => actions.toggleFollow(node)}
-          className={`rounded-full border-[1.5px] px-3.5 py-1.5 text-xs font-semibold ${followed ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary'}`}
+          className={`shrink-0 rounded-full border-[1.5px] px-3.5 py-1.5 text-xs font-semibold ${followed ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary'}`}
         >
           {followed ? '✓ Following' : '+ Follow'}
         </button>
