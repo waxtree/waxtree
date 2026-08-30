@@ -278,7 +278,7 @@ const LibrariesModal = ({ state, actions }) => {
   const allGenres = [...new Set(source.flatMap(release => release.genres || []))].sort();
   const toggleGenre = genre => setSelectedGenres(prev => (prev.includes(genre) ? prev.filter(item => item !== genre) : [...prev, genre]));
   const query = state.librariesSearch.trim().toLowerCase();
-  const filtered = (query ? source.filter(release => [release.title, release.artist, release.labelExploreName, ...(release.genres || [])].filter(Boolean).join(' ').toLowerCase().includes(query)) : source)
+  const filtered = (query ? source.filter(release => [release.title, release.artist, release.labelExploreName, ...(release.genres || []), ...(release.trackTitles || [])].filter(Boolean).join(' ').toLowerCase().includes(query)) : source)
     .filter(release => !selectedGenres.length || (release.genres || []).some(genre => selectedGenres.includes(genre)));
   const tabs = [
     ['vinyl', '💽 Vinyl', vinylEntries.length],
@@ -386,16 +386,7 @@ const LibrariesModal = ({ state, actions }) => {
           )}
           <div className="max-h-[420px] overflow-y-auto">
             {filtered.length ? filtered.map((release, index) => (
-              <div key={release.discogsUrl || `${release.title}-${index}`} className="flex items-center gap-2.5 border-b border-border py-2">
-                {release.thumb ? <img className="size-10 rounded-lg object-cover" src={release.thumb} alt="" /> : <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">♫</div>}
-                <div className="min-w-0 flex-1">
-                  <strong className="block truncate text-[13px]">{release.title}</strong>
-                  <span className="block truncate text-[11px] text-muted-foreground">{[release.artist, release.year, release.labelExploreName].filter(Boolean).join(' · ')}</span>
-                  {release.genres?.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{release.genres.map(genre => <span key={genre} className="rounded border border-primary/30 px-1.5 text-[9px] text-primary">{genre}</span>)}</div>}
-                </div>
-                {release.artistExploreId && <button type="button" className={`${buttonSecondary} inline-flex items-center gap-0.5`} onClick={() => openEntity(release.artistExploreType || 'artist', release.artistExploreId, release.artistExploreName)}>Artist<ArrowUpRight className="size-3" /></button>}
-                {release.labelExploreId && <button type="button" className={`${buttonSecondary} inline-flex items-center gap-0.5`} onClick={() => openEntity('label', release.labelExploreId, release.labelExploreName)}>Label<ArrowUpRight className="size-3" /></button>}
-              </div>
+              <LibraryEntryRow key={release.discogsUrl || `${release.title}-${index}`} release={release} openEntity={openEntity} />
             )) : (
               <button type="button" onClick={() => { if (!source.length) actions.mutateState(value => { value.librariesTab = 'sync'; }); }} className="w-full py-8 text-center text-xs text-muted-foreground/70">
                 {source.length ? `No matches for "${state.librariesSearch.trim()}".` : state.librariesTab === 'vinyl' ? 'Sync your Discogs collection to see it here.' : state.ownedTracks.length ? 'No matches yet — explore an artist or label whose tracks are in your local folder.' : 'Link your local music folder to see it here.'}
@@ -405,6 +396,47 @@ const LibrariesModal = ({ state, actions }) => {
         </>
       )}
     </Modal>
+  );
+};
+
+// A release with several owned tracks used to show ONE row for the whole
+// release, bold release/album title only — which specific tracks were
+// actually owned was invisible (getDigitalLibraryEntries used to silently
+// drop every owned track past the first one found for the same release).
+// Now trackTitles carries all of them, so the bold headline here is the
+// track name(s) the user actually has, not the release title — the vinyl
+// tab has no trackTitles at all (a whole record is owned, not individual
+// tracks), so that case falls back to the release title exactly as
+// before.
+const LibraryEntryRow = ({ release, openEntity }) => {
+  const [expanded, setExpanded] = useState(false);
+  const trackTitles = release.trackTitles || [];
+  const shown = expanded ? trackTitles : trackTitles.slice(0, 2);
+  const remaining = trackTitles.length - shown.length;
+  return (
+    <div className="flex items-center gap-2.5 border-b border-border py-2">
+      {release.thumb ? <img className="size-10 rounded-lg object-cover" src={release.thumb} alt="" /> : <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">♫</div>}
+      <div className="min-w-0 flex-1">
+        {trackTitles.length > 0 ? (
+          <>
+            <strong className="block text-[13px]">
+              {shown.join(', ')}
+              {remaining > 0 && <button type="button" onClick={() => setExpanded(true)} className="ml-1 font-normal text-primary">+{remaining} more</button>}
+              {expanded && trackTitles.length > 2 && <button type="button" onClick={() => setExpanded(false)} className="ml-1 font-normal text-primary">show less</button>}
+            </strong>
+            <span className="block truncate text-[11px] text-muted-foreground">{release.title} · {[release.artist, release.year, release.labelExploreName].filter(Boolean).join(' · ')}</span>
+          </>
+        ) : (
+          <>
+            <strong className="block truncate text-[13px]">{release.title}</strong>
+            <span className="block truncate text-[11px] text-muted-foreground">{[release.artist, release.year, release.labelExploreName].filter(Boolean).join(' · ')}</span>
+          </>
+        )}
+        {release.genres?.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{release.genres.map(genre => <span key={genre} className="rounded border border-primary/30 px-1.5 text-[9px] text-primary">{genre}</span>)}</div>}
+      </div>
+      {release.artistExploreId && <button type="button" className={`${buttonSecondary} inline-flex items-center gap-0.5`} onClick={() => openEntity(release.artistExploreType || 'artist', release.artistExploreId, release.artistExploreName)}>Artist<ArrowUpRight className="size-3" /></button>}
+      {release.labelExploreId && <button type="button" className={`${buttonSecondary} inline-flex items-center gap-0.5`} onClick={() => openEntity('label', release.labelExploreId, release.labelExploreName)}>Label<ArrowUpRight className="size-3" /></button>}
+    </div>
   );
 };
 
