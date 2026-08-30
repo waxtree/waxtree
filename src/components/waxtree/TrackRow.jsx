@@ -5,9 +5,13 @@ import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen }) => {
   const artist = isLabel ? track.label : (track.trackArtistName || track.releaseArtistName || node.name);
   const [helpOpen, setHelpOpen] = useState(false);
-  const videoId = track.videoId || null;
+  // A raw Discogs videoId only counts here once it's known to actually
+  // play — one that already failed (embedding disabled, or gone) is
+  // exactly as "no video" as never having had one, and getTrackVideo
+  // itself now falls through to the auto-match search for either case.
+  const videoId = track.videoId && !actions.isNoEmbedVideo(track.videoId) ? track.videoId : null;
   useEffect(() => { if (!videoId) actions.getTrackVideo(track, artist, isLabel ? node.name : track.label); }, [actions, artist, isLabel, node.name, track, videoId]);
-  const resolvedVideo = track.videoId || actions.getTrackVideo(track, artist, isLabel ? node.name : track.label) || null;
+  const resolvedVideo = actions.getTrackVideo(track, artist, isLabel ? node.name : track.label) || null;
   const liked = !!state.likes[track.id];
   const queued = state.dasAscoltare.some(item => item.id === track.id);
   const trackWithArtist = { ...track, artistName: artist };

@@ -2603,7 +2603,10 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
             attempted=true;
             try{
               const uploads=await fetchChannelUploads(knownChannelId);
-              hit=uploads.find(r=>normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
+              // Excludes anything already confirmed unplayable (retryVideoAfterEmbedFail's
+              // whole reason for existing: re-selecting the exact video that
+              // just failed would be a silent no-op, not a real alternate).
+              hit=uploads.find(r=>!noEmbedIds.has(r.id)&&!invalidYtIds.has(r.id)&&normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
             }catch(e){
               console.warn('WaxTree: channel-uploads lookup failed, falling back to search for',title,e);
             }
@@ -2622,6 +2625,7 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
           const q=`"${artistName||''}" "${title}"`;
           const results=await searchYouTubeApi(q);
           hit=results.find(r=>{
+            if(noEmbedIds.has(r.id)||invalidYtIds.has(r.id))return false; // see the channel-uploads search above for why
             const rTitleN=normalizeStr(r.title||'');
             if(!rTitleN.includes(titleN))return false;
             const channelN=normalizeStr(r.channelTitle||'');
@@ -2723,12 +2727,39 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
         // The user is actively watching THIS one resolve (it's what's
         // currently playing) — worth an immediate render rather than
         // waiting out the debounce window everything else uses below.
-        st.nowPlaying.videoId=result;rr();return;
+        // ytError is cleared here too — this path runs right after
+        // retryVideoAfterEmbedFail found a working alternate for a track
+        // whose original video had just failed (see createYtPlayer's
+        // onError); leaving the old "Embedding disabled"/"Video
+        // unavailable" fallback message up would otherwise mask the new,
+        // working player (RightPanel only renders the player when
+        // !state.ytError). fromDiscogs flips to false alongside it — this
+        // result is an auto-match now, not the original Discogs video, so
+        // it should get the same native-controls treatment any other
+        // auto-matched video gets, not stay stuck on the custom bar it
+        // only had because it started out fromDiscogs.
+        st.ytError=null;
+        st.nowPlaying.videoId=result;st.nowPlaying.fromDiscogs=false;rr();return;
       }
     }
     scheduleYtResolveRerender();
   })();
   return undefined;
+}
+// Called once a track's OWN assigned video has just failed to play (see
+// createYtPlayer's onError below) — tries to find a working alternate for
+// the exact same track instead of leaving the user stuck on a dead video.
+// If this track was already auto-matched before (ytMatches has an entry —
+// only possible if that earlier match ALSO just failed, a rarer case than
+// a fresh Discogs video failing), that stale verdict is cleared first so a
+// real new attempt happens; resolveTrackVideoId's own candidate filtering
+// (see noEmbedIds/invalidYtIds checks there) guarantees it can never just
+// re-select the same broken id, so this can't loop.
+function retryVideoAfterEmbedFail(trackId,title,artistName){
+  const found=findTrackAndNode(trackId);
+  const labelName=found?(found.node.type==='label'?found.node.name:found.track.label):null;
+  if(trackId in ytMatches)delete ytMatches[trackId];
+  resolveTrackVideoId(trackId,title,artistName,found?.track?.duration,labelName);
 }
 
 function loadYtApi(){
@@ -2759,17 +2790,28 @@ function createYtPlayer(){
         if(e.data===YT.PlayerState.PLAYING)tryBadge();
       },
       onError(e){
-        const vid=st.nowPlaying?.videoId;
+        const np=st.nowPlaying;
+        const vid=np?.videoId;
         if(ytPlayer){ytPlayer.destroy();ytPlayer=null;}
         if(e.data===101||e.data===150){
           // Embedding disabled — video exists on YouTube, owner blocked embeds
           if(vid)noEmbedIds.add(vid);
-          showYtFallback('Embedding disabled by owner',st.nowPlaying);
+          showYtFallback('Embedding disabled by owner',np);
         } else {
           // Genuinely unavailable (100=not found/private, 2=bad ID, 5=HTML5 error)
           if(vid&&(e.data===100||e.data===2||e.data===5)){invalidYtIds.add(vid);rr();}
-          showYtFallback('Video unavailable',st.nowPlaying);
+          showYtFallback('Video unavailable',np);
         }
+        // Either way, the track's OWN assigned video is now confirmed dead —
+        // try to find one that actually plays for this exact track before
+        // just leaving it stuck (retryVideoAfterEmbedFail's own filtering
+        // guarantees it can't just re-select the same broken id). Resolves
+        // async — if it finds one, st.nowPlaying.videoId gets swapped in and
+        // this player reloads (see resolveTrackVideoId/syncYtPlayer); if it
+        // comes up empty, the track falls back to the same "no video, mark
+        // as listened / paste a link" state a track with no video at all
+        // already gets (see getTrackVideo/TrackRow.jsx).
+        if(np?.trackId)retryVideoAfterEmbedFail(np.trackId,np.title,np.artistName);
       }
     }
   });
@@ -5043,8 +5085,15 @@ async function fetchGenreYearReleaseDetails(releaseIds){
   }
 }
 function getGenreYearReleaseDetail(releaseId){return genreYearReleaseCache[releaseId]||null;}
+// A track's own Discogs-provided videoId isn't trusted blindly here anymore
+// once it's confirmed dead (embedding disabled, or genuinely gone — see
+// createYtPlayer's onError/retryVideoAfterEmbedFail) — that only happens
+// AFTER a real play attempt actually failed, so this can't ever wrongly
+// distrust a video nobody has tried yet. Falls through to the exact same
+// auto-match path a track with no Discogs video at all already uses.
+function isNoEmbedVideo(videoId){return!!videoId&&(noEmbedIds.has(videoId)||invalidYtIds.has(videoId));}
 function getTrackVideo(track,artistName,nodeName){
-  if(track.videoId)return track.videoId;
+  if(track.videoId&&!isNoEmbedVideo(track.videoId))return track.videoId;
   if(track.id in ytMatches)return ytMatches[track.id]||null;
   return resolveTrackVideoId(track.id,track.title,artistName,track.duration,nodeName);
 }
@@ -5065,7 +5114,7 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,searchArtistsForFavorites,
+  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
