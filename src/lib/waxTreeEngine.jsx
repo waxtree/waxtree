@@ -3389,11 +3389,24 @@ const stripDiscogsSuffix=n=>(n||'').replace(/\s\(\d+\)$/,'');
 // sitting right there in Discogs' own urls array). Normalized down to the
 // band root (no path/query) so it's directly usable as bc-discography's
 // knownBandUrl.
+// Strips a stray leading "www." off a *.bandcamp.com host. Bandcamp itself
+// never actually serves that — every band's real address is the bare
+// "{band}.bandcamp.com" subdomain — but an editor pasting a link by hand
+// on Discogs sometimes adds it anyway. Confirmed live 2026-08-30: Discogs'
+// own urls field for a real label ("Salon Records") had exactly
+// "www.salonrecords.bandcamp.com" on file, and that host doesn't even
+// complete a TLS handshake — left unstripped, this silently broke bc-
+// discography's own fetch (throws, caught, reported resolved:false),
+// surfacing as "no verified page" even though Discogs DID have a link on
+// file, just a slightly wrong one. Applied wherever a *.bandcamp.com host
+// is pulled from anywhere outside Bandcamp's own search results (which
+// never carry this prefix themselves).
+const stripWwwBandcamp=host=>host.replace(/^www\./i,'');
 function extractBandcampUrl(urls){
   const hit=(urls||[]).find(u=>/\.bandcamp\.com/i.test(u||''));
   if(!hit)return null;
   const m=hit.match(/^https?:\/\/([^/?#]+\.bandcamp\.com)/i);
-  return m?'https://'+m[1]:null;
+  return m?'https://'+stripWwwBandcamp(m[1]):null;
 }
 // A dedicated, lightweight lookup (one small Discogs call, just the
 // artist/label record — nothing like fetchArtistData/fetchLabelData's own
@@ -3416,6 +3429,80 @@ async function fetchDiscogsBandcampUrl(type,discogsId){
   }catch{
     return null; // not cached — a transient failure shouldn't permanently poison this
   }
+}
+// fetchDiscogsBandcampUrl alone only trusts a link an editor hand-entered
+// on Discogs — plenty of real labels/artists have a genuine Bandcamp page
+// that was just never added there. The per-release "Bandcamp" button
+// (fetchBandcampDirect/getBandcampDirect) already resolves those fine via
+// bc-search's title+name-verified matching, so "Only on Bandcamp" showing
+// "no verified page" right next to release cards with lit-up, working
+// Bandcamp buttons was a real, confusing inconsistency. Confirmed live
+// 2026-08-30: "Salon Records" has no Bandcamp url on Discogs, but several
+// of its releases individually verify fine via bc-search.
+// This still goes through the exact same bc-search endpoint the per-
+// release button already trusts, rather than a cruder bare-name guess —
+// bc-discography itself dropped a much weaker name-only fallback for this
+// exact spot already (see its own comment: "Mosaic" confidently resolved
+// to a totally unrelated act's page). Every call here carries a REAL
+// release title from this node's own Discogs catalog, so bc-search's
+// title-verified strategy gets first crack instead of a name-only guess.
+// For a LABEL node specifically, the credited ARTIST of each sample
+// release is passed too (not just the label name) — confirmed live: a
+// label-name+title search alone ("Salon Records" + "Secret Chamber") found
+// nothing, while artist+title ("Steve O'Sullivan"/"DJ Sneak"/"Lil' Mark" +
+// their own track) each verified individually — Bandcamp's own search
+// indexes releases by credited artist even on a shared label page. That
+// means a single verified hit isn't enough on its own for a label,
+// though: it could just as easily be that artist's OWN separate Bandcamp
+// page (unrelated to this label) rather than the label's shared one, and
+// trusting that alone would list a stranger's whole catalog as "only on
+// Bandcamp" for this label — so a label only accepts a domain once TWO
+// different sampled releases independently land on the SAME one (three
+// real, unrelated Salon Records artists all confirmed live to agree on
+// salonrecords.bandcamp.com — vanishingly unlikely to happen by accident,
+// unlike trusting any single match alone). An artist node has no such
+// ambiguity to guard against — it's already resolving that one artist's
+// own page — so a single verified hit is accepted immediately there.
+// Only once samples run out without enough agreement does this give up as
+// unresolved, same as before.
+async function resolveBandcampCatalogUrl(type,discogsId,name,isLabelNode,sampleReleases){
+  const key=type+':'+discogsId;
+  const fromDiscogs=await fetchDiscogsBandcampUrl(type,discogsId);
+  if(fromDiscogs)return fromDiscogs;
+  const domainHits={}; // domain → count, label case only
+  for(const rel of sampleReleases){
+    if(!rel.title)continue;
+    let domain=null;
+    try{
+      const{data,error}=await sb.functions.invoke('bc-search',{body:{
+        artist:isLabelNode?rel.artist:name,
+        label:isLabelNode?name:null,
+        title:rel.title,release:rel.title,
+      }});
+      if(error)continue;
+      const hitUrl=data?.tracks?.[0]?.url||null;
+      const hostMatch=hitUrl?hitUrl.match(/^https?:\/\/([^/?#]+\.bandcamp\.com)/i)?.[1]:null;
+      // bc-search's own bcAutocomplete strategies never produce a "www."
+      // host, but its Google/DDG fallback strategies just forward whatever
+      // that search engine indexed — normalize the same way extractBandcampUrl
+      // does, for the same reason (see its own comment).
+      domain=hostMatch?stripWwwBandcamp(hostMatch):null;
+    }catch{/* try the next sample title */}
+    if(!domain)continue;
+    if(!isLabelNode){
+      const resolved='https://'+domain;
+      bandcampUrlCache[key]=resolved;
+      return resolved;
+    }
+    domainHits[domain]=(domainHits[domain]||0)+1;
+    if(domainHits[domain]>=2){
+      const resolved='https://'+domain;
+      bandcampUrlCache[key]=resolved;
+      return resolved;
+    }
+  }
+  bandcampUrlCache[key]=null; // every sample checked, nothing confirmed — same confirmed-absence caching fetchDiscogsBandcampUrl already does for its own source
+  return null;
 }
 function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='',vinylTitles=null){
   const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.title);
@@ -4001,16 +4088,31 @@ async function fetchBandcampOnly(nodeId){
   try{
     const isLabelNode=node.type==='label';
     const name=node.data?.name||node.name;
+    // Moved ahead of the URL resolution below (previously fetched only
+    // after) — resolveBandcampCatalogUrl's own title-verified fallback
+    // needs a few real release titles from this exact catalog, and this
+    // call was already happening later in this same function for the
+    // Discogs-vs-Bandcamp diff, same cache — no extra Discogs cost, just
+    // reordered.
+    const discogsReleases=await fetchAllDiscogsReleaseTitles(node.type,node.discogsId);
     // Fetched fresh (not from node.data, which only has this on data
-    // loaded after the field existed — see fetchDiscogsBandcampUrl's own
+    // loaded after the field existed — see resolveBandcampCatalogUrl's own
     // comment) — and checked BEFORE spending anything else, since bc-
-    // discography now flatly refuses to guess without it.
-    const knownBandUrl=await fetchDiscogsBandcampUrl(node.type,node.discogsId);
+    // discography flatly refuses to guess without it. resolveBandcampCatalogUrl
+    // tries Discogs' own hand-entered link first, then a small, title-
+    // verified sample of this catalog's own releases, before finally
+    // giving up as 'unresolved'.
+    // A label needs TWO samples to independently agree before trusting a
+    // domain (see resolveBandcampCatalogUrl's own comment) — a wider
+    // sample than an artist node (which accepts its first verified hit)
+    // gives that a real chance of happening on a catalog where not every
+    // release is on Bandcamp.
+    const bcSampleSize=isLabelNode?8:5;
+    const knownBandUrl=await resolveBandcampCatalogUrl(node.type,node.discogsId,name,isLabelNode,discogsReleases.slice(0,bcSampleSize));
     if(!knownBandUrl){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
     const{data:bcData,error:bcErr}=await sb.functions.invoke('bc-discography',{body:{knownBandUrl}});
     if(bcErr)throw new Error(bcErr.message);
     if(!bcData?.resolved){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
-    const discogsReleases=await fetchAllDiscogsReleaseTitles(node.type,node.discogsId);
     const discogsEntries=discogsReleases.map(r=>({
       title:normalizeStr(r.title||''),
       artist:isLabelNode?normalizeStr(stripDiscogsSuffix(r.artist||'')):null,
