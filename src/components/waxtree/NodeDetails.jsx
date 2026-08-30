@@ -39,17 +39,18 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
 
   return (
     <>
-      <p className="mb-2.5 text-[13px] text-muted-foreground">{isLabel ? 'Label' : 'Artist'} · {data.trackCount} releases on Discogs</p>
-      {data.highlights && (
-        <div className="mb-3">
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {[data.highlights.yearRange, `${data.trackCount} release`, data.country].filter(Boolean).map(item => <span key={item} className="rounded-full border border-border bg-secondary px-2.5 py-1 text-[11px] text-muted-foreground">{item}</span>)}
-          </div>
-          {(data.highlights.curiosity || (isLabel ? data.highlights.artistStr : data.highlights.labelStr)) && (
-            <p className="rounded-lg border-l-2 border-primary bg-secondary p-3 text-xs leading-5 text-muted-foreground">{data.highlights.curiosity || (isLabel ? data.highlights.artistStr : data.highlights.labelStr)}</p>
-          )}
-        </div>
-      )}
+      {/* The name/image header (Content.jsx) already shows "Artist/Label ·
+          N releases on Discogs" right next to the name — this used to
+          repeat that count a second time here (once plainly, once again
+          inside its own pill), plus a year-range pill and a "Released
+          on: .../Artists include: ..." box, all stacked before anything
+          else in the page. Per explicit request, all of that is gone now:
+          highlights.artistStr/labelStr IS that "Released on:"/"Artists
+          include:" text (confirmed against waxTreeEngine.jsx — there's no
+          separate summary line hiding in there), and highlights.curiosity
+          never actually gets set by the real fetchArtistData/fetchLabelData
+          (only a hardcoded DEMO_NODES fallback used it), so there was
+          nothing worth preserving from this block. */}
       {!isLabel && data.correlatedArtists?.length > 0 && (
         <div className="mb-4">
           <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Related artists</span>
