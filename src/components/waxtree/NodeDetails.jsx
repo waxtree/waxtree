@@ -40,8 +40,8 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
   return (
     <>
       {/* The name/image header (Content.jsx) already shows "Artist/Label ·
-          N releases on Discogs" right next to the name — this used to
-          repeat that count a second time here (once plainly, once again
+          N releases" right next to the name — this used to repeat that
+          count a second time here (once plainly, once again
           inside its own pill), plus a year-range pill and a "Released
           on: .../Artists include: ..." box, all stacked before anything
           else in the page. Per explicit request, all of that is gone now:

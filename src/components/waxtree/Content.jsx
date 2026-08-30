@@ -50,7 +50,7 @@ export const Content = ({ state, actions }) => {
         {data?.imageUrl ? <img className="size-20 shrink-0 rounded-2xl border border-border object-cover max-sm:size-14" src={data.imageUrl} alt={node.name} /> : <div className="flex size-20 shrink-0 items-center justify-center rounded-2xl border border-border bg-secondary text-muted-foreground max-sm:size-14">{isLabel ? <LabelIcon className="size-8" /> : <ArtistIcon className="size-8" />}</div>}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[28px] font-bold leading-tight max-sm:text-xl">{node.name}</h1>
-          {data && <p className="mt-0.5 text-[13px] text-muted-foreground">{isLabel ? 'Label' : 'Artist'} · {data.trackCount} releases on Discogs</p>}
+          {data && <p className="mt-0.5 text-[13px] text-muted-foreground">{isLabel ? 'Label' : 'Artist'} · {data.trackCount} releases</p>}
         </div>
         <button
           type="button"
