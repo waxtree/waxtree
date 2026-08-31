@@ -2340,11 +2340,33 @@ const YT_MATCHES_CAP=4000;
 function saveYtMatches(m){
   const keys=Object.keys(m);
   if(keys.length>YT_MATCHES_CAP){
-    keys.slice(0,keys.length-YT_MATCHES_CAP).forEach(k=>delete m[k]);
+    keys.slice(0,keys.length-YT_MATCHES_CAP).forEach(k=>{delete m[k];delete ytNoMatchAt[k];});
   }
   try{localStorage.setItem('wt-yt-matches',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist YouTube matches:',e);}
 }
 let ytMatches=loadYtMatches();
+// A confirmed no-match is no longer permanent: the matching criteria and
+// the query shape both keep improving (see the false-purge history right
+// below — every criteria change so far has needed a one-off remediation
+// hack precisely because "false" never expired), and ~46% of the SHARED
+// verdicts table was measured (2026-08-31) to be no-matches frozen under
+// whatever criteria happened to be live when each was first tried. A "no"
+// older than this TTL simply stops blocking: the next render re-runs the
+// exact same strict verification, so this can never introduce a wrong
+// match — it only changes when a re-attempt is allowed. Confirmed matches
+// stay permanent as before (a found video doesn't need re-verifying).
+// Timestamps live in their own small map (trackId → epoch ms) because
+// ytMatches' value shape (videoId string | false) is read for truthiness
+// all over — a legacy false entry with no timestamp here reads as ts 0,
+// i.e. long expired, which is exactly the retro-unblock the old frozen
+// verdicts need.
+const YT_NO_MATCH_TTL_MS=30*24*3600000;
+function loadYtNoMatchAt(){try{const r=localStorage.getItem('wt-yt-nomatch-at');return r?JSON.parse(r):{};}catch{return{};}}
+function saveYtNoMatchAt(){try{localStorage.setItem('wt-yt-nomatch-at',JSON.stringify(ytNoMatchAt));}catch{}}
+let ytNoMatchAt=loadYtNoMatchAt();
+function isExpiredNoMatch(trackId){
+  return ytMatches[trackId]===false&&Date.now()-(ytNoMatchAt[trackId]||0)>YT_NO_MATCH_TTL_MS;
+}
 // One-time remediation, bumped each time something that affects a "no
 // match" verdict changes (budget-exhaustion bug, then matching-criteria
 // changes — see the artist/label-in-title fallback added 2026-07-20,
@@ -2500,19 +2522,38 @@ function scheduleYtResolveRerender(){
 async function fetchSharedYtMatches(trackIds){
   if(!trackIds.length)return;
   try{
-    const{data,error}=await sb.from('yt_video_matches').select('track_id,video_id').in('track_id',trackIds);
+    const{data,error}=await sb.from('yt_video_matches').select('track_id,video_id,matched_at').in('track_id',trackIds);
     trackIds.forEach(id=>ytSharedChecked.add(id)); // verdict settled for the whole batch now, hit or miss
     if(error||!data)return;
     let changed=false;
     data.forEach(row=>{
-      if(!(row.track_id in ytMatches)){ytMatches[row.track_id]=row.video_id||false;changed=true;}
+      // A shared no-match past its TTL is deliberately NOT imported —
+      // leaving the track absent from ytMatches is what lets
+      // resolveTrackVideoId give it a real fresh attempt (and the new
+      // verdict then refreshes/upgrades the shared row via pushSharedYtMatch).
+      if(!row.video_id&&Date.now()-new Date(row.matched_at).getTime()>YT_NO_MATCH_TTL_MS)return;
+      if(!(row.track_id in ytMatches)){
+        ytMatches[row.track_id]=row.video_id||false;
+        if(!row.video_id)ytNoMatchAt[row.track_id]=new Date(row.matched_at).getTime();
+        changed=true;
+      }
     });
-    if(changed){saveYtMatches(ytMatches);scheduleYtResolveRerender();}
+    if(changed){saveYtMatches(ytMatches);saveYtNoMatchAt();scheduleYtResolveRerender();}
   }catch(e){console.warn('WaxTree: shared YouTube cache lookup failed:',e);}
 }
 function pushSharedYtMatch(trackId,videoId){
   sb.from('yt_video_matches').upsert({track_id:trackId,video_id:videoId||null},{onConflict:'track_id',ignoreDuplicates:true})
     .then(({error})=>{if(error)console.warn('WaxTree: could not publish shared YouTube match:',error);});
+  // ignoreDuplicates above means an EXISTING row is never touched — right
+  // for the first-writer-wins race between two auto-matches, but a re-check
+  // of an expired no-match (see YT_NO_MATCH_TTL_MS) has to be able to land
+  // its outcome on the old row too: a found video upgrades it, another
+  // "no" refreshes matched_at so the shared retry clock actually restarts
+  // (otherwise every user re-burns quota on the same dead track every
+  // render past the TTL). The .is('video_id',null) filter is what keeps
+  // this from ever downgrading someone else's real confirmed match.
+  sb.from('yt_video_matches').update({video_id:videoId||null,matched_at:new Date().toISOString()}).eq('track_id',trackId).is('video_id',null)
+    .then(({error})=>{if(error)console.warn('WaxTree: could not refresh shared YouTube no-match:',error);});
 }
 // A human pasting a real link is strictly better information than an
 // automated verdict, including a previous confirmed no-match — unlike
@@ -2552,7 +2593,14 @@ function pushSharedYtChannel(nameNorm,channelId){
     .then(({error})=>{if(error)console.warn('WaxTree: could not publish shared YouTube channel:',error);});
 }
 function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
-  if(trackId in ytMatches)return ytMatches[trackId]; // false (confirmed no match) or a videoId string — permanent
+  // A videoId is permanent; a false (confirmed no match) only holds until
+  // its TTL runs out (see YT_NO_MATCH_TTL_MS), then it's dropped so the
+  // full strict resolution below gets a genuine fresh attempt.
+  if(trackId in ytMatches){
+    if(!isExpiredNoMatch(trackId))return ytMatches[trackId];
+    delete ytMatches[trackId];delete ytNoMatchAt[trackId];
+    saveYtMatches(ytMatches);saveYtNoMatchAt();
+  }
   if(ytAutoMatchInFlight.has(trackId))return undefined;
   ytAutoMatchInFlight.add(trackId);
   (async()=>{
@@ -2569,8 +2617,12 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
       if(!ytSharedChecked.has(trackId)){
         ytSharedChecked.add(trackId);
         try{
-          const{data}=await sb.from('yt_video_matches').select('video_id').eq('track_id',trackId).maybeSingle();
-          if(data){result=data.video_id||null;publishToShared=false;}
+          const{data}=await sb.from('yt_video_matches').select('video_id,matched_at').eq('track_id',trackId).maybeSingle();
+          // Same TTL rule as fetchSharedYtMatches: an expired shared
+          // no-match is treated as never checked, so the real attempt
+          // below runs — and publishToShared stays true, so its outcome
+          // refreshes/upgrades the stale row for everyone else too.
+          if(data&&(data.video_id||Date.now()-new Date(data.matched_at).getTime()<=YT_NO_MATCH_TTL_MS)){result=data.video_id||null;publishToShared=false;}
         }catch{}
       }
 
@@ -2623,7 +2675,28 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
           // common word (e.g. "Vedik" vs. "Vedic") gets swamped by unrelated
           // results otherwise, even though the right video is on YouTube.
           const q=`"${artistName||''}" "${title}"`;
-          const results=await searchYouTubeApi(q);
+          let results=await searchYouTubeApi(q);
+          // Second attempt with the NORMALIZED title when the raw-title
+          // query comes back completely empty — Discogs titles routinely
+          // carry wording the actual YouTube upload doesn't ("(Original
+          // Mix)", embedded feat. credits, stray punctuation), and the
+          // quoted-phrase query then finds nothing even though the video
+          // exists. normalizeStr is the exact same normalization the
+          // title check below applies to candidates, so this searches for
+          // precisely what the filter will require — it widens what
+          // REACHES the strict verification, never what passes it. Only
+          // fires on a genuinely empty first result (not merely
+          // no-hit-among-results), so the extra search.list spend stays
+          // rare; skipped without retry when the budget says no, same as
+          // any other blocked attempt (the first, real search already
+          // counts as attempted).
+          if(!results.length){
+            const titleClean=normalizeStr(title);
+            const qClean=`"${artistName||''}" "${titleClean}"`;
+            if(titleClean&&qClean.toLowerCase()!==q.toLowerCase()&&trySpendYtCalls('search')==='ok'){
+              results=await searchYouTubeApi(qClean);
+            }
+          }
           hit=results.find(r=>{
             if(noEmbedIds.has(r.id)||invalidYtIds.has(r.id))return false; // see the channel-uploads search above for why
             const rTitleN=normalizeStr(r.title||'');
@@ -2712,6 +2785,8 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
       return;
     }
     ytMatches[trackId]=result===null?false:result;
+    if(result===null)ytNoMatchAt[trackId]=Date.now();else delete ytNoMatchAt[trackId];
+    saveYtNoMatchAt();
     saveYtMatches(ytMatches);
     if(publishToShared)pushSharedYtMatch(trackId,result); // share with every other WaxTree user
     if(result){
@@ -2758,7 +2833,7 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
 function retryVideoAfterEmbedFail(trackId,title,artistName){
   const found=findTrackAndNode(trackId);
   const labelName=found?(found.node.type==='label'?found.node.name:found.track.label):null;
-  if(trackId in ytMatches)delete ytMatches[trackId];
+  if(trackId in ytMatches){delete ytMatches[trackId];delete ytNoMatchAt[trackId];}
   resolveTrackVideoId(trackId,title,artistName,found?.track?.duration,labelName);
 }
 
@@ -5094,7 +5169,9 @@ function getGenreYearReleaseDetail(releaseId){return genreYearReleaseCache[relea
 function isNoEmbedVideo(videoId){return!!videoId&&(noEmbedIds.has(videoId)||invalidYtIds.has(videoId));}
 function getTrackVideo(track,artistName,nodeName){
   if(track.videoId&&!isNoEmbedVideo(track.videoId))return track.videoId;
-  if(track.id in ytMatches)return ytMatches[track.id]||null;
+  // An expired no-match falls through to resolveTrackVideoId, which drops
+  // the stale verdict and re-attempts (see YT_NO_MATCH_TTL_MS).
+  if(track.id in ytMatches&&!isExpiredNoMatch(track.id))return ytMatches[track.id]||null;
   return resolveTrackVideoId(track.id,track.title,artistName,track.duration,nodeName);
 }
 function getExploreTargets(trackId,artistName){

@@ -79,7 +79,7 @@ export default async function handler(req, res) {
     searchUrl.searchParams.set('part', 'snippet')
     searchUrl.searchParams.set('type', 'video')
     searchUrl.searchParams.set('videoCategoryId', '10') // Music
-    searchUrl.searchParams.set('maxResults', '8')
+    searchUrl.searchParams.set('maxResults', '15')
     searchUrl.searchParams.set('q', q)
     searchUrl.searchParams.set('key', YT_API_KEY)
     const sd = await ytFetch(searchUrl)
