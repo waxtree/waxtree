@@ -43,9 +43,10 @@ export default async function handler(req, res) {
       if (d in signupsByDay) signupsByDay[d]++
     })
 
-    // digging_events is small enough today (see supabase/digging_events.sql's
-    // own note) to just fetch and count by type in JS. Move this to a
-    // Postgres view/RPC once it's grown past a few thousand rows.
+    // digging_events is small enough today (see digging_events.sql's own
+    // note, now in the separate waxtree/supabase-locale repo) to just
+    // fetch and count by type in JS. Move this to a Postgres view/RPC once
+    // it's grown past a few thousand rows.
     const eventsRes = await sbAdmin('/rest/v1/digging_events?select=user_id,event,payload,created_at&order=created_at.desc&limit=5000')
     const events = eventsRes.ok ? await eventsRes.json() : []
     const eventsByType = {}

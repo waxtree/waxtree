@@ -37,4 +37,4 @@ export const LoginForm = () => (
 ## Exceptions
 
 - Existing `index.css` (global variables, reset, legacy animations): do not expand it with new styles; prefer Tailwind.
-- Files in `api/` and `supabase/`: not React UI, this rule does not apply.
+- Files in `api/`: not React UI, this rule does not apply.

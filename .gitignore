@@ -15,4 +15,8 @@ node_modules/
 # Build artifacts
 dist/
 build/
+
+# Local Supabase CLI project-link state — this repo's supabase/ folder was
+# split out to waxtree/supabase-locale, but the CLI can still leave this
+# behind locally if it's ever re-linked here; never meant to be committed.
 supabase/.temp/
