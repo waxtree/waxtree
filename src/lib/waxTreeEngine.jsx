@@ -2415,7 +2415,7 @@ const ytAutoMatchInFlight=new Set();
 // it ONLY draws against the generous 10,000/day pool — effectively
 // unconstrained in practice. Budgeting search.list separately, tightly,
 // is what actually matters; the general pool just needs a sane backstop.
-const YT_SEARCH_CALLS_DAILY_LIMIT=80; // real cap is 100 — leaves headroom for manual testing/other margin
+const YT_SEARCH_CALLS_DAILY_LIMIT=95; // real cap is 100 — small headroom only, raised from 80 (2026-08-31) since the old margin was getting hit during normal active testing/browsing, not just edge cases
 const YT_GENERAL_CALLS_DAILY_LIMIT=9000; // real cap is 10,000 — rarely the binding constraint
 const YT_DAILY_BUDGET_KEY='wt-yt-daily-budget';
 function pacificDayKey(){
