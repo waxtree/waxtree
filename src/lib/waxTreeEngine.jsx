@@ -3719,8 +3719,22 @@ async function resolveBandcampCatalogUrl(type,discogsId,name,isLabelNode,sampleR
   bandcampUrlCache[key]=null; // every sample checked, nothing confirmed — same confirmed-absence caching fetchDiscogsBandcampUrl already does for its own source
   return null;
 }
+// type_ "index" is Discogs' own convention for a container entry on a
+// continuous-mix/medley release — a segment marker with no audio of its
+// own, whose REAL constituent songs live nested in its own sub_tracks
+// array (never surfaced by this API response's own field set the way a
+// plain track's data is). Confirmed live 2026-09-04: a Luke Slater
+// "Berghain Fünfzehn" DJ-mix pressing (a real, separate Discogs release,
+// "File/WAV/Mixed" format) shares the exact release TITLE its vinyl and
+// FLAC pressings use, so groupTracksByRelease's title+label key merges
+// all three into one card — and this one's 23 index entries (each
+// literally titled by the mix segment's source year range, e.g. "2011–
+// 2012 [O-Ton Reassembled 2]") got treated as 23 individually "playable"
+// tracks right alongside the pressings' real 7, none of them a real song
+// title anything could ever resolve a match for. Same treatment as
+// "heading" — never a real track on its own.
 function buildTrackEntries(rd,fetchId,releaseUrl,relYear,relLabelHint,relThumb='',vinylTitles=null){
-  const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.title);
+  const tracklist=(rd.tracklist||[]).filter(t=>t.type_!=='heading'&&t.type_!=='index'&&t.title);
   if(!tracklist.length)return[];
   // A vinyl-with-download-code release is very common and Discogs represents
   // it as ONE "Vinyl" format entry whose descriptions mention the download,
