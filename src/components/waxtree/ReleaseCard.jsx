@@ -106,7 +106,7 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-[5px] max-sm:basis-full">
         {tracks.map(track => (
-          <TrackRow key={track.id} track={track} node={node} isLabel={isLabel} primaryArtist={primaryArtist} state={state} actions={actions} playlistOpen={openPlaylist === track.id} setPlaylistOpen={open => setOpenPlaylist(open ? track.id : null)} />
+          <TrackRow key={track.id} track={track} node={node} isLabel={isLabel} primaryArtist={primaryArtist} state={state} actions={actions} playlistOpen={openPlaylist === track.id} setPlaylistOpen={open => setOpenPlaylist(open ? track.id : null)} hardwaxUrl={hardwax?.url} />
         ))}
       </div>
       <div className="flex max-w-[370px] shrink-0 flex-col items-end gap-[5px] max-sm:max-w-none max-sm:basis-full max-sm:items-start">

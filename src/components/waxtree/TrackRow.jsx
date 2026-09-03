@@ -1,10 +1,11 @@
-import { ChevronDown, Heart, Play, Tag } from 'lucide-react';
+import { ChevronDown, Headphones, Heart, Play, Tag } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 
-export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen }) => {
+export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl }) => {
   const artist = isLabel ? track.label : (track.trackArtistName || track.releaseArtistName || node.name);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   // A raw Discogs videoId only counts here once it's known to actually
   // play — one that already failed (embedding disabled, or gone) is
   // exactly as "no video" as never having had one, and getTrackVideo
@@ -12,6 +13,18 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   const videoId = track.videoId && !actions.isNoEmbedVideo(track.videoId) ? track.videoId : null;
   useEffect(() => { if (!videoId) actions.getTrackVideo(track, artist, isLabel ? node.name : track.label); }, [actions, artist, isLabel, node.name, track, videoId]);
   const resolvedVideo = actions.getTrackVideo(track, artist, isLabel ? node.name : track.label) || null;
+  // Last-resort fallback, only ever worth checking once YouTube has
+  // genuinely come up empty — an actual audio clip beats no audio at all,
+  // but it's still a different, clearly-labeled thing from the real
+  // player experience a YouTube match gets (no mini-player, no related
+  // tracks, no history — just "here, at least you can hear it").
+  const hardwaxPreview = !resolvedVideo ? actions.getHardwaxAudioPreview(hardwaxUrl, track.id, track.title) : null;
+  // getHardwaxAudioPreview above is a cheap, already-cached tracklist
+  // lookup and just decides whether the headphone button shows at all —
+  // the actual mp3 only gets downloaded (via getHardwaxAudioBlobUrl,
+  // which proxies it through our own edge function since Hard Wax's CDN
+  // blocks a direct in-browser fetch) once the popover is opened.
+  const hardwaxBlobUrl = previewOpen && hardwaxPreview ? actions.getHardwaxAudioBlobUrl(hardwaxPreview) : undefined;
   const liked = !!state.likes[track.id];
   const queued = state.dasAscoltare.some(item => item.id === track.id);
   const trackWithArtist = { ...track, artistName: artist };
@@ -42,9 +55,29 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
         </button>
         {playlistOpen && <PlaylistDrop track={trackWithArtist} node={node} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}
       </div>
+      {hardwaxPreview && (
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            title="No video found — play a preview from Hard Wax instead"
+            onClick={() => { setHelpOpen(false); setPreviewOpen(value => !value); }}
+            className={`flex size-[22px] items-center justify-center rounded-full bg-background transition-colors hover:bg-primary hover:text-primary-foreground ${previewOpen ? 'text-primary' : 'text-muted-foreground/70'}`}
+          >
+            <Headphones className="size-3" />
+          </button>
+          {previewOpen && (
+            <div className="absolute right-0 top-[calc(100%+4px)] z-50 w-[230px] rounded-[10px] border border-border bg-card p-2.5 shadow-[var(--wt-shadow)]">
+              <p className="mb-1.5 text-[10px] text-muted-foreground/70">No video found — preview via <span className="font-semibold">Hard Wax</span></p>
+              {hardwaxBlobUrl === undefined && <p className="py-1 text-center text-[11px] text-muted-foreground/70">Loading preview…</p>}
+              {hardwaxBlobUrl === null && <p className="py-1 text-center text-[11px] text-muted-foreground/70">Preview unavailable right now.</p>}
+              {hardwaxBlobUrl && <audio src={hardwaxBlobUrl} controls autoPlay className="h-8 w-full" />}
+            </div>
+          )}
+        </div>
+      )}
       {!resolvedVideo && (
         <div className="relative shrink-0">
-          <button type="button" title="No video found" onClick={() => setHelpOpen(value => !value)} className="flex shrink-0 items-center rounded-[5px] border border-border px-[5px] py-px text-muted-foreground/70 transition-colors hover:border-primary hover:text-primary">
+          <button type="button" title="No video found" onClick={() => { setPreviewOpen(false); setHelpOpen(value => !value); }} className="flex shrink-0 items-center rounded-[5px] border border-border px-[5px] py-px text-muted-foreground/70 transition-colors hover:border-primary hover:text-primary">
             <ChevronDown className="size-3" />
           </button>
           {helpOpen && (
