@@ -35,16 +35,21 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
           type="button"
           title={hardwaxPlaying ? 'Playing Hard Wax preview' : 'No video found — play a preview from Hard Wax instead'}
           onClick={() => actions.playHardwaxPreview(track.id, hardwaxUrl, track.title, artist)}
-          className={`flex size-[22px] shrink-0 items-center justify-center rounded-full bg-background transition-colors hover:bg-primary hover:text-primary-foreground ${hardwaxPlaying ? 'text-primary' : 'text-muted-foreground/70'}`}
+          className={`flex size-[22px] shrink-0 items-center justify-center rounded-full border border-border bg-background transition-colors hover:border-primary hover:bg-primary hover:text-primary-foreground ${hardwaxPlaying ? 'border-primary text-primary' : 'text-muted-foreground/70'}`}
         >
           <Headphones className="size-3" />
         </button>
       )}
+      {/* Explicit border on both — without it, the "off" state (no
+          resolved video, text-muted-foreground on the same bg-background
+          as every other state) reads as visually absent next to the
+          headphone button beside it, since only the icon's own fill
+          color was ever what carried "on" vs "off" here. */}
       <button
         type="button"
         onClick={() => actions.doPlay(track.id, resolvedVideo, track.title, artist)}
         title={resolvedVideo ? 'Play' : 'Search on YouTube'}
-        className={`flex size-[22px] shrink-0 items-center justify-center rounded-full bg-background transition-colors hover:bg-primary hover:text-primary-foreground ${resolvedVideo ? 'text-primary' : 'text-muted-foreground'}`}
+        className={`flex size-[22px] shrink-0 items-center justify-center rounded-full border bg-background transition-colors hover:border-primary hover:bg-primary hover:text-primary-foreground ${resolvedVideo ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}
       >
         <Play className="size-2.5 fill-current" />
       </button>

@@ -3497,6 +3497,47 @@ function getResolvedRemixArtist(remainder){
   }
   return undefined;
 }
+
+// ── Related-artist chip resolution (NodeDetails' "Related artists") ────
+// correlatedArtists itself (see fetchArtistData above) is built from a
+// Discogs LABEL-releases listing, which only ever returns a plain artist
+// NAME string per release — no id — so there was never anything to
+// navigate to directly; a chip's click used to just drop the name into
+// the search box instead. Resolved here the same way a remix credit is
+// (searchDiscogsArtist, confirmed by an exact disambiguation-suffix-
+// stripped title match before ever being trusted) — but deliberately
+// ON CLICK, not proactively for all ~10 chips the moment an artist page
+// loads: that would be up to 10 extra Discogs searches per page visit
+// for names a visitor may never click, on top of the request budget
+// this cross-check style already spends elsewhere.
+async function resolveCorrelatedArtist(name){
+  const results=await searchDiscogsArtist(name);
+  const hit=results.find(r=>r.title.replace(/\s*\(\d+\)$/,'').toLowerCase()===name.toLowerCase());
+  return hit?{name:hit.title,id:hit.id}:null;
+}
+// The chip's own click handler (CorrelatedArtistChip.jsx) awaits this
+// directly rather than going through the usual sync-getter/rr() pattern
+// — there's no render depending on the outcome mid-flight, just "open
+// the node if we found one." Returns whether it worked so the chip can
+// show a "couldn't confirm this one" state instead of silently doing
+// nothing on a genuine miss (a name Discogs' own search can't find
+// again — a misspelling, a one-off compilation credit).
+async function exploreCorrelatedArtist(name,parentId,branchId){
+  const ck='ca:'+name.toLowerCase();
+  const cached=lsGet(ck);
+  let resolved;
+  if(cached!==null)resolved=cached||null; // false (confirmed no match) -> null
+  else{
+    try{
+      resolved=await resolveCorrelatedArtist(name);
+      lsSet(ck,resolved===null?false:resolved);
+    }catch{
+      resolved=null; // network failure — don't cache, so a later click can retry
+    }
+  }
+  if(resolved)addNode('artist',resolved.id,resolved.name,parentId,branchId,{background:true});
+  return !!resolved;
+}
 // MusicBrainz: 1 req/sec limit enforced server-side
 let mbLast=0;
 async function mbFetch(url,_retry=0){
@@ -3936,7 +3977,12 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
           const lRel=await dReq('/labels/'+topLabelId+'/releases',{per_page:'30',sort:'year'});
           const seen=new Set([artData.name.toLowerCase().replace(/\s+/g,'')]);
           nd.correlatedArtists=lRel.releases
-            .map(r=>r.artist||'').filter(n=>n&&!/^various$/i.test(n.trim()))
+            // "Various" is Discogs' own compilation marker; "Unknown
+            // Artist" is its placeholder for an unidentified credit —
+            // neither is a real profile exploreCorrelatedArtist could
+            // ever confirm, so both are dropped here rather than left to
+            // fail silently (or worse, "resolve") on every click.
+            .map(r=>r.artist||'').filter(n=>n&&!/^various$/i.test(n.trim())&&!/^unknown artist$/i.test(n.trim()))
             .map(n=>({name:n,k:n.toLowerCase().replace(/\s+/g,'')}))
             .filter(a=>{if(seen.has(a.k))return false;seen.add(a.k);return true;})
             .slice(0,10).map(a=>a.name);
@@ -5374,7 +5420,7 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
+  exploreCorrelatedArtist,findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
