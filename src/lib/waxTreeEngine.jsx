@@ -4232,10 +4232,19 @@ async function fetchHardwaxComment(ck,artist,title,catno){
       return data?.results||[];
     };
     let hit,actUrl;
+    // A single tier throwing (a transient network hiccup, hardwax.com
+    // itself being briefly slow under a burst of concurrent per-release
+    // requests) used to abort the WHOLE chain — one bad catalog-number
+    // query meant the artist+title and artist-alone tiers right below it
+    // never even got a chance to run, treating a temporary blip on tier
+    // ONE as "no comment at all" for a release the later tiers might well
+    // have found fine. Each tier now only ever costs itself.
     const tryFind=async body=>{
-      const r=await runQuery(body);
-      hit=r.find(matches);
-      if(!hit)actUrl=actUrl||r.find(x=>bcOnlyArtistMatches(x.artist,artistNorm))?.actUrl;
+      try{
+        const r=await runQuery(body);
+        hit=r.find(matches);
+        if(!hit)actUrl=actUrl||r.find(x=>bcOnlyArtistMatches(x.artist,artistNorm))?.actUrl;
+      }catch{/* this tier failed — the next one still gets a chance */}
     };
     // Catalog number first when the release has one — effectively unique
     // on its own, and Hard Wax's own search handles it precisely (a plain
