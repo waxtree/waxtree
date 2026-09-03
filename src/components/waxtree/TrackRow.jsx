@@ -1,8 +1,8 @@
-import { ChevronDown, Heart, Play, Tag } from 'lucide-react';
+import { ChevronDown, Headphones, Heart, Play, Tag } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 
-export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen }) => {
+export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl }) => {
   const artist = isLabel ? track.label : (track.trackArtistName || track.releaseArtistName || node.name);
   const [helpOpen, setHelpOpen] = useState(false);
   // A raw Discogs videoId only counts here once it's known to actually
@@ -12,6 +12,14 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   const videoId = track.videoId && !actions.isNoEmbedVideo(track.videoId) ? track.videoId : null;
   useEffect(() => { if (!videoId) actions.getTrackVideo(track, artist, isLabel ? node.name : track.label); }, [actions, artist, isLabel, node.name, track, videoId]);
   const resolvedVideo = actions.getTrackVideo(track, artist, isLabel ? node.name : track.label) || null;
+  // Last-resort fallback, only ever worth checking once YouTube has
+  // genuinely come up empty — an actual audio clip beats no audio at all.
+  // Just decides whether the headphone button shows at all; clicking it
+  // routes through playHardwaxPreview into the real mini-player
+  // (RightPanel/HardwaxCustomControls) exactly like the main Play button
+  // does for a YouTube match, rather than a bare inline audio widget.
+  const hardwaxPreview = !resolvedVideo ? actions.getHardwaxAudioPreview(hardwaxUrl, track.id, track.title) : null;
+  const hardwaxPlaying = state.nowPlaying?.trackId === track.id && !!state.nowPlaying?.hardwaxMp3Url;
   const liked = !!state.likes[track.id];
   const queued = state.dasAscoltare.some(item => item.id === track.id);
   const trackWithArtist = { ...track, artistName: artist };
@@ -22,11 +30,36 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
 
   return (
     <div className="relative flex min-w-0 items-center gap-[6px]">
+      {/* Always reserves this 22px slot, filled or not — otherwise a
+          headphone button only on SOME rows shifts just those rows'
+          Play button (and everything after it, title included) out of
+          vertical alignment with every other track's, in this release
+          and every other one, since nothing else in the row has a fixed
+          position to anchor against. Reserving it unconditionally keeps
+          every row's Play button at the same x regardless of whether
+          that particular track happens to have a Hard Wax preview. */}
+      <div className="flex size-[22px] shrink-0 items-center justify-center">
+        {hardwaxPreview && (
+          <button
+            type="button"
+            title={hardwaxPlaying ? 'Playing Hard Wax preview' : 'No video found — play a preview from Hard Wax instead'}
+            onClick={() => actions.playHardwaxPreview(track.id, hardwaxUrl, track.title, artist)}
+            className="flex size-[22px] items-center justify-center rounded-full border border-primary bg-background text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+          >
+            <Headphones className="size-3" />
+          </button>
+        )}
+      </div>
+      {/* Explicit border on both — without it, the "off" state (no
+          resolved video, text-muted-foreground on the same bg-background
+          as every other state) reads as visually absent next to the
+          headphone button beside it, since only the icon's own fill
+          color was ever what carried "on" vs "off" here. */}
       <button
         type="button"
         onClick={() => actions.doPlay(track.id, resolvedVideo, track.title, artist)}
         title={resolvedVideo ? 'Play' : 'Search on YouTube'}
-        className={`flex size-[22px] shrink-0 items-center justify-center rounded-full bg-background transition-colors hover:bg-primary hover:text-primary-foreground ${resolvedVideo ? 'text-primary' : 'text-muted-foreground'}`}
+        className={`flex size-[22px] shrink-0 items-center justify-center rounded-full border bg-background transition-colors hover:border-primary hover:bg-primary hover:text-primary-foreground ${resolvedVideo ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}
       >
         <Play className="size-2.5 fill-current" />
       </button>

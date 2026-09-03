@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { BandcampOnlyResults } from '@/components/waxtree/BandcampOnlyResults';
+import { CorrelatedArtistChip } from '@/components/waxtree/CorrelatedArtistChip';
 import { Filters } from '@/components/waxtree/Filters';
 import { RelatedEntities } from '@/components/waxtree/RelatedEntities';
 import { ReleaseCard } from '@/components/waxtree/ReleaseCard';
@@ -54,7 +55,7 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
       {!isLabel && data.correlatedArtists?.length > 0 && (
         <div className="mb-4">
           <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Related artists</span>
-          <div className="flex flex-wrap gap-1.5">{data.correlatedArtists.map(name => <button key={name} type="button" onClick={() => actions.mutateState(value => { value.q = name; actions.doSearch(); })} className={buttonSecondary}>{name}</button>)}</div>
+          <div className="flex flex-wrap gap-1.5">{data.correlatedArtists.map(name => <CorrelatedArtistChip key={name} name={name} node={node} actions={actions} />)}</div>
         </div>
       )}
       <RelatedEntities node={node} data={data} isLabel={isLabel} actions={actions} />

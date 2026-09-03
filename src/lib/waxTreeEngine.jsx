@@ -2658,7 +2658,14 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
               // Excludes anything already confirmed unplayable (retryVideoAfterEmbedFail's
               // whole reason for existing: re-selecting the exact video that
               // just failed would be a silent no-op, not a real alternate).
-              hit=uploads.find(r=>!noEmbedIds.has(r.id)&&!invalidYtIds.has(r.id)&&normalizeStr(r.title||'').includes(titleN)&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
+              // bcOnlyMatches instead of a plain substring check here too —
+              // even lower-risk than the general search path below, since
+              // the channel itself is already confirmed as the real
+              // artist/label; this only decides which of THEIR OWN uploads
+              // is this specific track, and their own titling doesn't
+              // always match Discogs' wording exactly (mix name wording,
+              // dropped/reordered words).
+              hit=uploads.find(r=>!noEmbedIds.has(r.id)&&!invalidYtIds.has(r.id)&&bcOnlyMatches(titleN,normalizeStr(r.title||''))&&(!expectedSec||!r.durationSec||Math.abs(r.durationSec-expectedSec)<=8))||null;
             }catch(e){
               console.warn('WaxTree: channel-uploads lookup failed, falling back to search for',title,e);
             }
@@ -2677,30 +2684,50 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
           const q=`"${artistName||''}" "${title}"`;
           let results=await searchYouTubeApi(q);
           // Second attempt with the NORMALIZED title when the raw-title
-          // query comes back completely empty — Discogs titles routinely
-          // carry wording the actual YouTube upload doesn't ("(Original
-          // Mix)", embedded feat. credits, stray punctuation), and the
-          // quoted-phrase query then finds nothing even though the video
-          // exists. normalizeStr is the exact same normalization the
-          // title check below applies to candidates, so this searches for
+          // query comes back either completely empty OR with results none
+          // of which textually correspond to the track at all (see the
+          // bcOnlyMatches check below) — Discogs titles routinely carry
+          // wording the actual YouTube upload doesn't ("(Original Mix)",
+          // embedded feat. credits, stray punctuation), and the
+          // quoted-phrase query then either finds nothing or finds only
+          // unrelated results, even though the video exists. Widened
+          // 2026-08-31 from "only when literally zero results" — a
+          // non-empty but entirely irrelevant result set (common: YouTube's
+          // search is semantic/fuzzy, not exact) used to silently skip this
+          // retry and give up, even though the exact same "no result here
+          // corresponds to this track" situation is what the retry exists
+          // to fix. normalizeStr is the exact same normalization the title
+          // check below applies to candidates, so this searches for
           // precisely what the filter will require — it widens what
-          // REACHES the strict verification, never what passes it. Only
-          // fires on a genuinely empty first result (not merely
-          // no-hit-among-results), so the extra search.list spend stays
-          // rare; skipped without retry when the budget says no, same as
-          // any other blocked attempt (the first, real search already
-          // counts as attempted).
-          if(!results.length){
+          // REACHES the strict verification, never what passes it. Costs
+          // one extra search.list call only when the first attempt's
+          // results are already useless for this track, so the added spend
+          // stays rare in practice; skipped without retry when the budget
+          // says no, same as any other blocked attempt (the first, real
+          // search already counts as attempted).
+          const firstAttemptUseless=!results.some(r=>bcOnlyMatches(titleN,normalizeStr(r.title||'')));
+          if(firstAttemptUseless){
             const titleClean=normalizeStr(title);
             const qClean=`"${artistName||''}" "${titleClean}"`;
             if(titleClean&&qClean.toLowerCase()!==q.toLowerCase()&&trySpendYtCalls('search')==='ok'){
-              results=await searchYouTubeApi(qClean);
+              const cleanResults=await searchYouTubeApi(qClean);
+              if(cleanResults.length)results=cleanResults;
             }
           }
           hit=results.find(r=>{
             if(noEmbedIds.has(r.id)||invalidYtIds.has(r.id))return false; // see the channel-uploads search above for why
             const rTitleN=normalizeStr(r.title||'');
-            if(!rTitleN.includes(titleN))return false;
+            // bcOnlyMatches (already tuned for the Bandcamp/Hard Wax
+            // cross-checks — same trailing-series-number guard, same 40%
+            // word-overlap/length-ratio thresholds, see its own definition)
+            // instead of a plain substring check — real YouTube upload
+            // titles very often reorder or drop a word or two relative to
+            // Discogs' own title in ways a strict includes() rejects even
+            // though it's genuinely the same track. The channel/duration
+            // checks right below remain the real anti-false-positive gate;
+            // this only loosens the FIRST hurdle (does the title
+            // correspond at all), not the overall trust bar.
+            if(!bcOnlyMatches(titleN,rTitleN))return false;
             const channelN=normalizeStr(r.channelTitle||'');
             const channelMatches=(artistN&&channelN.includes(artistN))||(labelN&&channelN.includes(labelN));
             if(channelMatches){
@@ -2939,6 +2966,23 @@ function stopPlay(){
   killYt();
   st.ytError=null;
   st.nowPlaying=null;rr();
+}
+// Mirrors doPlay's shape, for the Hard Wax "not on YouTube at all"
+// fallback — but unlike doPlay there's no further matching to attempt
+// here: getHardwaxAudioPreview has already resolved synchronously by the
+// time this can even be called (it's what makes TrackRow's headphone
+// button clickable in the first place), so this just hands the already-
+// confirmed mp3 URL to the real mini-player (RightPanel/
+// HardwaxCustomControls) instead of the small inline popover player it
+// replaced. The actual audio bytes (proxied through hardwax-audio, see
+// getHardwaxAudioBlobUrl) are still only fetched once that mini-player
+// actually mounts, same "only once truly needed" discipline as before.
+function playHardwaxPreview(trackId,hardwaxUrl,title,artistName){
+  killYt();
+  st.ytError=null;
+  const mp3Url=getHardwaxAudioPreview(hardwaxUrl,trackId,title);
+  st.nowPlaying={trackId,videoId:null,title,artistName,fromDiscogs:false,hardwaxMp3Url:mp3Url||null};
+  rr();
 }
 function syncYtPlayer(){
   if(!st.nowPlaying){killYt();return;}
@@ -3453,6 +3497,47 @@ function getResolvedRemixArtist(remainder){
   }
   return undefined;
 }
+
+// ── Related-artist chip resolution (NodeDetails' "Related artists") ────
+// correlatedArtists itself (see fetchArtistData above) is built from a
+// Discogs LABEL-releases listing, which only ever returns a plain artist
+// NAME string per release — no id — so there was never anything to
+// navigate to directly; a chip's click used to just drop the name into
+// the search box instead. Resolved here the same way a remix credit is
+// (searchDiscogsArtist, confirmed by an exact disambiguation-suffix-
+// stripped title match before ever being trusted) — but deliberately
+// ON CLICK, not proactively for all ~10 chips the moment an artist page
+// loads: that would be up to 10 extra Discogs searches per page visit
+// for names a visitor may never click, on top of the request budget
+// this cross-check style already spends elsewhere.
+async function resolveCorrelatedArtist(name){
+  const results=await searchDiscogsArtist(name);
+  const hit=results.find(r=>r.title.replace(/\s*\(\d+\)$/,'').toLowerCase()===name.toLowerCase());
+  return hit?{name:hit.title,id:hit.id}:null;
+}
+// The chip's own click handler (CorrelatedArtistChip.jsx) awaits this
+// directly rather than going through the usual sync-getter/rr() pattern
+// — there's no render depending on the outcome mid-flight, just "open
+// the node if we found one." Returns whether it worked so the chip can
+// show a "couldn't confirm this one" state instead of silently doing
+// nothing on a genuine miss (a name Discogs' own search can't find
+// again — a misspelling, a one-off compilation credit).
+async function exploreCorrelatedArtist(name,parentId,branchId){
+  const ck='ca:'+name.toLowerCase();
+  const cached=lsGet(ck);
+  let resolved;
+  if(cached!==null)resolved=cached||null; // false (confirmed no match) -> null
+  else{
+    try{
+      resolved=await resolveCorrelatedArtist(name);
+      lsSet(ck,resolved===null?false:resolved);
+    }catch{
+      resolved=null; // network failure — don't cache, so a later click can retry
+    }
+  }
+  if(resolved)addNode('artist',resolved.id,resolved.name,parentId,branchId,{background:true});
+  return !!resolved;
+}
 // MusicBrainz: 1 req/sec limit enforced server-side
 let mbLast=0;
 async function mbFetch(url,_retry=0){
@@ -3892,7 +3977,12 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
           const lRel=await dReq('/labels/'+topLabelId+'/releases',{per_page:'30',sort:'year'});
           const seen=new Set([artData.name.toLowerCase().replace(/\s+/g,'')]);
           nd.correlatedArtists=lRel.releases
-            .map(r=>r.artist||'').filter(n=>n&&!/^various$/i.test(n.trim()))
+            // "Various" is Discogs' own compilation marker; "Unknown
+            // Artist" is its placeholder for an unidentified credit —
+            // neither is a real profile exploreCorrelatedArtist could
+            // ever confirm, so both are dropped here rather than left to
+            // fail silently (or worse, "resolve") on every click.
+            .map(r=>r.artist||'').filter(n=>n&&!/^various$/i.test(n.trim())&&!/^unknown artist$/i.test(n.trim()))
             .map(n=>({name:n,k:n.toLowerCase().replace(/\s+/g,'')}))
             .filter(a=>{if(seen.has(a.k))return false;seen.add(a.k);return true;})
             .slice(0,10).map(a=>a.name);
@@ -4193,6 +4283,145 @@ function getHardwaxComment(artist,title,catno){
   const cached=lsGet(ck);
   if(cached!==null)return cached||null; // false (confirmed no match) -> null
   if(!hardwaxInFlight.has(ck))fetchHardwaxComment(ck,artist,title,catno);
+  return undefined;
+}
+
+// ── Hard Wax audio previews — the rare "not on YouTube at all" fallback ──
+// Only ever consulted for a track that already failed to resolve a real
+// YouTube video (see getTrackVideo/TrackRow.jsx) — this is deliberately a
+// last-resort fallback, not a proactive check, both because a genuinely
+// missing YouTube video is uncommon and because it piggybacks on a Hard
+// Wax MATCH that has to already be confirmed first (getHardwaxComment,
+// same bcOnlyMatches verification the editorial-comment feature already
+// trusts) — no new search, no new guessing, just reading the tracklist of
+// a release already known to be the right one. Release-level cache (one
+// fetch covers every track on that release), same shape as
+// bcOnlyDetailCache below for the analogous Bandcamp case.
+const hardwaxTracksInFlight=new Set();
+let hardwaxTracksCache={}; // release url -> {tracks:[{position,title,mp3}]} | false
+async function fetchHardwaxTracks(url){
+  hardwaxTracksInFlight.add(url);
+  try{
+    const{data,error}=await sb.functions.invoke('hardwax-release',{body:{url}});
+    if(error)throw new Error(error.message);
+    hardwaxTracksCache[url]=data?.resolved?{tracks:data.tracks||[]}:false;
+  }catch{
+    // Network/edge-function failure — leave uncached, not "confirmed
+    // nothing here", so a later render can retry.
+    delete hardwaxTracksCache[url];
+  }finally{
+    hardwaxTracksInFlight.delete(url);
+    rr();
+  }
+}
+function getHardwaxTracks(url){
+  if(!url)return null;
+  if(url in hardwaxTracksCache)return hardwaxTracksCache[url]||null;
+  if(!hardwaxTracksInFlight.has(url))fetchHardwaxTracks(url);
+  return undefined;
+}
+// A WaxTree track id is `${releaseId}-${discogsPosition}` (see
+// buildTrackEntries) — position is never stored as its own field, so it's
+// pulled back out of the id itself. Sliced at the FIRST "-", not split,
+// so a position that itself legitimately contains one (Discogs uses
+// "1-1"-style positions on some multi-disc releases) survives intact.
+function trackPositionFromId(trackId){
+  const i=(trackId||'').indexOf('-');
+  return i===-1?'':trackId.slice(i+1);
+}
+// A position is only trustworthy to match on when it's real vinyl-side
+// notation (A1/B2/...) — a physically-meaningful convention Discogs and
+// Hard Wax each derive independently from the same record, so an exact
+// match there is safe to trust outright. A purely numeric Hard Wax
+// position ("01".."06", confirmed live 2026-09-03 on Earwax's "Tar 21" /
+// TH Tar Hallow) is instead just Hard Wax's OWN listing order, with no
+// guaranteed correspondence to Discogs' own numbering — that release has
+// a Hard-Wax-only bonus locked-groove version sitting between two tracks
+// Discogs numbers consecutively, and naively matching "4"-strips-to-"04"
+// silently swapped "No Need More" and "Again" instead of just missing —
+// worse than no match at all. Title matching (below) doesn't have that
+// failure mode, so numeric Hard Wax positions skip straight to it.
+const isVinylPosition=p=>/^[a-z]/i.test(String(p||''));
+// A base title that's a real WORD-FOR-WORD prefix of a longer one (not
+// just a coincidental substring) is exactly what a mix/version descriptor
+// Discogs' own title doesn't carry looks like — "Again" vs Hard Wax's
+// "Again (Locked Groove) (Vinyl Version)", confirmed live on the same
+// Tar 21 release above. bcOnlyMatches' word-overlap/length-ratio
+// thresholds correctly reject that pairing in ITS usual context (a
+// web-wide search, or someone else's whole discography, where a short
+// generic word matching almost anything is a real false-positive risk)
+// — but the candidate pool here is only the handful of tracks on a
+// release ALREADY confirmed as the right one, so a strict leading-word
+// prefix match is safe to accept on top, not instead.
+function isTitlePrefixMatch(shortN,longN){
+  if(!shortN||!longN)return false;
+  const shortW=shortN.split(' ').filter(Boolean),longW=longN.split(' ').filter(Boolean);
+  if(!shortW.length||shortW.length>longW.length)return false;
+  return shortW.every((w,i)=>longW[i]===w);
+}
+// hardwaxUrl is whatever getHardwaxComment already resolved for this exact
+// release (null/undefined -> nothing to look up yet, or confirmed no Hard
+// Wax match at all — same "undefined = still checking" convention as
+// every other self-triggering getter in this file). Matches primarily by
+// Discogs position against Hard Wax's own vinyl-side notation (see
+// isVinylPosition's own comment for why a numeric Hard Wax position skips
+// this and goes straight to title) — falls back to title for the rarer
+// case a position doesn't line up (a bonus/hidden track, a listing
+// discrepancy) rather than giving up outright.
+function getHardwaxAudioPreview(hardwaxUrl,trackId,trackTitle){
+  if(!hardwaxUrl)return null;
+  const resolved=getHardwaxTracks(hardwaxUrl);
+  if(!resolved)return resolved===undefined?undefined:null;
+  const position=trackPositionFromId(trackId);
+  const byPosition=position&&resolved.tracks.find(t=>isVinylPosition(t.position)&&t.position.toLowerCase()===position.toLowerCase());
+  if(byPosition)return byPosition.mp3;
+  const titleN=normalizeStr(trackTitle||'');
+  if(!titleN)return null;
+  const byTitle=resolved.tracks.find(t=>{
+    const tN=normalizeStr(t.title||'');
+    return bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN);
+  });
+  return byTitle?byTitle.mp3:null;
+}
+// Hard Wax's own CDN (media.hardwax.com) blocks a direct in-browser load of
+// the mp3 from any other site — confirmed live: the exact same URL that
+// curl fetches fine (200, access-control-allow-origin:*) comes back as a
+// redirect to the release page for a real browser tab, even with no
+// referrer at all, because the block keys off Sec-Fetch-Site (browser
+// fetch metadata a page's own JS can't override), not the Referer header.
+// So playback has to go through our own edge function instead — a
+// server-side Deno fetch carries none of that browser fetch-metadata, so
+// it goes straight through. hardwax-audio answers as
+// application/octet-stream rather than audio/mpeg specifically so
+// supabase-js's functions client parses it as a Blob instead of
+// mis-decoding the binary as UTF-8 text (its Content-Type switch only
+// treats octet-stream/pdf as blob(), everything else not json/form-data
+// falls through to text()) — re-wrapped below with the real mime type
+// before handing out an object URL. Deliberately a separate cache/getter
+// from getHardwaxAudioPreview above: that one is cheap (just a tracklist
+// lookup) and drives whether the headphone button shows at all; this one
+// actually downloads the audio, so callers should only invoke it once a
+// track's preview popover is actually open, not for every track that
+// merely has one available.
+const hardwaxAudioBlobInFlight=new Set();
+let hardwaxAudioBlobCache={}; // mp3 url -> object URL string | false
+async function fetchHardwaxAudioBlob(mp3Url){
+  hardwaxAudioBlobInFlight.add(mp3Url);
+  try{
+    const{data,error}=await sb.functions.invoke('hardwax-audio',{body:{url:mp3Url}});
+    if(error||!(data instanceof Blob))throw new Error(error?.message||'bad response');
+    hardwaxAudioBlobCache[mp3Url]=URL.createObjectURL(new Blob([data],{type:'audio/mpeg'}));
+  }catch{
+    hardwaxAudioBlobCache[mp3Url]=false;
+  }finally{
+    hardwaxAudioBlobInFlight.delete(mp3Url);
+    rr();
+  }
+}
+function getHardwaxAudioBlobUrl(mp3Url){
+  if(!mp3Url)return null;
+  if(mp3Url in hardwaxAudioBlobCache)return hardwaxAudioBlobCache[mp3Url]||null;
+  if(!hardwaxAudioBlobInFlight.has(mp3Url))fetchHardwaxAudioBlob(mp3Url);
   return undefined;
 }
 
@@ -5191,14 +5420,14 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
+  exploreCorrelatedArtist,findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
-  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
+  playAdjacentTrack,playHardwaxPreview,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
-  baseTitleKey,extractRemixCandidate,getHardwaxComment,getResolvedRemixArtist,normalizeStr,
+  baseTitleKey,extractRemixCandidate,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,
