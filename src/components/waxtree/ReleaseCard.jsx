@@ -47,8 +47,20 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
   const digitalOnly = tracks.some(track => track.digital) && !tracks.some(track => track.hasVinyl);
   // Same artist-vs-label field swap StoreButton already relies on below —
   // on a label node, first.label actually holds the (repurposed) artist
-  // name, see buildTrackEntries's own comment on trueLabelId.
-  const releaseArtist = isLabel ? first.label : node.name;
+  // name, see buildTrackEntries's own comment on trueLabelId. But
+  // first.label is only ever ONE track's credit — for a various-artists
+  // compilation (variousArtists above, already computed for the "·
+  // Various Artists" subtitle) it's just whichever artist happened to be
+  // first, not remotely the release's real identity. Confirmed live
+  // 2026-09-04: Hard Wax's own listing for Fides' "X6" compilation
+  // credits it to literally "Various Artists" — searching for it (which
+  // still worked, since track titles are enough to land on the right
+  // page) then comparing that against "Fireground" (X6's first track's
+  // own artist) failed the artist check outright, silently killing the
+  // Hard Wax comment AND audio-preview fallback for every track on
+  // every various-artists release on this label, not just a mismatched
+  // one — same bug would hit getBeatportDirect/getBandcampDirect below.
+  const releaseArtist = isLabel ? (variousArtists ? 'Various Artists' : first.label) : node.name;
   const releaseLabel = isLabel ? node.name : first.label;
   const hardwax = actions.getHardwaxComment(releaseArtist, releaseTitle, first.catno);
   const beatportDirect = actions.getBeatportDirect(releaseArtist, releaseLabel, releaseTitle);
