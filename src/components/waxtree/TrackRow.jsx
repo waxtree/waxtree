@@ -30,6 +30,16 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
 
   return (
     <div className="relative flex min-w-0 items-center gap-[6px]">
+      {hardwaxPreview && (
+        <button
+          type="button"
+          title={hardwaxPlaying ? 'Playing Hard Wax preview' : 'No video found — play a preview from Hard Wax instead'}
+          onClick={() => actions.playHardwaxPreview(track.id, hardwaxUrl, track.title, artist)}
+          className={`flex size-[22px] shrink-0 items-center justify-center rounded-full bg-background transition-colors hover:bg-primary hover:text-primary-foreground ${hardwaxPlaying ? 'text-primary' : 'text-muted-foreground/70'}`}
+        >
+          <Headphones className="size-3" />
+        </button>
+      )}
       <button
         type="button"
         onClick={() => actions.doPlay(track.id, resolvedVideo, track.title, artist)}
@@ -50,16 +60,6 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
         </button>
         {playlistOpen && <PlaylistDrop track={trackWithArtist} node={node} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}
       </div>
-      {hardwaxPreview && (
-        <button
-          type="button"
-          title={hardwaxPlaying ? 'Playing Hard Wax preview' : 'No video found — play a preview from Hard Wax instead'}
-          onClick={() => actions.playHardwaxPreview(track.id, hardwaxUrl, track.title, artist)}
-          className={`flex size-[22px] shrink-0 items-center justify-center rounded-full bg-background transition-colors hover:bg-primary hover:text-primary-foreground ${hardwaxPlaying ? 'text-primary' : 'text-muted-foreground/70'}`}
-        >
-          <Headphones className="size-3" />
-        </button>
-      )}
       {!resolvedVideo && (
         <div className="relative shrink-0">
           <button type="button" title="No video found" onClick={() => setHelpOpen(value => !value)} className="flex shrink-0 items-center rounded-[5px] border border-border px-[5px] py-px text-muted-foreground/70 transition-colors hover:border-primary hover:text-primary">

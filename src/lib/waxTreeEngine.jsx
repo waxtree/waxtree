@@ -4283,23 +4283,58 @@ function trackPositionFromId(trackId){
   const i=(trackId||'').indexOf('-');
   return i===-1?'':trackId.slice(i+1);
 }
+// A position is only trustworthy to match on when it's real vinyl-side
+// notation (A1/B2/...) — a physically-meaningful convention Discogs and
+// Hard Wax each derive independently from the same record, so an exact
+// match there is safe to trust outright. A purely numeric Hard Wax
+// position ("01".."06", confirmed live 2026-09-03 on Earwax's "Tar 21" /
+// TH Tar Hallow) is instead just Hard Wax's OWN listing order, with no
+// guaranteed correspondence to Discogs' own numbering — that release has
+// a Hard-Wax-only bonus locked-groove version sitting between two tracks
+// Discogs numbers consecutively, and naively matching "4"-strips-to-"04"
+// silently swapped "No Need More" and "Again" instead of just missing —
+// worse than no match at all. Title matching (below) doesn't have that
+// failure mode, so numeric Hard Wax positions skip straight to it.
+const isVinylPosition=p=>/^[a-z]/i.test(String(p||''));
+// A base title that's a real WORD-FOR-WORD prefix of a longer one (not
+// just a coincidental substring) is exactly what a mix/version descriptor
+// Discogs' own title doesn't carry looks like — "Again" vs Hard Wax's
+// "Again (Locked Groove) (Vinyl Version)", confirmed live on the same
+// Tar 21 release above. bcOnlyMatches' word-overlap/length-ratio
+// thresholds correctly reject that pairing in ITS usual context (a
+// web-wide search, or someone else's whole discography, where a short
+// generic word matching almost anything is a real false-positive risk)
+// — but the candidate pool here is only the handful of tracks on a
+// release ALREADY confirmed as the right one, so a strict leading-word
+// prefix match is safe to accept on top, not instead.
+function isTitlePrefixMatch(shortN,longN){
+  if(!shortN||!longN)return false;
+  const shortW=shortN.split(' ').filter(Boolean),longW=longN.split(' ').filter(Boolean);
+  if(!shortW.length||shortW.length>longW.length)return false;
+  return shortW.every((w,i)=>longW[i]===w);
+}
 // hardwaxUrl is whatever getHardwaxComment already resolved for this exact
 // release (null/undefined -> nothing to look up yet, or confirmed no Hard
 // Wax match at all — same "undefined = still checking" convention as
 // every other self-triggering getter in this file). Matches primarily by
-// Discogs position against Hard Wax's own (both use the same A1/A2/B1...
-// vinyl-side notation) — falls back to bcOnlyMatches on title for the
-// rarer case a position doesn't line up (a bonus/hidden track, a listing
+// Discogs position against Hard Wax's own vinyl-side notation (see
+// isVinylPosition's own comment for why a numeric Hard Wax position skips
+// this and goes straight to title) — falls back to title for the rarer
+// case a position doesn't line up (a bonus/hidden track, a listing
 // discrepancy) rather than giving up outright.
 function getHardwaxAudioPreview(hardwaxUrl,trackId,trackTitle){
   if(!hardwaxUrl)return null;
   const resolved=getHardwaxTracks(hardwaxUrl);
   if(!resolved)return resolved===undefined?undefined:null;
   const position=trackPositionFromId(trackId);
-  const byPosition=position&&resolved.tracks.find(t=>t.position.toLowerCase()===position.toLowerCase());
+  const byPosition=position&&resolved.tracks.find(t=>isVinylPosition(t.position)&&t.position.toLowerCase()===position.toLowerCase());
   if(byPosition)return byPosition.mp3;
   const titleN=normalizeStr(trackTitle||'');
-  const byTitle=titleN&&resolved.tracks.find(t=>bcOnlyMatches(titleN,normalizeStr(t.title||'')));
+  if(!titleN)return null;
+  const byTitle=resolved.tracks.find(t=>{
+    const tN=normalizeStr(t.title||'');
+    return bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN);
+  });
   return byTitle?byTitle.mp3:null;
 }
 // Hard Wax's own CDN (media.hardwax.com) blocks a direct in-browser load of
