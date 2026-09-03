@@ -4382,6 +4382,23 @@ function isTitlePrefixMatch(shortN,longN){
   if(!shortW.length||shortW.length>longW.length)return false;
   return shortW.every((w,i)=>longW[i]===w);
 }
+// Hard Wax renders a various-artists compilation's OWN per-track title as
+// "Artist: Title" (confirmed live 2026-09-04 on Fides' X5/X6 — "Human
+// Safari: Havanas", "Jon Hester: Oblique") — a convention its single-
+// artist releases never use at all. Neither bcOnlyMatches (the added
+// artist words dilute the word-overlap ratio same as any unrelated
+// prefix would) nor isTitlePrefixMatch (which only ever catches a
+// SUFFIX being appended, like "Again" -> "Again (Locked Groove)", not a
+// PREFIX) catches this, so "Havanas" against "Human Safari: Havanas"
+// failed outright even though the release match itself was already
+// correct. Stripped on the raw string, before normalizeStr — the colon
+// is exactly the boundary marker to key off, and normalizeStr's own
+// punctuation-stripping would erase it first and make the split
+// ambiguous.
+function stripHardwaxArtistPrefix(rawTitle){
+  const i=(rawTitle||'').indexOf(': ');
+  return i===-1?null:rawTitle.slice(i+2);
+}
 // hardwaxUrl is whatever getHardwaxComment already resolved for this exact
 // release (null/undefined -> nothing to look up yet, or confirmed no Hard
 // Wax match at all — same "undefined = still checking" convention as
@@ -4402,7 +4419,9 @@ function getHardwaxAudioPreview(hardwaxUrl,trackId,trackTitle){
   if(!titleN)return null;
   const byTitle=resolved.tracks.find(t=>{
     const tN=normalizeStr(t.title||'');
-    return bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN);
+    if(bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN))return true;
+    const strippedN=normalizeStr(stripHardwaxArtistPrefix(t.title||'')||'');
+    return strippedN&&(bcOnlyMatches(titleN,strippedN)||isTitlePrefixMatch(titleN,strippedN)||isTitlePrefixMatch(strippedN,titleN));
   });
   return byTitle?byTitle.mp3:null;
 }
