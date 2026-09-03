@@ -30,16 +30,26 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
 
   return (
     <div className="relative flex min-w-0 items-center gap-[6px]">
-      {hardwaxPreview && (
-        <button
-          type="button"
-          title={hardwaxPlaying ? 'Playing Hard Wax preview' : 'No video found — play a preview from Hard Wax instead'}
-          onClick={() => actions.playHardwaxPreview(track.id, hardwaxUrl, track.title, artist)}
-          className={`flex size-[22px] shrink-0 items-center justify-center rounded-full border border-border bg-background transition-colors hover:border-primary hover:bg-primary hover:text-primary-foreground ${hardwaxPlaying ? 'border-primary text-primary' : 'text-muted-foreground/70'}`}
-        >
-          <Headphones className="size-3" />
-        </button>
-      )}
+      {/* Always reserves this 22px slot, filled or not — otherwise a
+          headphone button only on SOME rows shifts just those rows'
+          Play button (and everything after it, title included) out of
+          vertical alignment with every other track's, in this release
+          and every other one, since nothing else in the row has a fixed
+          position to anchor against. Reserving it unconditionally keeps
+          every row's Play button at the same x regardless of whether
+          that particular track happens to have a Hard Wax preview. */}
+      <div className="flex size-[22px] shrink-0 items-center justify-center">
+        {hardwaxPreview && (
+          <button
+            type="button"
+            title={hardwaxPlaying ? 'Playing Hard Wax preview' : 'No video found — play a preview from Hard Wax instead'}
+            onClick={() => actions.playHardwaxPreview(track.id, hardwaxUrl, track.title, artist)}
+            className={`flex size-[22px] items-center justify-center rounded-full border border-border bg-background transition-colors hover:border-primary hover:bg-primary hover:text-primary-foreground ${hardwaxPlaying ? 'border-primary text-primary' : 'text-muted-foreground/70'}`}
+          >
+            <Headphones className="size-3" />
+          </button>
+        )}
+      </div>
       {/* Explicit border on both — without it, the "off" state (no
           resolved video, text-muted-foreground on the same bg-background
           as every other state) reads as visually absent next to the
