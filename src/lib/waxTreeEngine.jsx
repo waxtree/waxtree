@@ -4150,6 +4150,18 @@ async function fetchBandcamp(nodeId,artistName){
   }
   rr();
 }
+// Whatever fetchBandcamp already resolved as this node's own confirmed
+// Bandcamp presence — its real home page when Discogs listed one
+// directly, otherwise whatever specific page a verified name-only search
+// landed on (see bc-search's own knownBandUrl/strategy-3-4 comments).
+// Used as the fallback destination for a release-level Bandcamp button
+// that's OFF (no confirmed link for that SPECIFIC release, e.g. a track
+// genuinely not on Bandcamp at all) — landing on the artist/label's own
+// real Bandcamp space beats either doing nothing or running a generic
+// on-click search that isn't guaranteed to even be about them.
+function getBandcampArtistUrl(nodeId){
+  return bcCacheMap[nodeId]?.tracks?.[0]?.url||null;
+}
 
 // Deliberately more permissive than findBcMatch's own 0.5 threshold above
 // (which picks ONE specific link to open — a wrong pick there is a bad
@@ -5462,7 +5474,7 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  exploreCorrelatedArtist,findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
+  exploreCorrelatedArtist,findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampArtistUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
