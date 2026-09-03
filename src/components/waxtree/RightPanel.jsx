@@ -1,5 +1,6 @@
-import { ArrowUpRight, ChevronDown, Heart, SkipBack, SkipForward, Tag, X } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, Headphones, Heart, SkipBack, SkipForward, Tag, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { HardwaxCustomControls } from '@/components/waxtree/HardwaxCustomControls';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { RelatedCard } from '@/components/waxtree/RelatedCard';
 import { YtCustomControls } from '@/components/waxtree/YtCustomControls';
@@ -54,6 +55,14 @@ export const RightPanel = ({ state, actions }) => {
                   scrub-bar overlay; the mobile bar is deliberately just
                   the essentials (see this component's own top comment). */}
               {playing.fromDiscogs && <div className="max-sm:hidden"><YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} /></div>}
+            </>
+          ) : playing.hardwaxMp3Url ? (
+            <>
+              <div className="flex flex-col items-center justify-center gap-1.5 bg-secondary p-4 text-center">
+                <Headphones className="size-5 text-muted-foreground/50" />
+                <p className="text-[11px] text-muted-foreground/70">No video found — playing a preview from <span className="font-semibold">Hard Wax</span></p>
+              </div>
+              <HardwaxCustomControls key={playing.trackId} trackId={playing.trackId} mp3Url={playing.hardwaxMp3Url} actions={actions} />
             </>
           ) : (
             <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-secondary p-4 text-center max-sm:aspect-auto max-sm:py-3">

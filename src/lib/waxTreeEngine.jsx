@@ -2967,6 +2967,23 @@ function stopPlay(){
   st.ytError=null;
   st.nowPlaying=null;rr();
 }
+// Mirrors doPlay's shape, for the Hard Wax "not on YouTube at all"
+// fallback — but unlike doPlay there's no further matching to attempt
+// here: getHardwaxAudioPreview has already resolved synchronously by the
+// time this can even be called (it's what makes TrackRow's headphone
+// button clickable in the first place), so this just hands the already-
+// confirmed mp3 URL to the real mini-player (RightPanel/
+// HardwaxCustomControls) instead of the small inline popover player it
+// replaced. The actual audio bytes (proxied through hardwax-audio, see
+// getHardwaxAudioBlobUrl) are still only fetched once that mini-player
+// actually mounts, same "only once truly needed" discipline as before.
+function playHardwaxPreview(trackId,hardwaxUrl,title,artistName){
+  killYt();
+  st.ytError=null;
+  const mp3Url=getHardwaxAudioPreview(hardwaxUrl,trackId,title);
+  st.nowPlaying={trackId,videoId:null,title,artistName,fromDiscogs:false,hardwaxMp3Url:mp3Url||null};
+  rr();
+}
 function syncYtPlayer(){
   if(!st.nowPlaying){killYt();return;}
   const np=st.nowPlaying;
@@ -5326,7 +5343,7 @@ export const waxTreeActions={
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
-  playAdjacentTrack,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
+  playAdjacentTrack,playHardwaxPreview,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
   baseTitleKey,extractRemixCandidate,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,normalizeStr,
