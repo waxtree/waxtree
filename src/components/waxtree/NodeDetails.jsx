@@ -7,6 +7,36 @@ import { ReleaseCard } from '@/components/waxtree/ReleaseCard';
 import { ReleaseSection } from '@/components/waxtree/ReleaseSection';
 import { buttonSecondary } from '@/lib/waxtreeUi';
 
+// Packs whole release groups onto each page, never splitting one across
+// a page boundary — a naive flat-track slice (the previous approach)
+// could cut a release in half right at the pageSize mark, so the SAME
+// release showed twice: an incomplete tail on one page (missing
+// whatever data — like the Hard Wax preview button — a track only gets
+// once every track in its group has rendered together) and the rest on
+// the next. Greedy bin-packing: keep adding groups to the current page
+// while they fit within pageSize; once a group would push the running
+// total over, start a fresh page with that group — unless the current
+// page is still empty, in which case an oversized single group (more
+// tracks alone than pageSize) still has to go somewhere on its own
+// rather than looping forever trying to fit it.
+const packGroupsIntoPages = (groups, pageSize) => {
+  const pages = [];
+  let current = [];
+  let currentCount = 0;
+  for (const group of groups) {
+    const size = group.tracks.length;
+    if (current.length && currentCount + size > pageSize) {
+      pages.push(current);
+      current = [];
+      currentCount = 0;
+    }
+    current.push(group);
+    currentCount += size;
+  }
+  if (current.length) pages.push(current);
+  return pages.length ? pages : [[]];
+};
+
 export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage }) => {
   const bcOnly = actions.getBandcampOnly(node.id);
   const bandcampOnlyView = !!state.bandcampOnlyView[node.id];
@@ -19,9 +49,11 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
   const listenedIds = new Set(listenedGroups.flatMap(group => group.tracks.flatMap(track => [track.id, ...(track.altIds || [])])));
   const browsable = notOwned.filter(track => !listenedIds.has(track.id));
   const pageSize = 50;
-  const totalPages = Math.max(1, Math.ceil(browsable.length / pageSize));
+  const browsableGroups = actions.groupTracksByRelease(browsable);
+  const pages = packGroupsIntoPages(browsableGroups, pageSize);
+  const totalPages = pages.length;
   const safePage = Math.min(page, totalPages - 1);
-  const visibleGroups = actions.groupTracksByRelease(browsable.slice(safePage * pageSize, (safePage + 1) * pageSize));
+  const visibleGroups = pages[safePage] || [];
   const genres = [...new Set((data.tracks || []).flatMap(track => track.genre ? track.genre.split(' · ') : []))].sort();
 
   useEffect(() => {
@@ -29,14 +61,14 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
     if (!target || target.nodeId !== node.id) return;
     const matches = track => track.id.split('-')[0] === String(target.releaseId)
       || (target.titleNorm && actions.normalizeStr(track.album || track.title) === target.titleNorm);
-    const targetIndex = browsable.findIndex(matches);
     const targetGroup = groups.find(group => group.tracks.some(matches));
-    if (targetIndex >= 0) setPage(Math.floor(targetIndex / pageSize));
+    const targetPageIndex = targetGroup ? pages.findIndex(pageGroups => pageGroups.some(group => group.key === targetGroup.key)) : -1;
+    if (targetPageIndex >= 0) setPage(targetPageIndex);
     actions.mutateState(value => { value.scrollToRelease = null; });
     if (targetGroup) setTimeout(() => {
       [...document.querySelectorAll('[data-release-key]')].find(element => element.dataset.releaseKey === targetGroup.key)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 80);
-  }, [actions, browsable, groups, node.id, setPage, state.scrollToRelease]);
+  }, [actions, groups, node.id, pages, setPage, state.scrollToRelease]);
 
   return (
     <>
