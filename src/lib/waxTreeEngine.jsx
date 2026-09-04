@@ -5374,8 +5374,16 @@ function getBeatportDirect(artist,label,title){
 // free (bc-search uses Bandcamp's own public autocomplete API, no paid
 // search), so no cost trade-off to weigh here.
 const bandcampInFlight=new Set();
+// v2 — bc-search's own matching changed underneath this cache twice on
+// 2026-09-04 (the "Classic Cuts"→"Reconstructed" false-positive fix, the
+// trailing-number retry that fixed "Dimensions 1" coming back a false
+// negative) — a real fix to bc-search doesn't invalidate an entry
+// already sitting in someone's localStorage from before it shipped, same
+// "old wrong answer sticks around forever" problem hardwaxCacheKey's own
+// v2 bump solved for the analogous Hard Wax case. Bumping the key
+// version just makes every old entry a cache miss, re-verified lazily.
 function bandcampCacheKey(artist,label,title){
-  return 'bc:v1:'+normalizeStr(artist||'')+'|'+normalizeStr(label||'')+'|'+normalizeStr(title||'');
+  return 'bc:v2:'+normalizeStr(artist||'')+'|'+normalizeStr(label||'')+'|'+normalizeStr(title||'');
 }
 async function fetchBandcampDirect(ck,artist,label,title){
   bandcampInFlight.add(ck);
