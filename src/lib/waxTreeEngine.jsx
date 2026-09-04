@@ -58,6 +58,15 @@ const BATCH_SIZE=50;
 
 function normalizeStr(str){
   return (str||'').toLowerCase()
+    // "A & B" / "A and B" are the same title, spelled two ways across
+    // different platforms \u2014 canonicalize BEFORE the punctuation-strip
+    // below, which would otherwise just delete the "&" outright and
+    // silently drop the connector word from one side only (the other
+    // side's literal "and" survives as-is), shrinking the word count on
+    // just one of the two strings being compared. Confirmed live
+    // 2026-09-04: Galcher Lustwerk's "Mirror And Table" (Discogs) vs the
+    // real YouTube upload's own "Mirror & Table".
+    .replace(/&/g,' and ')
     .normalize('NFKD').replace(/[\u0300-\u036f]/g,'')
     .replace(/[^\p{L}\p{N}\s]/gu,'')
     .replace(/\b(original mix|remix|edit|remaster|remastered|ep|lp|feat|ft)\b/g,'')
