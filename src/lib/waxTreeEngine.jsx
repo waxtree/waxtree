@@ -2583,6 +2583,29 @@ function pushUserSubmittedYtMatch(trackId,videoId){
   sb.from('yt_video_matches').upsert({track_id:trackId,video_id:videoId},{onConflict:'track_id'})
     .then(({error})=>{if(error)console.warn('WaxTree: could not publish user-submitted YouTube match:',error);});
 }
+// A human pasting a real link is also strictly-better TRAINING data, not
+// just a one-track fix — pushUserSubmittedYtMatch above already covers
+// the fix; this logs the surrounding context (what we searched for, and
+// the real video's own title/channel) so a periodic review can spot
+// patterns across many corrections the same way a manually-sent
+// screenshot used to, without needing a screenshot at all (see
+// yt_match_corrections.sql in supabase-locale and the scheduled
+// 'yt-match-training' task). oEmbed is YouTube's free, unauthenticated,
+// no-quota endpoint (confirmed to reflect CORS for any origin
+// 2026-09-04) — best-effort only: if it or the insert fails, the actual
+// fix from submitYoutubeLink already landed regardless.
+async function pushYtMatchCorrection(trackId,videoId,title,artistName,labelName,node){
+  let correctTitle=null,correctChannel=null;
+  try{
+    const r=await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v='+videoId)}&format=json`);
+    if(r.ok){const j=await r.json();correctTitle=j.title||null;correctChannel=j.author_name||null;}
+  }catch{}
+  sb.from('yt_match_corrections').insert({
+    track_id:trackId,video_id:videoId,title:title||null,artist_name:artistName||null,label_name:labelName||null,
+    node_type:node?.type||null,node_discogs_id:node?.discogsId||null,
+    correct_title:correctTitle,correct_channel:correctChannel,
+  }).then(({error})=>{if(error)console.warn('WaxTree: could not log YouTube match correction:',error);});
+}
 // More permissive than getYtId() (which only handles the exact ?v= form
 // Discogs' own embedded video URIs use) — a manually pasted link is just
 // as likely to be a youtu.be/ share link, a /shorts/ link, or the bare id.
@@ -5383,6 +5406,10 @@ function submitYoutubeLink(trackId,videoId){
   if(found){
     found.track.videoId=videoId;
     lsSet((found.node.type==='label'?'l8:':'a7:')+found.node.discogsId,found.node.data);
+    const isLabel=found.node.type==='label';
+    const artistName=isLabel?found.track.label:(found.track.trackArtistName||found.track.releaseArtistName||found.node.name);
+    const labelName=isLabel?found.node.name:found.track.label;
+    pushYtMatchCorrection(trackId,videoId,found.track.title,artistName,labelName,found.node);
   }
   rr();
 }
