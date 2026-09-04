@@ -3684,6 +3684,39 @@ async function resolveBandcampCatalogUrl(type,discogsId,name,isLabelNode,sampleR
   const key=type+':'+discogsId;
   const fromDiscogs=await fetchDiscogsBandcampUrl(type,discogsId);
   if(fromDiscogs)return fromDiscogs;
+  // A direct, name-only search — verified server-side against the
+  // credited band_name itself (bc-search's own verifyHit), not just "a
+  // release with this title exists somewhere on Bandcamp" — is a much
+  // more direct signal than hoping several release-title samples happen
+  // to cluster on the same domain, and is exactly what correctly finds
+  // an artist's own page unambiguously in one shot (confirmed live
+  // 2026-09-04: "Steve O'Sullivan" resolves to
+  // steveosullivanlondon.bandcamp.com on the first try this way). Tried
+  // ARTIST-node-only, ahead of the sampling loop below: the two-agreeing-
+  // samples requirement just added there (see its own comment) fixed a
+  // real false positive, but for an artist whose own catalog is
+  // scattered across many different LABELS' Bandcamp pages rather than
+  // consistently hosted on their own, two samples landing on the same
+  // domain was never a reliable bar to clear even when that artist's own
+  // page genuinely exists — Steve's real page stopped resolving at all
+  // once that stricter bar applied. Not extended to labels: a short,
+  // thematic label name ("Mosaic") is far more collision-prone than a
+  // full person's name, which is exactly why bc-search's own comments
+  // already flag a bare name-only label search as unreliable without a
+  // known domain to disambiguate against — the release-title-verified
+  // sampling below stays label nodes' primary path, unchanged.
+  if(!isLabelNode){
+    try{
+      const{data,error}=await sb.functions.invoke('bc-search',{body:{artist:name}});
+      const hitUrl=error?null:data?.tracks?.[0]?.url||null;
+      const hostMatch=hitUrl?hitUrl.match(/^https?:\/\/([^/?#]+\.bandcamp\.com)/i)?.[1]:null;
+      if(hostMatch){
+        const resolved='https://'+stripWwwBandcamp(hostMatch);
+        bandcampUrlCache[key]=resolved;
+        return resolved;
+      }
+    }catch{/* fall through to the release-sampling approach below */}
+  }
   // Requires TWO independent sample releases to agree on the same
   // domain before trusting it — for BOTH artist and label nodes.
   // Previously an artist node trusted the very FIRST hit outright, no
@@ -4521,14 +4554,16 @@ async function fetchBandcampOnly(nodeId){
     // loaded after the field existed — see resolveBandcampCatalogUrl's own
     // comment) — and checked BEFORE spending anything else, since bc-
     // discography flatly refuses to guess without it. resolveBandcampCatalogUrl
-    // tries Discogs' own hand-entered link first, then a small, title-
-    // verified sample of this catalog's own releases, before finally
-    // giving up as 'unresolved'.
-    // A label needs TWO samples to independently agree before trusting a
-    // domain (see resolveBandcampCatalogUrl's own comment) — a wider
-    // sample than an artist node (which accepts its first verified hit)
-    // gives that a real chance of happening on a catalog where not every
-    // release is on Bandcamp.
+    // tries Discogs' own hand-entered link first, then (artist nodes
+    // only) a direct name-only search, then a small, title-verified
+    // sample of this catalog's own releases requiring two independent
+    // samples to agree, before finally giving up as 'unresolved' — see
+    // its own comments for why artist and label nodes diverge there.
+    // A label needs those two samples to independently agree before
+    // trusting a domain, so it gets a wider sample than an artist node
+    // (which usually resolves via the direct name search instead,
+    // without ever needing this sampling loop at all) — a real chance of
+    // two agreeing on a catalog where not every release is on Bandcamp.
     const bcSampleSize=isLabelNode?8:5;
     const knownBandUrl=await resolveBandcampCatalogUrl(node.type,node.discogsId,name,isLabelNode,discogsReleases.slice(0,bcSampleSize));
     if(!knownBandUrl){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
