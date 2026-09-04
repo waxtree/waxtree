@@ -3684,7 +3684,21 @@ async function resolveBandcampCatalogUrl(type,discogsId,name,isLabelNode,sampleR
   const key=type+':'+discogsId;
   const fromDiscogs=await fetchDiscogsBandcampUrl(type,discogsId);
   if(fromDiscogs)return fromDiscogs;
-  const domainHits={}; // domain → count, label case only
+  // Requires TWO independent sample releases to agree on the same
+  // domain before trusting it — for BOTH artist and label nodes.
+  // Previously an artist node trusted the very FIRST hit outright, no
+  // cross-check at all (only the label path required agreement).
+  // Confirmed live 2026-09-04: Steve O'Sullivan's "Only on Bandcamp"
+  // check surfaced 71 releases with nothing to do with him — one early
+  // sample release (a collab/compilation credit, common on any prolific
+  // artist's own Discogs list) happened to bc-search-match on SOMEONE
+  // ELSE's Bandcamp domain, which single hit then got adopted outright
+  // as "Steve's own Bandcamp catalog domain" and scraped wholesale. An
+  // artist's sample releases are no less likely to include a stray
+  // collab/compilation hit than a label's are to include a various-
+  // artists one — there was never a real reason for the two cases to
+  // trust this differently.
+  const domainHits={}; // domain → count
   for(const rel of sampleReleases){
     if(!rel.title)continue;
     let domain=null;
@@ -3704,11 +3718,6 @@ async function resolveBandcampCatalogUrl(type,discogsId,name,isLabelNode,sampleR
       domain=hostMatch?stripWwwBandcamp(hostMatch):null;
     }catch{/* try the next sample title */}
     if(!domain)continue;
-    if(!isLabelNode){
-      const resolved='https://'+domain;
-      bandcampUrlCache[key]=resolved;
-      return resolved;
-    }
     domainHits[domain]=(domainHits[domain]||0)+1;
     if(domainHits[domain]>=2){
       const resolved='https://'+domain;
