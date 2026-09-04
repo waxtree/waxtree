@@ -140,7 +140,7 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
           </div>
         )}
         <div className="flex flex-wrap items-center justify-end gap-[5px] max-sm:justify-start">
-          <StoreButton source="bc" directUrl={bandcampDirect} releaseTitle={releaseTitle} artist={releaseArtist} label={releaseLabel} isLabel={isLabel} actions={actions} />
+          <StoreButton source="bc" directUrl={bandcampDirect} artistProfileUrl={actions.getBandcampArtistUrl(node.id)} releaseTitle={releaseTitle} artist={releaseArtist} label={releaseLabel} isLabel={isLabel} actions={actions} />
           <StoreButton source="bp" directUrl={beatportDirect} releaseTitle={releaseTitle} artist={releaseArtist} label={releaseLabel} isLabel={isLabel} actions={actions} />
           {first.discogsUrl && !digitalOnly && <a href={first.discogsUrl} target="_blank" rel="noreferrer" className={`${actionButton} gap-0.5 border-border hover:border-primary hover:text-primary`}>Discogs<ArrowUpRight className="size-3" /></a>}
         </div>

@@ -1,11 +1,16 @@
 import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
 
-export const StoreButton = ({ source, directUrl, releaseTitle, artist, label, isLabel, actions }) => {
+export const StoreButton = ({ source, directUrl, artistProfileUrl, releaseTitle, artist, label, isLabel, actions }) => {
   const [loading, setLoading] = useState(false);
   const isBandcamp = source === 'bc';
   const open = async () => {
     if (directUrl) { window.open(directUrl, '_blank', 'noreferrer'); return; }
+    // No confirmed link for THIS specific release, but the artist/label's
+    // own Bandcamp page is already known (see getBandcampArtistUrl) —
+    // land there instead of running a generic on-click search that isn't
+    // guaranteed to even be about them.
+    if (artistProfileUrl) { window.open(artistProfileUrl, '_blank', 'noreferrer'); return; }
     const nextTab = window.open('about:blank', '_blank');
     setLoading(true);
     const url = await actions.resolveStoreUrl(source, { isLabel, artist, label, title: releaseTitle });
