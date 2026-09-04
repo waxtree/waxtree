@@ -2592,6 +2592,57 @@ function pushSharedYtChannel(nameNorm,channelId){
   sb.from('yt_channel_matches').upsert({name_norm:nameNorm,channel_id:channelId},{onConflict:'name_norm',ignoreDuplicates:true})
     .then(({error})=>{if(error)console.warn('WaxTree: could not publish shared YouTube channel:',error);});
 }
+// Shared verification for one candidate video against a track — used by
+// every search attempt in resolveTrackVideoId below (quoted, normalized-
+// title, and the plain-unquoted last resort) so all of them apply the
+// exact same trust bar, not slightly different ones by accident.
+function matchYtCandidate(r,titleN,artistN,labelN,expectedSec){
+  if(noEmbedIds.has(r.id)||invalidYtIds.has(r.id))return false; // see the channel-uploads search above for why
+  const rTitleN=normalizeStr(r.title||'');
+  // bcOnlyMatches (already tuned for the Bandcamp/Hard Wax cross-checks —
+  // same trailing-series-number guard, same 40% word-overlap/length-ratio
+  // thresholds, see its own definition) instead of a plain substring
+  // check — real YouTube upload titles very often reorder or drop a word
+  // or two relative to Discogs' own title in ways a strict includes()
+  // rejects even though it's genuinely the same track. The channel/
+  // duration checks right below remain the real anti-false-positive
+  // gate; this only loosens the FIRST hurdle (does the title correspond
+  // at all), not the overall trust bar.
+  if(!bcOnlyMatches(titleN,rTitleN))return false;
+  const channelN=normalizeStr(r.channelTitle||'');
+  const channelMatches=(artistN&&channelN.includes(artistN))||(labelN&&channelN.includes(labelN));
+  if(channelMatches){
+    // Uploader confirmed as the artist/label (or their YouTube-generated
+    // "Topic" channel) — a looser duration tolerance is fine here.
+    if(expectedSec&&r.durationSec&&Math.abs(r.durationSec-expectedSec)>8)return false;
+    return true;
+  }
+  // Uploader isn't recognizably the artist/label — a third-party
+  // repost, common for smaller labels (verified live 2026-07-20:
+  // Sushitech Records' "Generation Drive" has no durations listed
+  // on Discogs at all for ANY track, and its videos are commonly
+  // reposted by unrelated channels — e.g. "Per Hammar - Teleferico
+  // [SUSH74]" uploaded by a channel called "Rayzeh"). A tight
+  // duration match used to be the only fallback here, but that's
+  // unusable when Discogs never had a duration to compare against
+  // in the first place. The video's own TITLE naming the artist or
+  // label too (not just the track title) is a second, independent
+  // text match — promo/repost uploads very commonly title videos
+  // "Artist - Track [CATNO]" even from an unrelated channel, and a
+  // coincidental match on two specific strings together (not just
+  // a generic track title alone) is strong enough evidence on its
+  // own. Length-gated the same way matchVideo() already guards
+  // short strings elsewhere, so a short/generic artist initials
+  // string can't swing this on a loose substring hit.
+  if((artistN.length>=4&&rTitleN.includes(artistN))||(labelN.length>=4&&rTitleN.includes(labelN)))return true;
+  // Otherwise, only trust a tight duration agreement: a matching
+  // title AND a near-exact duration match is too specific a
+  // coincidence for unrelated content, but a loose title match
+  // alone is not enough (that's exactly what got the earlier
+  // attempt reverted).
+  if(!expectedSec||!r.durationSec)return false;
+  return Math.abs(r.durationSec-expectedSec)<=3;
+}
 function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
   // A videoId is permanent; a false (confirmed no match) only holds until
   // its TTL runs out (see YT_NO_MATCH_TTL_MS), then it's dropped so the
@@ -2714,54 +2765,29 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
               if(cleanResults.length)results=cleanResults;
             }
           }
-          hit=results.find(r=>{
-            if(noEmbedIds.has(r.id)||invalidYtIds.has(r.id))return false; // see the channel-uploads search above for why
-            const rTitleN=normalizeStr(r.title||'');
-            // bcOnlyMatches (already tuned for the Bandcamp/Hard Wax
-            // cross-checks — same trailing-series-number guard, same 40%
-            // word-overlap/length-ratio thresholds, see its own definition)
-            // instead of a plain substring check — real YouTube upload
-            // titles very often reorder or drop a word or two relative to
-            // Discogs' own title in ways a strict includes() rejects even
-            // though it's genuinely the same track. The channel/duration
-            // checks right below remain the real anti-false-positive gate;
-            // this only loosens the FIRST hurdle (does the title
-            // correspond at all), not the overall trust bar.
-            if(!bcOnlyMatches(titleN,rTitleN))return false;
-            const channelN=normalizeStr(r.channelTitle||'');
-            const channelMatches=(artistN&&channelN.includes(artistN))||(labelN&&channelN.includes(labelN));
-            if(channelMatches){
-              // Uploader confirmed as the artist/label (or their YouTube-generated
-              // "Topic" channel) — a looser duration tolerance is fine here.
-              if(expectedSec&&r.durationSec&&Math.abs(r.durationSec-expectedSec)>8)return false;
-              return true;
+          hit=results.find(r=>matchYtCandidate(r,titleN,artistN,labelN,expectedSec))||null;
+          // Last resort: the exact same terms, no quotes at all. YouTube's
+          // search API doesn't document real phrase-matching on quote
+          // characters inside q the way a browser's own search bar loosely
+          // does — quoting genuinely helps precision for the common case
+          // (see this function's own comment above, the "Vedik"/"Vedic"
+          // example), but for a track whose right upload IS on YouTube and
+          // simply never surfaces inside either quoted attempt's results,
+          // plain terms can still find it. Confirmed live 2026-09-04:
+          // Galcher Lustwerk's "Black Power Electronics" — genuinely on
+          // YouTube (found instantly searching a plain, unquoted "Galcher
+          // Lustwerk Black Power Electronics" directly on youtube.com) —
+          // never surfaced by either quoted attempt above. Tried only once
+          // both quoted attempts have already failed to verify anything,
+          // so this never spends extra quota on a track the quoted queries
+          // already found fine.
+          if(!hit&&trySpendYtCalls('search')==='ok'){
+            const qPlain=`${artistName||''} ${title}`.trim();
+            if(qPlain&&qPlain.toLowerCase()!==q.toLowerCase()){
+              const plainResults=await searchYouTubeApi(qPlain);
+              hit=plainResults.find(r=>matchYtCandidate(r,titleN,artistN,labelN,expectedSec))||null;
             }
-            // Uploader isn't recognizably the artist/label — a third-party
-            // repost, common for smaller labels (verified live 2026-07-20:
-            // Sushitech Records' "Generation Drive" has no durations listed
-            // on Discogs at all for ANY track, and its videos are commonly
-            // reposted by unrelated channels — e.g. "Per Hammar - Teleferico
-            // [SUSH74]" uploaded by a channel called "Rayzeh"). A tight
-            // duration match used to be the only fallback here, but that's
-            // unusable when Discogs never had a duration to compare against
-            // in the first place. The video's own TITLE naming the artist or
-            // label too (not just the track title) is a second, independent
-            // text match — promo/repost uploads very commonly title videos
-            // "Artist - Track [CATNO]" even from an unrelated channel, and a
-            // coincidental match on two specific strings together (not just
-            // a generic track title alone) is strong enough evidence on its
-            // own. Length-gated the same way matchVideo() already guards
-            // short strings elsewhere, so a short/generic artist initials
-            // string can't swing this on a loose substring hit.
-            if((artistN.length>=4&&rTitleN.includes(artistN))||(labelN.length>=4&&rTitleN.includes(labelN)))return true;
-            // Otherwise, only trust a tight duration agreement: a matching
-            // title AND a near-exact duration match is too specific a
-            // coincidence for unrelated content, but a loose title match
-            // alone is not enough (that's exactly what got the earlier
-            // attempt reverted).
-            if(!expectedSec||!r.durationSec)return false;
-            return Math.abs(r.durationSec-expectedSec)<=3;
-          })||null;
+          }
           if(hit?.channelId){
             const channelN=normalizeStr(hit.channelTitle||'');
             // Only remember the channel for the identity it actually matched —
