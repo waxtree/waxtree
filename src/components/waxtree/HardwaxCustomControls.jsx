@@ -16,7 +16,7 @@ const fmtTime = seconds => {
 // actual bytes still only get fetched here, once this actually mounts
 // (proxied through our own edge function, see getHardwaxAudioBlobUrl's
 // own comment for why a direct src can't just point at hardwax.com).
-export const HardwaxCustomControls = ({ trackId, mp3Url, actions }) => {
+export const HardwaxCustomControls = ({ trackId, mp3Url, title, artistName, actions }) => {
   const audioRef = useRef(null);
   const seekRef = useRef(null);
   const curRef = useRef(null);
@@ -39,7 +39,13 @@ export const HardwaxCustomControls = ({ trackId, mp3Url, actions }) => {
       if (seekRef.current && audio.duration > 0) seekRef.current.value = String(Math.round((audio.currentTime / audio.duration) * 1000));
       if (curRef.current) curRef.current.textContent = fmtTime(audio.currentTime);
     };
-    const onPlay = () => setPlaying(true);
+    // Same "badge it the instant playback actually starts" moment the
+    // YouTube player already gets (see badgeListened/tryBadge in the
+    // engine) — this fallback player has no ytTid of its own to hook
+    // into that mechanism, so it calls the same badging logic directly
+    // instead. Confirmed live 2026-09-04: a track played only via this
+    // preview never got marked Listened at all before this.
+    const onPlay = () => { setPlaying(true); actions.badgeListened(trackId, title, artistName); };
     const onPause = () => setPlaying(false);
     audio.addEventListener('timeupdate', onTime);
     audio.addEventListener('loadedmetadata', onTime);

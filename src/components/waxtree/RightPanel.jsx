@@ -62,7 +62,7 @@ export const RightPanel = ({ state, actions }) => {
                 <Headphones className="size-5 text-muted-foreground/50" />
                 <p className="text-[11px] text-muted-foreground/70">No video found — playing a preview from <span className="font-semibold">Hard Wax</span></p>
               </div>
-              <HardwaxCustomControls key={playing.trackId} trackId={playing.trackId} mp3Url={playing.hardwaxMp3Url} actions={actions} />
+              <HardwaxCustomControls key={playing.trackId} trackId={playing.trackId} mp3Url={playing.hardwaxMp3Url} title={playing.title} artistName={playing.artistName} actions={actions} />
             </>
           ) : (
             <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-secondary p-4 text-center max-sm:aspect-auto max-sm:py-3">

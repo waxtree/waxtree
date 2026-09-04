@@ -2269,25 +2269,34 @@ let ytPlayer=null,ytTid=null,ytTitle='',ytArtist='';
 let discoveredTracks={};
 function findTrack(id){for(const n of st.nodes){const t=n.data?.tracks?.find(t=>t.id===id);if(t)return t;}return discoveredTracks[id]||null;}
 // Badged the instant playback starts — no accumulated-seconds or skip
-// threshold anymore (there used to be one; removed per explicit request
-// 2026-08-11, "appena parte la traccia appaia il badge Listened").
-function tryBadge(){
-  if(ytTid&&!st.listens[ytTid]?.badged){
-    st.listens[ytTid]={badged:true};
-    const found=findTrackAndNode(ytTid);
-    const tr=found?.track||findTrack(ytTid);
-    st.history.unshift({id:ytTid,title:ytTitle,artistName:ytArtist,ts:Date.now(),
-      thumbUrl:tr?.thumbUrl||null,videoId:st.nowPlaying?.videoId||null,
-      exploreId:tr?.exploreId||null,exploreType:tr?.exploreType||'artist',exploreName:tr?.exploreName||ytArtist});
-    if(st.history.length>300)st.history.length=300; // unbounded otherwise — this is per-play, not per-search
-    // node_discogs_id links this play back to the exact node it happened
-    // under (see 'explore' events) so a later "plays vs likes per node"
-    // ratio can be computed by ID, not by fuzzy-matching artist/label text.
-    logEvent('play',{track_id:ytTid,title:ytTitle,artist:ytArtist,label:tr?.label||null,genre:tr?.genre||null,year:tr?.year||null,
-      node_type:found?.node?.type||null,node_discogs_id:found?.node?.discogsId||null,node_name:found?.node?.name||null});
-    rr();
-  }
+// threshold (there used to be one; removed per explicit request
+// 2026-08-11, "appena parte la traccia appaia il badge Listened"). Takes
+// explicit params rather than reading the YT-specific ytTid/ytTitle/
+// ytArtist module vars directly — those still drive tryBadge() below
+// (the YouTube player's own onStateChange handler, unchanged) — but the
+// Hard Wax audio-preview fallback needs the exact same "played it,
+// badge it" behavior once IT actually starts too (see
+// HardwaxCustomControls' own onPlay handler), and it has no YT player /
+// no ytTid of its own to read. Confirmed live 2026-09-04: a track played
+// only via its Hard Wax preview never got the Listened badge at all,
+// since this whole mechanism was wired to the YouTube player alone.
+function badgeListened(trackId,title,artist){
+  if(!trackId||st.listens[trackId]?.badged)return;
+  st.listens[trackId]={badged:true};
+  const found=findTrackAndNode(trackId);
+  const tr=found?.track||findTrack(trackId);
+  st.history.unshift({id:trackId,title,artistName:artist,ts:Date.now(),
+    thumbUrl:tr?.thumbUrl||null,videoId:st.nowPlaying?.videoId||null,
+    exploreId:tr?.exploreId||null,exploreType:tr?.exploreType||'artist',exploreName:tr?.exploreName||artist});
+  if(st.history.length>300)st.history.length=300; // unbounded otherwise — this is per-play, not per-search
+  // node_discogs_id links this play back to the exact node it happened
+  // under (see 'explore' events) so a later "plays vs likes per node"
+  // ratio can be computed by ID, not by fuzzy-matching artist/label text.
+  logEvent('play',{track_id:trackId,title,artist,label:tr?.label||null,genre:tr?.genre||null,year:tr?.year||null,
+    node_type:found?.node?.type||null,node_discogs_id:found?.node?.discogsId||null,node_name:found?.node?.name||null});
+  rr();
 }
+function tryBadge(){badgeListened(ytTid,ytTitle,ytArtist);}
 const invalidYtIds=new Set();  // truly gone: player fired error 100/2/5
 const noEmbedIds=new Set();    // exists on YT but embedding disabled (101/150)
 
@@ -5568,7 +5577,7 @@ export const waxTreeActions={
   playAdjacentTrack,playHardwaxPreview,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
-  baseTitleKey,extractRemixCandidate,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,normalizeStr,
+  badgeListened,baseTitleKey,extractRemixCandidate,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,
