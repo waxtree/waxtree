@@ -2004,6 +2004,28 @@ function saveCosineIdMap(m){
   try{localStorage.setItem('wt-cosine-ids-v2',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist Cosine track ids:',e);}
 }
 let cosineIdMap=loadCosineIdMap();
+// Investigated 2026-09-06 (user: related tracks don't always show up): a
+// track with genuinely no Cosine entry under any of its 3 candidate URLs
+// (resolveCosineTrackId) was cached here as the bare boolean `false`, with
+// no expiry at all — unlike every other "no match" cache in this file
+// (yt_video_matches' own YT_NO_MATCH_TTL_MS, the cosinecards:* entries
+// below via lsGet/lsSet's CT2_TTL_MS). Cosine keeps crawling and indexing
+// new releases/videos over time, so a track that wasn't indexed yet last
+// month may well be there now — but the old bare-false cache meant WaxTree
+// would never check again, for as long as that browser's localStorage
+// entry survived (up to COSINE_ID_MAP_CAP's 1000-entry eviction). This is
+// a narrow caching-freshness fix, NOT another pass at the actual matching
+// algorithm (score threshold, artist filter, VA attribution) — see
+// project_waxtree_related_tracks_stalemate memory for why that's
+// deliberately left alone without fresh direct evidence.
+const COSINE_NO_MATCH_TTL_MS=30*24*3600000;
+function isExpiredCosineNoMatch(entry){
+  // A legacy bare `false` (written before this fix, no timestamp at all)
+  // is treated as already-expired — one fresh recheck, then it re-caches
+  // in the new {no,t} shape like any other negative from here on.
+  if(entry===false)return true;
+  return!!entry&&entry.no===true&&Date.now()-entry.t>=COSINE_NO_MATCH_TTL_MS;
+}
 // Same remediation for the resolved-cards cache — a failed resolution pass
 // used to get persisted as a permanent empty array under ct2:cosinecards:*
 // (30-day TTL, so it wouldn't even self-heal soon). Sweeps every ct2: key
@@ -2088,7 +2110,7 @@ async function resolveCosineTrackId(np){
   // Bandcamp crawl frequently HAS the release under its own Bandcamp URL
   // even when the specific YouTube video comes back 404.
   const candidates=[youtubeUrl,discogsUrl,bcUrl].filter(Boolean);
-  if(!candidates.length){cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);return false;}
+  if(!candidates.length){cosineIdMap[np.trackId]={no:true,t:Date.now()};saveCosineIdMap(cosineIdMap);return false;}
   let anyFailed=false;
   for(const url of candidates){
     let json;
@@ -2113,7 +2135,7 @@ async function resolveCosineTrackId(np){
   // all rather than shown as a guess. Cosine's own exact-URL lookup is a
   // much narrower index than its search, but every result through it is
   // provably the right track.
-  cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);
+  cosineIdMap[np.trackId]={no:true,t:Date.now()};saveCosineIdMap(cosineIdMap);
   return false;
 }
 async function fetchCosineSimilar(cosineId){
@@ -2211,7 +2233,7 @@ let cosineResolveLoading=new Set();
 // already cached, in flight, or on cooldown.
 function ensureCosineRelatedLoading(np){
   const cachedId=cosineIdMap[np.trackId];
-  if(cachedId===undefined){
+  if(cachedId===undefined||isExpiredCosineNoMatch(cachedId)){
     if(relatedGaveUp('id:'+np.trackId))return;
     if(!cosineIdLoading.has(np.trackId)&&!relatedOnCooldown('id:'+np.trackId)){
       cosineIdLoading.add(np.trackId);
@@ -2222,7 +2244,7 @@ function ensureCosineRelatedLoading(np){
     }
     return;
   }
-  if(cachedId===false)return; // confirmed: no Cosine entry for this track
+  if(cachedId&&cachedId.no)return; // confirmed (within TTL): no Cosine entry for this track
   const cosineId=cachedId;
   const cardsKey='cosinecards:'+cosineId;
   if(lsGet(cardsKey))return;
@@ -2248,8 +2270,8 @@ function getRelatedView(){
   ensureCosineRelatedLoading(st.nowPlaying);
   const np=st.nowPlaying;
   const cachedId=cosineIdMap[np.trackId];
-  if(cachedId===undefined)return{status:relatedGaveUp('id:'+np.trackId)?'Couldn\'t load related tracks — try again later':'Looking up track…',cards:[]};
-  if(cachedId===false)return{status:'No related tracks found',cards:[]};
+  if(cachedId===undefined||isExpiredCosineNoMatch(cachedId))return{status:relatedGaveUp('id:'+np.trackId)?'Couldn\'t load related tracks — try again later':'Looking up track…',cards:[]};
+  if(cachedId.no)return{status:'No related tracks found',cards:[]};
   const cards=lsGet('cosinecards:'+cachedId);
   if(cards)return{status:cards.length?'':'No related tracks found',cards:cards.map(item=>({
     playId:'cosine:'+item.video_id,videoId:item.video_id,title:item.track||item.name,artist:item.artist,
