@@ -1433,9 +1433,34 @@ async function hydrateFromCloud(){
       return;
     }
     if(!data){console.info('WaxTree: no cloud backup found yet for this account.');return;}
+    const c=data.data||{};
+    // Merge these specific fields unconditionally, BEFORE the timestamp
+    // gate below even runs — same mergePlaylists/mergeById helpers
+    // pushStateToCloud already uses for exactly the same reason, just in
+    // the opposite direction. Confirmed live 2026-09-06: the gate below
+    // can leave a device permanently "stuck" thinking it's at least as
+    // current as the cloud simply because it was OPENED/clicked around
+    // recently — mutateState() calls rr()->saveSt() on EVERY ui
+    // interaction (opening a modal, selecting a node...), not just a real
+    // data change, so localTs keeps refreshing to "now" from ordinary use
+    // even on a device that hasn't added a single new playlist track in
+    // days. A user on that device kept seeing a stale, smaller playlist
+    // count than a second device genuinely had, through a hard refresh AND
+    // a full sign-out/sign-in, because the gate never even reached the
+    // restore code below. Merging these flat, only-ever-grows-through-use
+    // fields independently of that gate means a device can never
+    // permanently miss content added elsewhere just because its own clock
+    // looks newer — mirrors this file's now-established design (see
+    // pushStateToCloud) rather than introducing a new one.
+    let mergedAnything=false;
+    if(c.playlists){const merged=mergePlaylists(st.playlists,c.playlists);if(JSON.stringify(merged)!==JSON.stringify(st.playlists)){st.playlists=merged;mergedAnything=true;}}
+    if(c.dasAscoltare){const merged=mergeById(st.dasAscoltare,c.dasAscoltare,t=>t.id);if(merged.length!==(st.dasAscoltare?.length||0)){st.dasAscoltare=merged;mergedAnything=true;}}
+    if(c.follows){const merged=mergeById(st.follows,c.follows,f=>f.discogs_id+':'+f.type);if(merged.length!==(st.follows?.length||0)){st.follows=merged;mergedAnything=true;}}
+    if(c.likes){const merged={...c.likes,...st.likes};if(Object.keys(merged).length!==Object.keys(st.likes||{}).length){st.likes=merged;mergedAnything=true;}}
+    if(c.likedTracks){const merged={...c.likedTracks,...st.likedTracks};if(Object.keys(merged).length!==Object.keys(st.likedTracks||{}).length){st.likedTracks=merged;mergedAnything=true;}}
+    if(c.listens){const merged={...c.listens,...st.listens};if(Object.keys(merged).length!==Object.keys(st.listens||{}).length){st.listens=merged;mergedAnything=true;}}
     const cloudTs=new Date(data.updated_at).getTime();
     const localTs=Number(localStorage.getItem(SK+':ts')||0);
-    const c=data.data||{};
     // Timestamp alone isn't reliable — confirmed live twice now
     // (2026-08-02, 2026-08-03): a wiped local copy (localStorage quota
     // exhaustion, or a manually cleared cache) can still carry a "newer"
@@ -1463,20 +1488,25 @@ async function hydrateFromCloud(){
     // latency to count as a real reason to prefer it over local.
     const TIMESTAMP_GRACE_MS=5000;
     const looksWiped=looksLikeDataWipe(st,c);
-    if(cloudTs<=localTs+TIMESTAMP_GRACE_MS&&!looksWiped)return; // local copy is at least as current (within normal sync latency) and not suspiciously wiped — nothing to recover
+    if(cloudTs<=localTs+TIMESTAMP_GRACE_MS&&!looksWiped){
+      // Nothing to recover on the big, non-mergeable fields below — but
+      // still persist/render whatever the merge above already pulled in,
+      // rather than throwing it away just because the rest of this
+      // restore isn't needed right now.
+      if(mergedAnything){saveSt();rr();}
+      return;
+    }
     if(looksWiped)console.warn('WaxTree: local state looks wiped next to a real cloud backup — restoring from cloud despite the local timestamp.');
     if(c.branches?.length)st.branches=c.branches;
     if(c.nodes)st.nodes=c.nodes.map(n=>({...n,pinned:!!n.pinned,tags:n.tags||[],loaded:false,loading:false,error:null,data:null}));
     if(c.selectedId!==undefined)st.selectedId=c.selectedId;
     if(c.activeBranchId)st.activeBranchId=c.activeBranchId;
     if(c.chips)st.chips=c.chips;
-    if(c.likes)st.likes=c.likes;
-    if(c.likedTracks)st.likedTracks=c.likedTracks;
-    if(c.listens)st.listens=c.listens;
-    if(c.dasAscoltare)st.dasAscoltare=c.dasAscoltare;
-    if(c.playlists)st.playlists=c.playlists;
+    // likes/likedTracks/listens/dasAscoltare/playlists/follows are already
+    // merged (not overwritten) above, independently of this gate — do NOT
+    // reassign them here from the raw cloud copy, or a full restore would
+    // throw away exactly what the merge just preserved.
     if(c.history)st.history=c.history;
-    if(c.follows)st.follows=c.follows;
     if(c.followScanKnownIds)st.followScanKnownIds=c.followScanKnownIds;
     if(c.supaIdMap)st.supaIdMap={...c.supaIdMap,...st.supaIdMap}; // merge, don't clobber — this device may have minted mappings the cloud copy predates
     if(c.discogsUser)st.discogsUser=c.discogsUser;
