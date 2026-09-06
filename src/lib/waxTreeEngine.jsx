@@ -2094,22 +2094,41 @@ async function resolveCosineTrackId(np){
   // network round trip needed to find it again.
   const known=discoveredTracks[np.trackId]?.cosineId;
   if(known){cosineIdMap[np.trackId]=known;saveCosineIdMap(cosineIdMap);return known;}
-  const discogsUrl=findTrackAndNode(np.trackId)?.track?.discogsUrl||discoveredTracks[np.trackId]?.discogsUrl||null;
+  const track=findTrackAndNode(np.trackId)?.track;
+  const discogsUrl=track?.discogsUrl||discoveredTracks[np.trackId]?.discogsUrl||null;
   const bcUrl=discoveredTracks[np.trackId]?.bcUrl||null; // Bandcamp-only tracks (see fetchBcOnlyReleaseDetails)
   const youtubeUrl=np.videoId?'https://www.youtube.com/watch?v='+np.videoId:null;
-  // Try the YouTube link, the Discogs release link, AND the Bandcamp
-  // release link, not just one — Cosine may have indexed this recording
-  // under a different Discogs pressing/reissue than the exact release
-  // WaxTree's own tree points at, but the YouTube video actually playing
-  // is an exact match either way. Confirmed live: a track's own YouTube
-  // link returned real Cosine results when its Discogs release URL alone
-  // came back empty. The Bandcamp case is its own variant of the same
-  // thing, confirmed live 2026-08-20: WaxTree's own YouTube auto-match for
-  // a self-released Bandcamp track is very often a third-party repost —
-  // not what Cosine has indexed for that same track — but Cosine's own
-  // Bandcamp crawl frequently HAS the release under its own Bandcamp URL
-  // even when the specific YouTube video comes back 404.
-  const candidates=[youtubeUrl,discogsUrl,bcUrl].filter(Boolean);
+  // Investigated 2026-09-06 (user: ~85% "No related tracks found" even on
+  // tracks with a confirmed playing video) via direct probes against
+  // Cosine's own API: /tracks/lookup is an EXACT url match, not fuzzy —
+  // reproduced live with Satoshi Tomiie's "Abstract Nature" EP, digital
+  // release 10670204 (what WaxTree's tree pointed at) 404s, but the vinyl
+  // pressing of the SAME exact EP, release 9813267, IS indexed there for
+  // the exact track that kept showing empty. mergeReleaseVariantTracks
+  // already collapses these multi-pressing duplicates into one row and
+  // keeps the others' ids in altIds (same field inDiscogsCollection/
+  // inDiscogsWantlist already re-check for the same reason) — so every
+  // altId gets its own release-URL candidate here too, not just the one
+  // primary discogsUrl. Master ids (altIds prefixed 'm') are skipped —
+  // unconfirmed whether Cosine's lookup accepts /master/ urls the same way.
+  const altReleaseUrls=(track?.altIds||[]).map(id=>{
+    const raw=id?.split('-')[0];
+    return raw&&!raw.startsWith('m')?'https://www.discogs.com/release/'+raw:null;
+  }).filter(Boolean);
+  // Try the YouTube link, the Discogs release link (every pressing, not
+  // just the primary one), AND the Bandcamp release link — Cosine may
+  // have indexed this recording under a different Discogs pressing/
+  // reissue than the exact release WaxTree's own tree points at, but the
+  // YouTube video actually playing is an exact match either way.
+  // Confirmed live: a track's own YouTube link returned real Cosine
+  // results when its Discogs release URL alone came back empty. The
+  // Bandcamp case is its own variant of the same thing, confirmed live
+  // 2026-08-20: WaxTree's own YouTube auto-match for a self-released
+  // Bandcamp track is very often a third-party repost — not what Cosine
+  // has indexed for that same track — but Cosine's own Bandcamp crawl
+  // frequently HAS the release under its own Bandcamp URL even when the
+  // specific YouTube video comes back 404.
+  const candidates=[youtubeUrl,discogsUrl,...altReleaseUrls,bcUrl].filter(Boolean);
   if(!candidates.length){cosineIdMap[np.trackId]={no:true,t:Date.now()};saveCosineIdMap(cosineIdMap);return false;}
   let anyFailed=false;
   for(const url of candidates){
