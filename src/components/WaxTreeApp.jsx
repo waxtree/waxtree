@@ -92,7 +92,10 @@ const LikesModal = ({ state, actions }) => {
       {tracks.length ? Object.entries(groups).sort((a, b) => b[1].length - a[1].length).map(([genre, items]) => (
         <div key={genre}>
           <SectionHeader title={`${genre} · ${items.length}`} />
-          {items.map(track => <QueueRow key={`${genre}-${track.id}`} track={track} actions={actions} onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName || track.trackArtistName || ''); close(); }} onRemove={() => actions.toggleLike(track.id)} />)}
+          {/* Same as PlaylistsModal's own onPlay — no close() here either,
+              same reasoning: browsing/playing several liked tracks in a
+              row shouldn't kick the user back out to the tree each time. */}
+          {items.map(track => <QueueRow key={`${genre}-${track.id}`} track={track} actions={actions} onPlay={() => actions.doPlay(track.id, track.videoId, track.title, track.artistName || track.trackArtistName || '')} onRemove={() => actions.toggleLike(track.id)} />)}
         </div>
       )) : <p className="py-8 text-center text-xs text-muted-foreground/70">No liked tracks — use ♡ on tracks to add them</p>}
     </Modal>

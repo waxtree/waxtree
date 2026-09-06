@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal } from '@/components/waxtree/Modal';
 import { QueueRow } from '@/components/waxtree/QueueRow';
-import { buttonPrimary, buttonSecondary, hScrollThin, modalInput } from '@/lib/waxtreeUi';
+import { buttonPrimary, buttonSecondary, modalInput } from '@/lib/waxtreeUi';
 
 const LISTEN_LATER_ID = '__listen_later__';
 
@@ -10,9 +10,9 @@ export const PlaylistsModal = ({ state, actions }) => {
   const [selectedId, setSelectedId] = useState(LISTEN_LATER_ID);
   const close = () => actions.mutateState(value => { value.playlistsModal = false; });
 
-  // Listen Later is a playlist for this modal's purposes too — same tab
-  // strip, same track list, just built-in (no rename/delete) and backed by
-  // dasAscoltare instead of one of state.playlists' own entries.
+  // Listen Later is a playlist for this modal's purposes too — same
+  // sidebar list, same track list, just built-in (no rename/delete) and
+  // backed by dasAscoltare instead of one of state.playlists' own entries.
   const tabs = [{ id: LISTEN_LATER_ID, name: '🔖 Listen Later', tracks: state.dasAscoltare, builtIn: true }, ...state.playlists];
   const selected = tabs.find(item => item.id === selectedId) || tabs[0];
 
@@ -41,47 +41,66 @@ export const PlaylistsModal = ({ state, actions }) => {
   };
 
   return (
-    <Modal title="🏷️ Playlists" close={close} subtitle="Create as many playlists as you like — split by genre, by a gig you're digging for, whatever makes sense to you.">
+    <Modal title="🏷️ Playlists" close={close} maxWidth="760px" subtitle="Create as many playlists as you like — split by genre, by a gig you're digging for, whatever makes sense to you.">
       <div className="my-3 flex gap-2">
         <input value={name} onChange={event => setName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') createPlaylist(); }} className={modalInput} placeholder="New playlist name…" />
         <button type="button" onClick={createPlaylist} className={buttonPrimary}>Create</button>
       </div>
 
-      <div className={`flex items-end gap-0.5 border-b border-border ${hScrollThin}`}>
-        {tabs.map(tab => (
-          <div
-            key={tab.id}
-            onClick={() => setSelectedId(tab.id)}
-            onDoubleClick={() => { if (!tab.builtIn) renamePlaylist(tab); }}
-            title={tab.builtIn ? undefined : 'Double-click to rename'}
-            className={`relative -bottom-px flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t-lg border border-b-0 px-3 py-1.5 text-[11px] font-semibold ${selected?.id === tab.id ? 'border-border bg-card text-primary' : 'border-border bg-secondary text-muted-foreground'}`}
-          >
-            <span className="max-w-32 truncate">{tab.name}</span>
-            <span className="text-[10px] font-normal opacity-60">{tab.tracks.length}</span>
-            {!tab.builtIn && (
-              <button type="button" title="Delete playlist" onClick={event => { event.stopPropagation(); deletePlaylist(tab); }} className="text-muted-foreground/70 hover:text-destructive">×</button>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {selected.builtIn && selected.tracks.length > 0 && (
-        <div className="flex justify-end py-2">
-          <button type="button" className={buttonSecondary} onClick={() => { if (confirm('Clear Listen Later?')) actions.mutateState(value => { value.dasAscoltare = []; }); }}>Clear</button>
+      {/* Side-by-side, same shape as the main app's own node sidebar
+          (SidebarNode) — a vertical, scrollable list of playlist names on
+          the left (active one left-border-accented, same convention),
+          the selected playlist's tracks filling the rest. Replaced the
+          old horizontal tab strip: with more than a handful of playlists
+          that row just ran out of width and hid the rest off-screen with
+          no visual hint they existed. */}
+      <div className="flex gap-3 max-sm:flex-col">
+        <div className="max-h-[56vh] w-[190px] shrink-0 overflow-y-auto rounded-[10px] border border-border py-1 max-sm:max-h-36 max-sm:w-full">
+          {tabs.map(tab => (
+            <div
+              key={tab.id}
+              onClick={() => setSelectedId(tab.id)}
+              onDoubleClick={() => { if (!tab.builtIn) renamePlaylist(tab); }}
+              title={tab.builtIn ? undefined : 'Double-click to rename'}
+              className={`group flex cursor-pointer items-center gap-1.5 border-l-2 py-[7px] pl-2.5 pr-2 ${selected?.id === tab.id ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}
+            >
+              <span className={`min-w-0 flex-1 truncate text-[12.5px] ${selected?.id === tab.id ? 'font-semibold text-primary' : ''}`}>{tab.name}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground/70">{tab.tracks.length}</span>
+              {!tab.builtIn && (
+                <button type="button" title="Delete playlist" onClick={event => { event.stopPropagation(); deletePlaylist(tab); }} className="shrink-0 text-muted-foreground/70 opacity-0 hover:text-destructive group-hover:opacity-100">×</button>
+              )}
+            </div>
+          ))}
         </div>
-      )}
 
-      {selected.tracks.length ? selected.tracks.map(track => (
-        <QueueRow
-          key={track.id}
-          track={track}
-          state={state}
-          actions={actions}
-          showMove
-          onPlay={() => { actions.doPlay(track.id, track.videoId, track.title, track.artistName); close(); }}
-          onRemove={() => removeFromSelected(track)}
-        />
-      )) : <p className="py-8 text-center text-xs text-muted-foreground/70">No tracks yet — use 🏷️ on any track to add</p>}
+        <div className="max-h-[56vh] min-w-0 flex-1 overflow-y-auto">
+          {selected.builtIn && selected.tracks.length > 0 && (
+            <div className="flex justify-end pb-2">
+              <button type="button" className={buttonSecondary} onClick={() => { if (confirm('Clear Listen Later?')) actions.mutateState(value => { value.dasAscoltare = []; }); }}>Clear</button>
+            </div>
+          )}
+          {selected.tracks.length ? selected.tracks.map(track => (
+            <QueueRow
+              key={track.id}
+              track={track}
+              state={state}
+              actions={actions}
+              showMove
+              // Deliberately does NOT close() — pressing play used to
+              // kick the user straight back out to the tree behind this
+              // modal, which made browsing several tracks from a playlist
+              // in a row (the exact point of this modal) impossible.
+              // doPlay() itself still reaches the real mini-player fine
+              // even while this sits on top of it (RightPanel's iframe/
+              // audio element stays mounted, just visually behind this
+              // overlay) — the user can close this whenever they actually
+              // want to see the transport controls.
+              onPlay={() => actions.doPlay(track.id, track.videoId, track.title, track.artistName)}
+              onRemove={() => removeFromSelected(track)}
+            />
+          )) : <p className="py-8 text-center text-xs text-muted-foreground/70">No tracks yet — use 🏷️ on any track to add</p>}
+        </div>
+      </div>
     </Modal>
   );
 };
