@@ -1230,6 +1230,33 @@ function mergePlaylists(localPlaylists,cloudPlaylists){
   cloudById.forEach(cp=>merged.push(cp)); // a playlist created on the OTHER device only
   return merged;
 }
+// A union merge can only ever ADD — it has no way to tell "the cloud
+// still has this because nobody's told it otherwise yet" apart from
+// "someone else deliberately re-added it after I removed it", so merging
+// unconditionally on every push/pull means a removal (untag a playlist
+// track, unlike a track...) can never actually stick: the very next sync
+// cycle merges local against a cloud copy that, by definition, still has
+// the old pre-removal content until THIS sync is the one writing it.
+// Confirmed live 2026-09-06 exactly this way — removing several playlist
+// tracks survived locally, but reappeared after a refresh.
+//
+// The fix: only merge when the cloud has genuinely moved on since this
+// device last looked at it (a real push/pull from ANOTHER device in the
+// meantime) — otherwise this device's own current state (removals
+// included) is already the authoritative continuation of what it last
+// saw, and should just be trusted as-is. `user_state`'s own
+// user_state_updated_at trigger bumps updated_at on every single write
+// regardless of whether the data actually changed, so a plain equality
+// check against the last updated_at THIS device itself produced or
+// observed is exact — no content diffing needed, and no timestamp-drift
+// slop like hydrateFromCloud's own TIMESTAMP_GRACE_MS has to allow for
+// elsewhere (that one compares two INDEPENDENTLY-set clocks; this compares
+// the exact same server value against itself).
+const CLOUD_SYNC_MARK_KEY=SK+':cloudmark';
+function markCloudSynced(updatedAt){try{localStorage.setItem(CLOUD_SYNC_MARK_KEY,updatedAt);}catch{}}
+function isCloudUnchangedSinceLastSync(cloudUpdatedAt){
+  try{return localStorage.getItem(CLOUD_SYNC_MARK_KEY)===cloudUpdatedAt;}catch{return false;}
+}
 function looksLikeDataWipe(a,b){
   const aNodes=a.nodes?.length||0,bNodes=b.nodes?.length||0;
   const aFollows=a.follows?.length||0,bFollows=b.follows?.length||0;
@@ -1280,8 +1307,16 @@ async function pushStateToCloud(){
     // sparse, but sb.from() calls go straight to Supabase, not through our
     // own Vercel functions, so this doesn't add to the Edge Request
     // budget that prompted capping the related-tracks retry loop.
-    const{data:existing}=await sb.from('user_state').select('data').eq('user_id',wtSession.user.id).maybeSingle();
-    if(existing?.data){
+    const{data:existing}=await sb.from('user_state').select('data,updated_at').eq('user_id',wtSession.user.id).maybeSingle();
+    // Only merge when the cloud has actually moved on since we last saw
+    // it — otherwise merging on EVERY push can't ever express a removal.
+    // Confirmed live 2026-09-06: removing several tracks from a playlist
+    // survived the removal itself, but reappeared after a refresh —
+    // because merging unconditionally against "whatever's in the cloud
+    // right now" always re-adds anything the cloud still has, and until
+    // THIS push lands, the cloud still has the pre-removal copy by
+    // definition. See isCloudUnchangedSinceLastSync's own comment.
+    if(existing?.data&&!isCloudUnchangedSinceLastSync(existing.updated_at)){
       // Union-merge against the cloud BEFORE the wipe-check below — see
       // mergePlaylists/mergeById's own comment for why (two devices on the
       // same account, confirmed live 2026-09-06, were silently stomping
@@ -1299,8 +1334,9 @@ async function pushStateToCloud(){
       window.Sentry?.captureMessage instanceof Function&&Sentry.captureMessage('Blocked a suspicious cloud-state wipe',{tags:{area:'cloud-backup-guard'}});
       return; // nothing safe to push right now — also skip the history snapshot and syncNewSchema below
     }
-    const{error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});
+    const{data:written,error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload}).select('updated_at').single();
     if(error)throw error;
+    if(written?.updated_at)markCloudSynced(written.updated_at);
     maybeSnapshotHistory(payload);
   }catch(e){
     console.warn('WaxTree: cloud backup failed (will retry on next change):',e);
@@ -1434,10 +1470,20 @@ async function hydrateFromCloud(){
     }
     if(!data){console.info('WaxTree: no cloud backup found yet for this account.');return;}
     const c=data.data||{};
-    // Merge these specific fields unconditionally, BEFORE the timestamp
-    // gate below even runs — same mergePlaylists/mergeById helpers
-    // pushStateToCloud already uses for exactly the same reason, just in
-    // the opposite direction. Confirmed live 2026-09-06: the gate below
+    // Merge these specific fields (BEFORE the timestamp gate below even
+    // runs — same mergePlaylists/mergeById helpers pushStateToCloud
+    // already uses for exactly the same reason, just in the opposite
+    // direction), but ONLY when the cloud has actually moved on since this
+    // device last accounted for it — see isCloudUnchangedSinceLastSync's
+    // own comment for why unconditional merging can't ever let a removal
+    // stick. Without this gate here too, the exact same resurrection can
+    // happen purely from a page refresh: remove a playlist track, then
+    // refresh before the debounced push has actually reached Supabase —
+    // the cloud still has the old copy, and an unconditional pull-side
+    // merge would union it right back into the freshly-reloaded (and
+    // otherwise correct) local state. Confirmed live 2026-09-06.
+    //
+    // Separately (independent of merging): the gate right below this one
     // can leave a device permanently "stuck" thinking it's at least as
     // current as the cloud simply because it was OPENED/clicked around
     // recently — mutateState() calls rr()->saveSt() on EVERY ui
@@ -1446,19 +1492,22 @@ async function hydrateFromCloud(){
     // even on a device that hasn't added a single new playlist track in
     // days. A user on that device kept seeing a stale, smaller playlist
     // count than a second device genuinely had, through a hard refresh AND
-    // a full sign-out/sign-in, because the gate never even reached the
+    // a full sign-out/sign-in, because that gate never even reached the
     // restore code below. Merging these flat, only-ever-grows-through-use
-    // fields independently of that gate means a device can never
+    // fields independently of THAT gate means a device can never
     // permanently miss content added elsewhere just because its own clock
     // looks newer — mirrors this file's now-established design (see
     // pushStateToCloud) rather than introducing a new one.
     let mergedAnything=false;
-    if(c.playlists){const merged=mergePlaylists(st.playlists,c.playlists);if(JSON.stringify(merged)!==JSON.stringify(st.playlists)){st.playlists=merged;mergedAnything=true;}}
-    if(c.dasAscoltare){const merged=mergeById(st.dasAscoltare,c.dasAscoltare,t=>t.id);if(merged.length!==(st.dasAscoltare?.length||0)){st.dasAscoltare=merged;mergedAnything=true;}}
-    if(c.follows){const merged=mergeById(st.follows,c.follows,f=>f.discogs_id+':'+f.type);if(merged.length!==(st.follows?.length||0)){st.follows=merged;mergedAnything=true;}}
-    if(c.likes){const merged={...c.likes,...st.likes};if(Object.keys(merged).length!==Object.keys(st.likes||{}).length){st.likes=merged;mergedAnything=true;}}
-    if(c.likedTracks){const merged={...c.likedTracks,...st.likedTracks};if(Object.keys(merged).length!==Object.keys(st.likedTracks||{}).length){st.likedTracks=merged;mergedAnything=true;}}
-    if(c.listens){const merged={...c.listens,...st.listens};if(Object.keys(merged).length!==Object.keys(st.listens||{}).length){st.listens=merged;mergedAnything=true;}}
+    if(!isCloudUnchangedSinceLastSync(data.updated_at)){
+      if(c.playlists){const merged=mergePlaylists(st.playlists,c.playlists);if(JSON.stringify(merged)!==JSON.stringify(st.playlists)){st.playlists=merged;mergedAnything=true;}}
+      if(c.dasAscoltare){const merged=mergeById(st.dasAscoltare,c.dasAscoltare,t=>t.id);if(merged.length!==(st.dasAscoltare?.length||0)){st.dasAscoltare=merged;mergedAnything=true;}}
+      if(c.follows){const merged=mergeById(st.follows,c.follows,f=>f.discogs_id+':'+f.type);if(merged.length!==(st.follows?.length||0)){st.follows=merged;mergedAnything=true;}}
+      if(c.likes){const merged={...c.likes,...st.likes};if(Object.keys(merged).length!==Object.keys(st.likes||{}).length){st.likes=merged;mergedAnything=true;}}
+      if(c.likedTracks){const merged={...c.likedTracks,...st.likedTracks};if(Object.keys(merged).length!==Object.keys(st.likedTracks||{}).length){st.likedTracks=merged;mergedAnything=true;}}
+      if(c.listens){const merged={...c.listens,...st.listens};if(Object.keys(merged).length!==Object.keys(st.listens||{}).length){st.listens=merged;mergedAnything=true;}}
+    }
+    markCloudSynced(data.updated_at); // whether or not we merged — either way this device has now seen exactly this cloud state
     const cloudTs=new Date(data.updated_at).getTime();
     const localTs=Number(localStorage.getItem(SK+':ts')||0);
     // Timestamp alone isn't reliable — confirmed live twice now
