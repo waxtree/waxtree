@@ -2004,28 +2004,17 @@ function saveCosineIdMap(m){
   try{localStorage.setItem('wt-cosine-ids-v2',JSON.stringify(m));}catch(e){console.warn('WaxTree: could not persist Cosine track ids:',e);}
 }
 let cosineIdMap=loadCosineIdMap();
-// Investigated 2026-09-06 (user: related tracks don't always show up): a
-// track with genuinely no Cosine entry under any of its 3 candidate URLs
-// (resolveCosineTrackId) was cached here as the bare boolean `false`, with
-// no expiry at all — unlike every other "no match" cache in this file
-// (yt_video_matches' own YT_NO_MATCH_TTL_MS, the cosinecards:* entries
-// below via lsGet/lsSet's CT2_TTL_MS). Cosine keeps crawling and indexing
-// new releases/videos over time, so a track that wasn't indexed yet last
-// month may well be there now — but the old bare-false cache meant WaxTree
-// would never check again, for as long as that browser's localStorage
-// entry survived (up to COSINE_ID_MAP_CAP's 1000-entry eviction). This is
-// a narrow caching-freshness fix, NOT another pass at the actual matching
-// algorithm (score threshold, artist filter, VA attribution) — see
-// project_waxtree_related_tracks_stalemate memory for why that's
-// deliberately left alone without fresh direct evidence.
-const COSINE_NO_MATCH_TTL_MS=30*24*3600000;
-function isExpiredCosineNoMatch(entry){
-  // A legacy bare `false` (written before this fix, no timestamp at all)
-  // is treated as already-expired — one fresh recheck, then it re-caches
-  // in the new {no,t} shape like any other negative from here on.
-  if(entry===false)return true;
-  return!!entry&&entry.no===true&&Date.now()-entry.t>=COSINE_NO_MATCH_TTL_MS;
-}
+// Investigated 2026-09-06 (user: related tracks don't always show up).
+// First attempt added a 30-day TTL to the local negative cache here — the
+// user explicitly rejected that (no expiry, ever: "devi salvare sempre
+// tutto per sempre") and asked for the result to be SHARED across every
+// WaxTree user too, not just this one browser, same reasoning as
+// yt_video_matches (see fetchSharedCosineMatch/pushSharedCosineMatch
+// below, and cosine_shared_cache.sql in supabase-locale) — this trades
+// "a track Cosine indexes tomorrow stays 'no match' forever" for real
+// Cosine-API-cost savings shared across every user instead of every
+// browser re-paying independently. This local map remains a permanent,
+// no-expiry cache exactly like it always was before the TTL detour.
 // Same remediation for the resolved-cards cache — a failed resolution pass
 // used to get persisted as a permanent empty array under ct2:cosinecards:*
 // (30-day TTL, so it wouldn't even self-heal soon). Sweeps every ct2: key
@@ -2094,6 +2083,11 @@ async function resolveCosineTrackId(np){
   // network round trip needed to find it again.
   const known=discoveredTracks[np.trackId]?.cosineId;
   if(known){cosineIdMap[np.trackId]=known;saveCosineIdMap(cosineIdMap);return known;}
+  // Shared cache next (see fetchSharedCosineMatch's own comment) — zero
+  // Cosine API cost, and someone else's confirmed verdict for this exact
+  // track is exactly as valid here as it is for yt_video_matches.
+  const shared=await fetchSharedCosineMatch(np.trackId);
+  if(shared!==undefined){cosineIdMap[np.trackId]=shared;saveCosineIdMap(cosineIdMap);return shared;}
   const track=findTrackAndNode(np.trackId)?.track;
   const discogsUrl=track?.discogsUrl||discoveredTracks[np.trackId]?.discogsUrl||null;
   const bcUrl=discoveredTracks[np.trackId]?.bcUrl||null; // Bandcamp-only tracks (see fetchBcOnlyReleaseDetails)
@@ -2129,7 +2123,7 @@ async function resolveCosineTrackId(np){
   // frequently HAS the release under its own Bandcamp URL even when the
   // specific YouTube video comes back 404.
   const candidates=[youtubeUrl,discogsUrl,...altReleaseUrls,bcUrl].filter(Boolean);
-  if(!candidates.length){cosineIdMap[np.trackId]={no:true,t:Date.now()};saveCosineIdMap(cosineIdMap);return false;}
+  if(!candidates.length)return false; // nothing to ask Cosine about — NOT cached (this device's own state, not a real verdict; another device/user reaching this track may well have a candidate this one doesn't)
   let anyFailed=false;
   for(const url of candidates){
     let json;
@@ -2142,7 +2136,7 @@ async function resolveCosineTrackId(np){
       console.warn('WaxTree: Cosine track lookup failed (will retry):',e?.message||e);anyFailed=true;continue;
     }
     const id=json.data?.[0]?.id;
-    if(id){cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);return id;}
+    if(id){cosineIdMap[np.trackId]=id;saveCosineIdMap(cosineIdMap);pushSharedCosineMatch(np.trackId,id);return id;}
   }
   if(anyFailed)return undefined; // at least one attempt errored — don't cache a negative, retry later
   // Every direct URL lookup came back a clean 404 — genuinely no match.
@@ -2154,8 +2148,41 @@ async function resolveCosineTrackId(np){
   // all rather than shown as a guess. Cosine's own exact-URL lookup is a
   // much narrower index than its search, but every result through it is
   // provably the right track.
-  cosineIdMap[np.trackId]={no:true,t:Date.now()};saveCosineIdMap(cosineIdMap);
+  cosineIdMap[np.trackId]=false;saveCosineIdMap(cosineIdMap);pushSharedCosineMatch(np.trackId,null);
   return false;
+}
+// Shared, permanent, cross-user cache (see cosine_shared_cache.sql in
+// supabase-locale) — explicit request 2026-09-06: "devi salvare sempre
+// tutto per sempre, così che anche gli altri utenti ne possano
+// usufruire". Costs zero Cosine API calls (both the /tracks/lookup that
+// found cosineId, AND every Discogs call resolveCosineCard would have
+// spent per candidate below) for whichever user reaches a track's exact
+// same id/similar-tracks question next, permanently — mirrors
+// yt_video_matches' own reasoning exactly, just with no TTL/update path
+// at all: once found, a verdict here is treated as final for good.
+const cosineSharedChecked=new Set();
+async function fetchSharedCosineMatch(trackId){
+  if(cosineSharedChecked.has(trackId))return undefined;
+  cosineSharedChecked.add(trackId);
+  try{
+    const{data}=await sb.from('cosine_track_matches').select('cosine_id').eq('track_id',trackId).maybeSingle();
+    if(!data)return undefined; // no one's resolved this track yet — caller does the real work
+    return data.cosine_id||false;
+  }catch(e){console.warn('WaxTree: shared Cosine match lookup failed:',e);return undefined;}
+}
+function pushSharedCosineMatch(trackId,cosineId){
+  sb.from('cosine_track_matches').upsert({track_id:trackId,cosine_id:cosineId},{onConflict:'track_id',ignoreDuplicates:true})
+    .then(({error})=>{if(error)console.warn('WaxTree: could not publish shared Cosine match:',error);});
+}
+async function fetchSharedCosineCards(cosineId){
+  try{
+    const{data}=await sb.from('cosine_similar_cache').select('cards').eq('cosine_id',cosineId).maybeSingle();
+    return data?.cards||undefined;
+  }catch(e){console.warn('WaxTree: shared Cosine cards lookup failed:',e);return undefined;}
+}
+function pushSharedCosineCards(cosineId,cards){
+  sb.from('cosine_similar_cache').upsert({cosine_id:cosineId,cards},{onConflict:'cosine_id',ignoreDuplicates:true})
+    .then(({error})=>{if(error)console.warn('WaxTree: could not publish shared Cosine cards:',error);});
 }
 async function fetchCosineSimilar(cosineId){
   const ck='cosinesim:'+cosineId;
@@ -2252,7 +2279,7 @@ let cosineResolveLoading=new Set();
 // already cached, in flight, or on cooldown.
 function ensureCosineRelatedLoading(np){
   const cachedId=cosineIdMap[np.trackId];
-  if(cachedId===undefined||isExpiredCosineNoMatch(cachedId)){
+  if(cachedId===undefined){
     if(relatedGaveUp('id:'+np.trackId))return;
     if(!cosineIdLoading.has(np.trackId)&&!relatedOnCooldown('id:'+np.trackId)){
       cosineIdLoading.add(np.trackId);
@@ -2263,21 +2290,28 @@ function ensureCosineRelatedLoading(np){
     }
     return;
   }
-  if(cachedId&&cachedId.no)return; // confirmed (within TTL): no Cosine entry for this track
+  if(cachedId===false)return; // confirmed: no Cosine entry for this track
   const cosineId=cachedId;
   const cardsKey='cosinecards:'+cosineId;
   if(lsGet(cardsKey))return;
   if(relatedGaveUp('cards:'+cosineId))return;
   if(!cosineResolveLoading.has(cosineId)&&!relatedOnCooldown('cards:'+cosineId)){
     cosineResolveLoading.add(cosineId);
-    fetchCosineSimilar(cosineId)
-      .then(items=>resolveCosineCards(filterCosineItems(items,np)))
-      .then(({cards,complete})=>{
-        if(complete){lsSet(cardsKey,cards);relatedResetRetries('cards:'+cosineId);}
-        else relatedMarkFailed('cards:'+cosineId);
-      })
-      .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed (will retry):',e?.message||e);relatedMarkFailed('cards:'+cosineId);})
-      .then(()=>{cosineResolveLoading.delete(cosineId);renderRelatedTracks();});
+    // Shared cache first (see fetchSharedCosineCards' own comment) — skips
+    // BOTH the Cosine /similar call AND every per-candidate Discogs call
+    // resolveCosineCard would otherwise spend, if any other WaxTree user
+    // already resolved this exact cosineId's related tracks before.
+    fetchSharedCosineCards(cosineId).then(shared=>{
+      if(shared){lsSet(cardsKey,shared);relatedResetRetries('cards:'+cosineId);cosineResolveLoading.delete(cosineId);renderRelatedTracks();return;}
+      fetchCosineSimilar(cosineId)
+        .then(items=>resolveCosineCards(filterCosineItems(items,np)))
+        .then(({cards,complete})=>{
+          if(complete){lsSet(cardsKey,cards);relatedResetRetries('cards:'+cosineId);pushSharedCosineCards(cosineId,cards);}
+          else relatedMarkFailed('cards:'+cosineId);
+        })
+        .catch(e=>{console.warn('WaxTree: Related by Cosine.club failed (will retry):',e?.message||e);relatedMarkFailed('cards:'+cosineId);})
+        .then(()=>{cosineResolveLoading.delete(cosineId);renderRelatedTracks();});
+    });
   }
 }
 function renderRelatedTracks(){
@@ -2289,8 +2323,8 @@ function getRelatedView(){
   ensureCosineRelatedLoading(st.nowPlaying);
   const np=st.nowPlaying;
   const cachedId=cosineIdMap[np.trackId];
-  if(cachedId===undefined||isExpiredCosineNoMatch(cachedId))return{status:relatedGaveUp('id:'+np.trackId)?'Couldn\'t load related tracks — try again later':'Looking up track…',cards:[]};
-  if(cachedId.no)return{status:'No related tracks found',cards:[]};
+  if(cachedId===undefined)return{status:relatedGaveUp('id:'+np.trackId)?'Couldn\'t load related tracks — try again later':'Looking up track…',cards:[]};
+  if(cachedId===false)return{status:'No related tracks found',cards:[]};
   const cards=lsGet('cosinecards:'+cachedId);
   if(cards)return{status:cards.length?'':'No related tracks found',cards:cards.map(item=>({
     playId:'cosine:'+item.video_id,videoId:item.video_id,title:item.track||item.name,artist:item.artist,
