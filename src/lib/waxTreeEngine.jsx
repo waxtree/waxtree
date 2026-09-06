@@ -2902,13 +2902,9 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
         // onError); leaving the old "Embedding disabled"/"Video
         // unavailable" fallback message up would otherwise mask the new,
         // working player (RightPanel only renders the player when
-        // !state.ytError). fromDiscogs flips to false alongside it — this
-        // result is an auto-match now, not the original Discogs video, so
-        // it should get the same native-controls treatment any other
-        // auto-matched video gets, not stay stuck on the custom bar it
-        // only had because it started out fromDiscogs.
+        // !state.ytError).
         st.ytError=null;
-        st.nowPlaying.videoId=result;st.nowPlaying.fromDiscogs=false;rr();return;
+        st.nowPlaying.videoId=result;rr();return;
       }
     }
     scheduleYtResolveRerender();
@@ -2943,16 +2939,19 @@ function createYtPlayer(){
   if(!window.YT?.Player||ytPlayer)return;
   const host=document.getElementById('yt-iframe-host');if(!host)return;
   ytTid=st.nowPlaying.trackId;ytTitle=st.nowPlaying.title||'';ytArtist=st.nowPlaying.artistName||'';
-  // Discogs-confirmed videos get our own transport bar (controls:0 hides
-  // YouTube's native one, an officially supported player param — the video
-  // itself stays visible, satisfying the API terms). Auto-matched videos
-  // keep the native YouTube controls, same split as before the React
-  // migration, just re-ported (see YtCustomControls.jsx for the UI).
-  const custom=!!st.nowPlaying.fromDiscogs;
+  // Every video played here gets our own transport bar, regardless of
+  // whether it came straight from Discogs or from our own auto-match
+  // search (originally only Discogs-confirmed videos got it, auto-matched
+  // ones kept YouTube's native controls — inconsistent and confusing in
+  // practice, confirmed live 2026-09-06: the bar would silently vanish on
+  // some tracks with no obvious reason from the user's side). controls:0
+  // hides YouTube's native bar (an officially supported player param — the
+  // video itself stays visible, satisfying the API terms); YtCustomControls
+  // replaces it unconditionally now.
   ytPlayer=new YT.Player('yt-iframe-host',{
     host:'https://www.youtube-nocookie.com',
     height:'191',width:'340',videoId:st.nowPlaying.videoId,
-    playerVars:{autoplay:1,modestbranding:1,rel:0,fs:0,...(custom?{controls:0,disablekb:1,iv_load_policy:3}:{})},
+    playerVars:{autoplay:1,modestbranding:1,rel:0,fs:0,controls:0,disablekb:1,iv_load_policy:3},
     events:{
       onReady(){},
       onStateChange(e){
@@ -3015,18 +3014,13 @@ function ytTogglePlayPause(){
 }
 function doPlay(trackId,videoId,title,artistName){
   killYt();
-  // Only a video Discogs itself already had gets the custom transport bar —
-  // ytMatches only ever contains entries the auto-match feature resolved
-  // (see resolveTrackVideoId()), so a track already in there is auto-matched
-  // even if its videoId has since been persisted onto the track too.
-  const fromDiscogs=!!videoId&&!(trackId in ytMatches);
   st.ytError=null;
-  st.nowPlaying={trackId,videoId,title,artistName,fromDiscogs};rr();
+  st.nowPlaying={trackId,videoId,title,artistName};rr();
   if(!videoId){
     const found=findTrackAndNode(trackId);
     const labelName=found?(found.node.type==='label'?found.node.name:found.track.label):null;
     const resolved=resolveTrackVideoId(trackId,title,artistName,found?.track?.duration,labelName);
-    if(resolved)st.nowPlaying.videoId=resolved; // already resolved/cached from an earlier attempt — still auto-matched, not fromDiscogs
+    if(resolved)st.nowPlaying.videoId=resolved; // already resolved/cached from an earlier attempt
   }
 }
 function stopPlay(){
@@ -3048,7 +3042,7 @@ function playHardwaxPreview(trackId,hardwaxUrl,title,artistName){
   killYt();
   st.ytError=null;
   const mp3Url=getHardwaxAudioPreview(hardwaxUrl,trackId,title);
-  st.nowPlaying={trackId,videoId:null,title,artistName,fromDiscogs:false,hardwaxMp3Url:mp3Url||null};
+  st.nowPlaying={trackId,videoId:null,title,artistName,hardwaxMp3Url:mp3Url||null};
   rr();
 }
 function syncYtPlayer(){
