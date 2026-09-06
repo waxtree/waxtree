@@ -1188,6 +1188,48 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 // reference=what's currently in the cloud) and hydrateFromCloud
 // (candidate=current local state, reference=the cloud backup) — same
 // shape check, just compared in opposite directions.
+// Investigated 2026-09-06 (user: playlist count differs between two
+// browser profiles logged into the SAME account) — confirmed via
+// user_state_history that this wasn't stale-cache-on-one-device, it was
+// active data loss: two profiles used in parallel each ran
+// pushStateToCloud's own blind whole-blob upsert, so whichever one
+// happened to push LAST simply replaced the cloud's entire playlists
+// (etc.) with its own copy, discarding anything the OTHER device added
+// in between. History showed the exact sawtooth (128 -> 78 -> 131 tracks
+// within about 20 minutes). looksLikeDataWipe above already existed for
+// this class of problem but only ever caught a field going all the way to
+// zero — a smaller-but-nonzero regression (78 replacing 128) sailed
+// straight through.
+//
+// The real fix: these specific fields are flat collections that only
+// ever GROW through normal use (add a track to a playlist, like
+// something, follow an artist) — a union merge against whatever's
+// already in the cloud is safe and cheap, and makes the push order
+// irrelevant. Deliberately NOT extended to nodes/branches (the actual
+// explored tree): that's structural, not a flat collection, edits happen
+// in place (pin/tag/move), and a naive union there could easily produce
+// a broken tree — it stays on the existing overwrite+looksLikeDataWipe
+// safety net below, unchanged. The trade-off this merge accepts: a track
+// explicitly REMOVED from a playlist (or unliked) on one device, before
+// the other device ever saw that removal, can reappear once the other
+// device's stale local copy syncs — annoying but trivially undoable,
+// unlike the silent, hard-to-notice loss this replaces.
+function mergeById(localArr,cloudArr,keyFn){
+  const out=[...(localArr||[])];
+  const seen=new Set(out.map(keyFn));
+  (cloudArr||[]).forEach(item=>{const k=keyFn(item);if(!seen.has(k)){out.push(item);seen.add(k);}});
+  return out;
+}
+function mergePlaylists(localPlaylists,cloudPlaylists){
+  const cloudById=new Map((cloudPlaylists||[]).map(p=>[p.id,p]));
+  const merged=(localPlaylists||[]).map(p=>{
+    const cp=cloudById.get(p.id);
+    cloudById.delete(p.id);
+    return cp?{...p,tracks:mergeById(p.tracks,cp.tracks,t=>t.id)}:p;
+  });
+  cloudById.forEach(cp=>merged.push(cp)); // a playlist created on the OTHER device only
+  return merged;
+}
 function looksLikeDataWipe(a,b){
   const aNodes=a.nodes?.length||0,bNodes=b.nodes?.length||0;
   const aFollows=a.follows?.length||0,bFollows=b.follows?.length||0;
@@ -1239,6 +1281,19 @@ async function pushStateToCloud(){
     // own Vercel functions, so this doesn't add to the Edge Request
     // budget that prompted capping the related-tracks retry loop.
     const{data:existing}=await sb.from('user_state').select('data').eq('user_id',wtSession.user.id).maybeSingle();
+    if(existing?.data){
+      // Union-merge against the cloud BEFORE the wipe-check below — see
+      // mergePlaylists/mergeById's own comment for why (two devices on the
+      // same account, confirmed live 2026-09-06, were silently stomping
+      // each other's playlist growth on every push).
+      const c=existing.data;
+      payload.playlists=mergePlaylists(payload.playlists,c.playlists);
+      payload.dasAscoltare=mergeById(payload.dasAscoltare,c.dasAscoltare,t=>t.id);
+      payload.follows=mergeById(payload.follows,c.follows,f=>f.discogs_id+':'+f.type);
+      payload.likes={...(c.likes||{}),...(payload.likes||{})};
+      payload.likedTracks={...(c.likedTracks||{}),...(payload.likedTracks||{})};
+      payload.listens={...(c.listens||{}),...(payload.listens||{})};
+    }
     if(existing?.data&&looksLikeDataWipe(payload,existing.data)){
       console.warn('WaxTree: refusing to sync — new state looks like an unexplained wipe compared to the existing cloud backup.');
       window.Sentry?.captureMessage instanceof Function&&Sentry.captureMessage('Blocked a suspicious cloud-state wipe',{tags:{area:'cloud-backup-guard'}});
