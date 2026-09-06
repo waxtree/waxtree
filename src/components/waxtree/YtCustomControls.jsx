@@ -6,8 +6,8 @@ const fmtTime = seconds => {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 };
 
-// Discogs-confirmed videos hide YouTube's native control bar (see
-// createYtPlayer's controls:0) and get this one instead. Position/time
+// Every playing video hides YouTube's native control bar (see
+// createYtPlayer's controls:0) and gets this one instead. Position/time
 // are written straight to refs from a self-contained poll rather than
 // through state — see ytGetSnapshot's own comment for why.
 export const YtCustomControls = ({ trackId, actions }) => {

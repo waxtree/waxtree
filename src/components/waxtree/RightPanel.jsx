@@ -53,8 +53,13 @@ export const RightPanel = ({ state, actions }) => {
               <div className="aspect-video w-full bg-black max-sm:mx-auto max-sm:w-[220px]"><div id="yt-iframe-host" className="h-full w-full" /></div>
               {/* The full-width desktop panel has room for this extra
                   scrub-bar overlay; the mobile bar is deliberately just
-                  the essentials (see this component's own top comment). */}
-              {playing.fromDiscogs && <div className="max-sm:hidden"><YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} /></div>}
+                  the essentials (see this component's own top comment).
+                  Shown for every playing video now, not just ones Discogs
+                  itself had linked — createYtPlayer hides YouTube's native
+                  controls unconditionally too (see its own comment),
+                  confirmed live 2026-09-06 the old split made the bar
+                  silently vanish on auto-matched tracks. */}
+              <div className="max-sm:hidden"><YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} /></div>
             </>
           ) : playing.hardwaxMp3Url ? (
             <>
