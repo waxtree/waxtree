@@ -12,18 +12,23 @@ const fmtTime = seconds => {
 // postMessage API offers, but a native <audio> element already fires
 // timeupdate/play/pause/loadedmetadata directly, so there's no reason to
 // re-poll something the browser is already telling us. mp3Url is the
-// already-resolved Hard Wax track url (see playHardwaxPreview) — the
-// actual bytes still only get fetched here, once this actually mounts
-// (proxied through our own edge function, see getHardwaxAudioBlobUrl's
-// own comment for why a direct src can't just point at hardwax.com).
-export const HardwaxCustomControls = ({ trackId, mp3Url, title, artistName, actions }) => {
+// already-resolved preview track url (see playAudioPreview) from whichever
+// fallback source actually matched (source: 'hardwax' | 'yoyaku' — see
+// TrackRow.jsx). Only Hard Wax needs the proxy dance: media.hardwax.com
+// blocks a direct in-browser load by Sec-Fetch-Site (see
+// getHardwaxAudioBlobUrl's own comment), so that source routes through our
+// own edge function and only gets the actual bytes once this mounts.
+// Yoyaku's own mp3s live on a public, openly cross-origin CDN (confirmed
+// live 2026-09-07 from a genuinely different origin, not just curl) —
+// playable directly, no proxy or extra round trip needed at all.
+export const AudioPreviewControls = ({ trackId, mp3Url, source, title, artistName, actions }) => {
   const audioRef = useRef(null);
   const seekRef = useRef(null);
   const curRef = useRef(null);
   const durRef = useRef(null);
   const scrubbingRef = useRef(false);
   const [playing, setPlaying] = useState(false);
-  const blobUrl = actions.getHardwaxAudioBlobUrl(mp3Url);
+  const blobUrl = source === 'yoyaku' ? mp3Url : actions.getHardwaxAudioBlobUrl(mp3Url);
 
   useEffect(() => {
     scrubbingRef.current = false;

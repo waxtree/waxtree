@@ -1,6 +1,6 @@
 import { ArrowUpRight, ChevronDown, Headphones, Heart, SkipBack, SkipForward, Tag, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { HardwaxCustomControls } from '@/components/waxtree/HardwaxCustomControls';
+import { AudioPreviewControls } from '@/components/waxtree/AudioPreviewControls';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { RelatedCard } from '@/components/waxtree/RelatedCard';
 import { YtCustomControls } from '@/components/waxtree/YtCustomControls';
@@ -61,13 +61,13 @@ export const RightPanel = ({ state, actions }) => {
                   silently vanish on auto-matched tracks. */}
               <div className="max-sm:hidden"><YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} /></div>
             </>
-          ) : playing.hardwaxMp3Url ? (
+          ) : playing.previewMp3Url ? (
             <>
               <div className="flex flex-col items-center justify-center gap-1.5 bg-secondary p-4 text-center">
                 <Headphones className="size-5 text-muted-foreground/50" />
-                <p className="text-[11px] text-muted-foreground/70">No video found — playing a preview from <span className="font-semibold">Hard Wax</span></p>
+                <p className="text-[11px] text-muted-foreground/70">No video found — playing a preview from <span className="font-semibold">{playing.previewSource === 'yoyaku' ? 'Yoyaku' : 'Hard Wax'}</span></p>
               </div>
-              <HardwaxCustomControls key={playing.trackId} trackId={playing.trackId} mp3Url={playing.hardwaxMp3Url} title={playing.title} artistName={playing.artistName} actions={actions} />
+              <AudioPreviewControls key={playing.trackId} trackId={playing.trackId} mp3Url={playing.previewMp3Url} source={playing.previewSource} title={playing.title} artistName={playing.artistName} actions={actions} />
             </>
           ) : (
             <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-secondary p-4 text-center max-sm:aspect-auto max-sm:py-3">

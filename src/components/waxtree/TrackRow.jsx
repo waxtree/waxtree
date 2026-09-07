@@ -2,7 +2,7 @@ import { ChevronDown, Headphones, Heart, Play, Tag } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 
-export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl }) => {
+export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl, releaseArtist, releaseTitle, catno }) => {
   const artist = isLabel ? track.label : (track.trackArtistName || track.releaseArtistName || node.name);
   const [helpOpen, setHelpOpen] = useState(false);
   // A raw Discogs videoId only counts here once it's known to actually
@@ -14,12 +14,20 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   const resolvedVideo = actions.getTrackVideo(track, artist, isLabel ? node.name : track.label) || null;
   // Last-resort fallback, only ever worth checking once YouTube has
   // genuinely come up empty — an actual audio clip beats no audio at all.
-  // Just decides whether the headphone button shows at all; clicking it
-  // routes through playHardwaxPreview into the real mini-player
-  // (RightPanel/HardwaxCustomControls) exactly like the main Play button
+  // Hard Wax first; Yoyaku only gets consulted (and only then does its own
+  // release-level fetch even fire — see getYoyakuRelease's own comment)
+  // when Hard Wax didn't have it either — added 2026-09-07 after the user
+  // found Yoyaku carries previews Hard Wax was missing for a specific
+  // release. Just decides whether the headphone button shows at all;
+  // clicking it routes through playAudioPreview into the real mini-player
+  // (RightPanel/AudioPreviewControls) exactly like the main Play button
   // does for a YouTube match, rather than a bare inline audio widget.
   const hardwaxPreview = !resolvedVideo ? actions.getHardwaxAudioPreview(hardwaxUrl, track.id, track.title) : null;
-  const hardwaxPlaying = state.nowPlaying?.trackId === track.id && !!state.nowPlaying?.hardwaxMp3Url;
+  const yoyakuRelease = !resolvedVideo && !hardwaxPreview ? actions.getYoyakuRelease(releaseArtist, releaseTitle, catno) : null;
+  const yoyakuPreview = yoyakuRelease ? actions.matchYoyakuTrack(yoyakuRelease.tracks, track.id, track.title) : null;
+  const preview = hardwaxPreview ? { mp3Url: hardwaxPreview, source: 'hardwax' } : yoyakuPreview ? { mp3Url: yoyakuPreview, source: 'yoyaku' } : null;
+  const previewSourceLabel = preview?.source === 'hardwax' ? 'Hard Wax' : 'Yoyaku';
+  const previewPlaying = state.nowPlaying?.trackId === track.id && !!state.nowPlaying?.previewMp3Url;
   const liked = !!state.likes[track.id];
   const queued = state.dasAscoltare.some(item => item.id === track.id);
   const trackWithArtist = { ...track, artistName: artist };
@@ -39,11 +47,11 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
           every row's Play button at the same x regardless of whether
           that particular track happens to have a Hard Wax preview. */}
       <div className="flex size-[22px] shrink-0 items-center justify-center">
-        {hardwaxPreview && (
+        {preview && (
           <button
             type="button"
-            title={hardwaxPlaying ? 'Playing Hard Wax preview' : 'No video found — play a preview from Hard Wax instead'}
-            onClick={() => actions.playHardwaxPreview(track.id, hardwaxUrl, track.title, artist)}
+            title={previewPlaying ? `Playing ${previewSourceLabel} preview` : `No video found — play a preview from ${previewSourceLabel} instead`}
+            onClick={() => actions.playAudioPreview(track.id, preview.mp3Url, track.title, artist, preview.source)}
             className="flex size-[22px] items-center justify-center rounded-full border border-primary bg-background text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
           >
             <Headphones className="size-3" />
