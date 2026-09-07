@@ -2408,9 +2408,9 @@ function findTrack(id){for(const n of st.nodes){const t=n.data?.tracks?.find(t=>
 // explicit params rather than reading the YT-specific ytTid/ytTitle/
 // ytArtist module vars directly — those still drive tryBadge() below
 // (the YouTube player's own onStateChange handler, unchanged) — but the
-// Hard Wax audio-preview fallback needs the exact same "played it,
+// Hard Wax/Yoyaku audio-preview fallback needs the exact same "played it,
 // badge it" behavior once IT actually starts too (see
-// HardwaxCustomControls' own onPlay handler), and it has no YT player /
+// AudioPreviewControls' own onPlay handler), and it has no YT player /
 // no ytTid of its own to read. Confirmed live 2026-09-04: a track played
 // only via its Hard Wax preview never got the Listened badge at all,
 // since this whole mechanism was wired to the YouTube player alone.
@@ -3162,21 +3162,24 @@ function stopPlay(){
   st.ytError=null;
   st.nowPlaying=null;rr();
 }
-// Mirrors doPlay's shape, for the Hard Wax "not on YouTube at all"
-// fallback — but unlike doPlay there's no further matching to attempt
-// here: getHardwaxAudioPreview has already resolved synchronously by the
-// time this can even be called (it's what makes TrackRow's headphone
+// Mirrors doPlay's shape, for the "not on YouTube at all" fallback —
+// Hard Wax first, Yoyaku second (see getYoyakuRelease/matchYoyakuTrack
+// below) — but unlike doPlay there's no further matching to attempt
+// here: the caller (TrackRow) has already resolved mp3Url synchronously
+// by the time this can even be called (it's what makes the headphone
 // button clickable in the first place), so this just hands the already-
-// confirmed mp3 URL to the real mini-player (RightPanel/
-// HardwaxCustomControls) instead of the small inline popover player it
-// replaced. The actual audio bytes (proxied through hardwax-audio, see
-// getHardwaxAudioBlobUrl) are still only fetched once that mini-player
-// actually mounts, same "only once truly needed" discipline as before.
-function playHardwaxPreview(trackId,hardwaxUrl,title,artistName){
+// confirmed URL and its source to the real mini-player (RightPanel/
+// AudioPreviewControls) instead of the small inline popover player it
+// originally replaced. The actual audio bytes are still only fetched
+// once that mini-player actually mounts, same "only once truly needed"
+// discipline as before — and only for Hard Wax at all (proxied through
+// hardwax-audio, see getHardwaxAudioBlobUrl): Yoyaku's own mp3s are
+// directly playable cross-origin (confirmed live 2026-09-07), so
+// `source` is what tells AudioPreviewControls which of the two to do.
+function playAudioPreview(trackId,mp3Url,title,artistName,source){
   killYt();
   st.ytError=null;
-  const mp3Url=getHardwaxAudioPreview(hardwaxUrl,trackId,title);
-  st.nowPlaying={trackId,videoId:null,title,artistName,hardwaxMp3Url:mp3Url||null};
+  st.nowPlaying={trackId,videoId:null,title,artistName,previewMp3Url:mp3Url||null,previewSource:source};
   rr();
 }
 function syncYtPlayer(){
@@ -4674,6 +4677,92 @@ function getHardwaxAudioPreview(hardwaxUrl,trackId,trackTitle){
   });
   return byTitle?byTitle.mp3:null;
 }
+
+// ── Yoyaku audio previews — second fallback, after Hard Wax ──
+// Same reasoning/shape as the Hard Wax preview above (only ever consulted
+// for a track that already failed both a real YouTube match AND a Hard
+// Wax one — see TrackRow.jsx), added 2026-09-07 after the user found
+// Yoyaku (yoyaku.io) carries previews Hard Wax didn't have for a specific
+// Steve O'Sullivan release. Unlike Hard Wax this is ONE release-level
+// fetch that already returns the full track/mp3 list (yoyaku-release
+// wraps Yoyaku's own clean REST API, no HTML scraping needed there) —
+// so there's no separate "tracks" cache/getter layer the way
+// getHardwaxTracks exists apart from getHardwaxAudioPreview; this single
+// pair (fetchYoyakuRelease/getYoyakuRelease) covers both the match AND
+// the tracklist in one round trip.
+const yoyakuInFlight=new Set();
+function yoyakuCacheKey(artist,title,catno){
+  return catno?'yy:v1:cat:'+normalizeStr(catno):'yy:v1:at:'+normalizeStr(stripDiscogsSuffix(artist||''))+'|'+normalizeStr(title||'');
+}
+async function fetchYoyakuRelease(ck,artist,title,catno){
+  yoyakuInFlight.add(ck);
+  try{
+    const titleNorm=normalizeStr(title);
+    const artistNorm=normalizeStr(stripDiscogsSuffix(artist||''));
+    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&bcOnlyArtistMatches(r.artist,artistNorm);
+    const runQuery=async query=>{
+      const{data,error}=await sb.functions.invoke('yoyaku-match',{body:{query}});
+      if(error)throw new Error(error.message);
+      return data?.results||[];
+    };
+    let hit;
+    // Same three-tier cascade as fetchHardwaxComment, minus its 4th
+    // "artist's own discography page" fallback — Yoyaku's own search
+    // already handles an artist-alone query as a normal product-grid
+    // page (see yoyaku-match's own listing-page parser), so there's no
+    // separate deep-dive endpoint worth adding on top for this
+    // fallback-of-a-fallback feature. Each tier only ever costs itself
+    // (same isolated try/catch reasoning as Hard Wax's own).
+    const tryFind=async query=>{
+      try{hit=(await runQuery(query)).find(matches);}catch{/* this tier failed — the next one still gets a chance */}
+    };
+    if(catno)await tryFind(catno);
+    if(!hit&&artist&&title)await tryFind(`${artist} ${title}`);
+    if(!hit&&artist)await tryFind(artist);
+    if(!hit){lsSet(ck,false);rr();return;} // lsGet/lsSet can't store a bare null — false means "confirmed no match", same convention as getResolvedRemixArtist
+    const{data,error}=await sb.functions.invoke('yoyaku-release',{body:{id:hit.id}});
+    if(error)throw new Error(error.message);
+    lsSet(ck,data?.resolved?{url:data.url,tracks:data.tracks||[]}:false);
+    rr();
+  }catch{
+    // Network/edge-function failure — leave uncached (not "confirmed no
+    // match") so a later render can retry instead of failing permanently.
+  }finally{
+    yoyakuInFlight.delete(ck);
+  }
+}
+// Synchronous cache lookup for use inside ReleaseCard's render — same
+// self-triggering pattern as getHardwaxComment.
+function getYoyakuRelease(artist,title,catno){
+  if(!title)return null;
+  const ck=yoyakuCacheKey(artist,title,catno);
+  const cached=lsGet(ck);
+  if(cached!==null)return cached||null; // false (confirmed no match) -> null
+  if(!yoyakuInFlight.has(ck))fetchYoyakuRelease(ck,artist,title,catno);
+  return undefined;
+}
+// Matches one specific track against an already-resolved Yoyaku release's
+// tracks array (see getYoyakuRelease) — mirrors getHardwaxAudioPreview's
+// own position-then-title cascade exactly, minus Hard Wax's own
+// various-artists "Artist: Title" prefix stripping (not a convention
+// Yoyaku's own track titles use — confirmed live 2026-09-07, its
+// fwap/v1/track response only ever prefixes the vinyl position, e.g.
+// "A1: Cold Calling Blues", already stripped out by yoyaku-release
+// itself into its own `position` field).
+function matchYoyakuTrack(tracks,trackId,trackTitle){
+  if(!tracks?.length)return null;
+  const position=trackPositionFromId(trackId);
+  const byPosition=position&&tracks.find(t=>isVinylPosition(t.position)&&t.position.toLowerCase()===position.toLowerCase());
+  if(byPosition)return byPosition.mp3;
+  const titleN=normalizeStr(trackTitle||'');
+  if(!titleN)return null;
+  const byTitle=tracks.find(t=>{
+    const tN=normalizeStr(t.title||'');
+    return bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN);
+  });
+  return byTitle?byTitle.mp3:null;
+}
+
 // Hard Wax's own CDN (media.hardwax.com) blocks a direct in-browser load of
 // the mp3 from any other site — confirmed live: the exact same URL that
 // curl fetches fine (200, access-control-allow-origin:*) comes back as a
@@ -5729,10 +5818,10 @@ export const waxTreeActions={
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
-  playAdjacentTrack,playHardwaxPreview,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
+  playAdjacentTrack,playAudioPreview,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
-  badgeListened,baseTitleKey,extractRemixCandidate,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,normalizeStr,
+  badgeListened,baseTitleKey,extractRemixCandidate,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchYoyakuTrack,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,
