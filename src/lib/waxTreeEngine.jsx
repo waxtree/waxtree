@@ -4491,7 +4491,19 @@ async function fetchHardwaxComment(ck,artist,title,catno){
   try{
     const titleNorm=normalizeStr(title);
     const artistNorm=normalizeStr(stripDiscogsSuffix(artist||''));
-    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&bcOnlyArtistMatches(r.artist,artistNorm);
+    // "Various Artists" (releaseArtist's own convention for a various-
+    // artists compilation, see ReleaseCard) is a WaxTree-internal display
+    // string with no meaning on any of these sites' own catalogs — none
+    // of them credit a release to literally "Various Artists", so an
+    // artist check against it can never pass for one, even when their
+    // own search found the exact right release by title/catalog number.
+    // Confirmed live 2026-09-07: Mosaic's "DBS Volume 2" (Sub Basics/
+    // Fletcher, one track each) showed no preview button on either
+    // track at all for exactly this reason. Skipped entirely in that one
+    // case — title (+ catalog number, tried first, effectively unique on
+    // its own) is trusted alone, same bar Hard Wax's own catalog-number
+    // tier already relies on.
+    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&(artistNorm==='various artists'||bcOnlyArtistMatches(r.artist,artistNorm));
     const runQuery=async body=>{
       const{data,error}=await sb.functions.invoke('hardwax-match',{body});
       if(error)throw new Error(error.message);
@@ -4699,7 +4711,19 @@ async function fetchYoyakuRelease(ck,artist,title,catno){
   try{
     const titleNorm=normalizeStr(title);
     const artistNorm=normalizeStr(stripDiscogsSuffix(artist||''));
-    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&bcOnlyArtistMatches(r.artist,artistNorm);
+    // "Various Artists" (releaseArtist's own convention for a various-
+    // artists compilation, see ReleaseCard) is a WaxTree-internal display
+    // string with no meaning on any of these sites' own catalogs — none
+    // of them credit a release to literally "Various Artists", so an
+    // artist check against it can never pass for one, even when their
+    // own search found the exact right release by title/catalog number.
+    // Confirmed live 2026-09-07: Mosaic's "DBS Volume 2" (Sub Basics/
+    // Fletcher, one track each) showed no preview button on either
+    // track at all for exactly this reason. Skipped entirely in that one
+    // case — title (+ catalog number, tried first, effectively unique on
+    // its own) is trusted alone, same bar Hard Wax's own catalog-number
+    // tier already relies on.
+    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&(artistNorm==='various artists'||bcOnlyArtistMatches(r.artist,artistNorm));
     const runQuery=async query=>{
       const{data,error}=await sb.functions.invoke('yoyaku-match',{body:{query}});
       if(error)throw new Error(error.message);
@@ -4792,7 +4816,19 @@ async function fetchDeejayRelease(ck,artist,title,catno){
   try{
     const titleNorm=normalizeStr(title);
     const artistNorm=normalizeStr(stripDiscogsSuffix(artist||''));
-    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&bcOnlyArtistMatches(r.artist,artistNorm);
+    // "Various Artists" (releaseArtist's own convention for a various-
+    // artists compilation, see ReleaseCard) is a WaxTree-internal display
+    // string with no meaning on any of these sites' own catalogs — none
+    // of them credit a release to literally "Various Artists", so an
+    // artist check against it can never pass for one, even when their
+    // own search found the exact right release by title/catalog number.
+    // Confirmed live 2026-09-07: Mosaic's "DBS Volume 2" (Sub Basics/
+    // Fletcher, one track each) showed no preview button on either
+    // track at all for exactly this reason. Skipped entirely in that one
+    // case — title (+ catalog number, tried first, effectively unique on
+    // its own) is trusted alone, same bar Hard Wax's own catalog-number
+    // tier already relies on.
+    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&(artistNorm==='various artists'||bcOnlyArtistMatches(r.artist,artistNorm));
     const runQuery=async query=>{
       const{data,error}=await sb.functions.invoke('deejay-match',{body:{query}});
       if(error)throw new Error(error.message);
