@@ -4763,6 +4763,81 @@ function matchYoyakuTrack(tracks,trackId,trackTitle){
   return byTitle?byTitle.mp3:null;
 }
 
+// ── Deejay.de audio previews — third fallback, after Hard Wax and Yoyaku ──
+// Same reasoning/shape again (see the Yoyaku block above), added
+// 2026-09-07 the same day after the user found deejay.de had a preview
+// for a whole release neither Hard Wax nor Yoyaku had anything for at
+// all. Same one-fetch-covers-everything shape as Yoyaku (deejay-match
+// already returns each candidate's full tracklist, mp3 urls included —
+// deejay.de's own search results page embeds it inline, confirmed live
+// 2026-09-07, so there's no separate release-detail endpoint needed
+// here either).
+const deejayInFlight=new Set();
+function deejayCacheKey(artist,title,catno){
+  return catno?'dj:v1:cat:'+normalizeStr(catno):'dj:v1:at:'+normalizeStr(stripDiscogsSuffix(artist||''))+'|'+normalizeStr(title||'');
+}
+// deejay.de renders a various-artists-per-side release's own per-track
+// title as "Artist - Title" (e.g. "Fletcher - Sludge") even when that
+// artist is already one of the release's own credited artists — same
+// shape as Hard Wax's "Artist: Title" various-artists convention (see
+// stripHardwaxArtistPrefix), just hyphen-separated instead of colon-
+// separated. Split on the raw string's first " - ", before normalizeStr,
+// same reasoning as the Hard Wax version.
+function stripDeejayArtistPrefix(rawTitle){
+  const i=(rawTitle||'').indexOf(' - ');
+  return i===-1?null:rawTitle.slice(i+3);
+}
+async function fetchDeejayRelease(ck,artist,title,catno){
+  deejayInFlight.add(ck);
+  try{
+    const titleNorm=normalizeStr(title);
+    const artistNorm=normalizeStr(stripDiscogsSuffix(artist||''));
+    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&bcOnlyArtistMatches(r.artist,artistNorm);
+    const runQuery=async query=>{
+      const{data,error}=await sb.functions.invoke('deejay-match',{body:{query}});
+      if(error)throw new Error(error.message);
+      return data?.results||[];
+    };
+    let hit;
+    const tryFind=async query=>{
+      try{hit=(await runQuery(query)).find(matches);}catch{/* this tier failed — the next one still gets a chance */}
+    };
+    if(catno)await tryFind(catno);
+    if(!hit&&artist&&title)await tryFind(`${artist} ${title}`);
+    if(!hit&&artist)await tryFind(artist);
+    lsSet(ck,hit?{url:hit.url,tracks:hit.tracks||[]}:false); // lsGet/lsSet can't store a bare null — false means "confirmed no match", same convention as getResolvedRemixArtist
+    rr();
+  }catch{
+    // Network/edge-function failure — leave uncached (not "confirmed no
+    // match") so a later render can retry instead of failing permanently.
+  }finally{
+    deejayInFlight.delete(ck);
+  }
+}
+function getDeejayRelease(artist,title,catno){
+  if(!title)return null;
+  const ck=deejayCacheKey(artist,title,catno);
+  const cached=lsGet(ck);
+  if(cached!==null)return cached||null; // false (confirmed no match) -> null
+  if(!deejayInFlight.has(ck))fetchDeejayRelease(ck,artist,title,catno);
+  return undefined;
+}
+function matchDeejayTrack(tracks,trackId,trackTitle){
+  if(!tracks?.length)return null;
+  const position=trackPositionFromId(trackId);
+  const byPosition=position&&tracks.find(t=>isVinylPosition(t.position)&&t.position.toLowerCase()===position.toLowerCase());
+  if(byPosition)return byPosition.mp3;
+  const titleN=normalizeStr(trackTitle||'');
+  if(!titleN)return null;
+  const byTitle=tracks.find(t=>{
+    const tN=normalizeStr(t.title||'');
+    if(bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN))return true;
+    const strippedN=normalizeStr(stripDeejayArtistPrefix(t.title||'')||'');
+    return strippedN&&(bcOnlyMatches(titleN,strippedN)||isTitlePrefixMatch(titleN,strippedN)||isTitlePrefixMatch(strippedN,titleN));
+  });
+  return byTitle?byTitle.mp3:null;
+}
+
 // Hard Wax's own CDN (media.hardwax.com) blocks a direct in-browser load of
 // the mp3 from any other site — confirmed live: the exact same URL that
 // curl fetches fine (200, access-control-allow-origin:*) comes back as a
@@ -5821,7 +5896,7 @@ export const waxTreeActions={
   playAdjacentTrack,playAudioPreview,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
-  badgeListened,baseTitleKey,extractRemixCandidate,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchYoyakuTrack,normalizeStr,
+  badgeListened,baseTitleKey,extractRemixCandidate,getDeejayRelease,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchDeejayTrack,matchYoyakuTrack,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,
