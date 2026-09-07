@@ -14,19 +14,23 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   const resolvedVideo = actions.getTrackVideo(track, artist, isLabel ? node.name : track.label) || null;
   // Last-resort fallback, only ever worth checking once YouTube has
   // genuinely come up empty — an actual audio clip beats no audio at all.
-  // Hard Wax first; Yoyaku only gets consulted (and only then does its own
-  // release-level fetch even fire — see getYoyakuRelease's own comment)
-  // when Hard Wax didn't have it either — added 2026-09-07 after the user
-  // found Yoyaku carries previews Hard Wax was missing for a specific
-  // release. Just decides whether the headphone button shows at all;
-  // clicking it routes through playAudioPreview into the real mini-player
-  // (RightPanel/AudioPreviewControls) exactly like the main Play button
-  // does for a YouTube match, rather than a bare inline audio widget.
+  // Hard Wax first, then Yoyaku, then Deejay.de — each next source only
+  // gets consulted (and only then does its own release-level fetch even
+  // fire — see getYoyakuRelease/getDeejayRelease's own comments) once
+  // every source before it came up empty, added 2026-09-07 after the
+  // user found each of Yoyaku and (the same day) Deejay.de carrying
+  // previews the source(s) before it didn't have. Just decides whether
+  // the headphone button shows at all; clicking it routes through
+  // playAudioPreview into the real mini-player (RightPanel/
+  // AudioPreviewControls) exactly like the main Play button does for a
+  // YouTube match, rather than a bare inline audio widget.
   const hardwaxPreview = !resolvedVideo ? actions.getHardwaxAudioPreview(hardwaxUrl, track.id, track.title) : null;
   const yoyakuRelease = !resolvedVideo && !hardwaxPreview ? actions.getYoyakuRelease(releaseArtist, releaseTitle, catno) : null;
   const yoyakuPreview = yoyakuRelease ? actions.matchYoyakuTrack(yoyakuRelease.tracks, track.id, track.title) : null;
-  const preview = hardwaxPreview ? { mp3Url: hardwaxPreview, source: 'hardwax' } : yoyakuPreview ? { mp3Url: yoyakuPreview, source: 'yoyaku' } : null;
-  const previewSourceLabel = preview?.source === 'hardwax' ? 'Hard Wax' : 'Yoyaku';
+  const deejayRelease = !resolvedVideo && !hardwaxPreview && !yoyakuPreview ? actions.getDeejayRelease(releaseArtist, releaseTitle, catno) : null;
+  const deejayPreview = deejayRelease ? actions.matchDeejayTrack(deejayRelease.tracks, track.id, track.title) : null;
+  const preview = hardwaxPreview ? { mp3Url: hardwaxPreview, source: 'hardwax' } : yoyakuPreview ? { mp3Url: yoyakuPreview, source: 'yoyaku' } : deejayPreview ? { mp3Url: deejayPreview, source: 'deejay' } : null;
+  const previewSourceLabel = preview?.source === 'hardwax' ? 'Hard Wax' : preview?.source === 'yoyaku' ? 'Yoyaku' : 'Deejay.de';
   const previewPlaying = state.nowPlaying?.trackId === track.id && !!state.nowPlaying?.previewMp3Url;
   const liked = !!state.likes[track.id];
   const queued = state.dasAscoltare.some(item => item.id === track.id);
