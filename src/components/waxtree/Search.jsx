@@ -49,18 +49,27 @@ export const Search = ({ state, actions }) => {
         <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[300] max-h-[280px] overflow-y-auto rounded-xl border border-border bg-card shadow-[var(--wt-shadow)]">
           {state.loading && <div className="px-3.5 py-3 text-[13px] italic text-muted-foreground">Searching...</div>}
           {state.err && <div className="px-3.5 py-3 text-[13px] italic text-accent">{state.err}</div>}
-          {!state.loading && state.results.slice(0, 14).map(result => (
-            <button key={`${result.type}-${result.id}`} type="button" onClick={() => actions.pickResult(result)} className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left hover:bg-muted">
-              <div className="relative size-9 shrink-0">
-                {result.thumb ? <img className="size-9 rounded-[7px] border border-border object-cover" src={result.thumb} alt="" /> : <div className="flex size-9 items-center justify-center rounded-[7px] border border-border bg-secondary">{result.type === 'label' ? '🎵' : result.type === 'release' ? '💿' : '🎤'}</div>}
-                <span className="absolute -bottom-1 -right-1 rounded bg-primary px-1 text-[8px] font-bold text-primary-foreground">{result.type === 'release' ? 'Rel.' : result.type === 'label' ? 'Label' : 'Art.'}</span>
-              </div>
-              <span>
-                <span className="block text-[13px] font-medium">{result.title}</span>
-                <span className="block text-[11px] text-muted-foreground">{result.type === 'release' ? [result.label, result.year].filter(Boolean).join(' · ') || 'Release' : result.type === 'label' ? 'Label' : 'Artist'}</span>
-              </span>
-            </button>
-          ))}
+          {!state.loading && state.results.slice(0, 14).map(result => {
+            const isBc = result.type === 'bcArtist' || result.type === 'bcLabel';
+            const badge = result.type === 'release' ? 'Rel.' : result.type === 'label' || result.type === 'bcLabel' ? 'Label' : 'Art.';
+            const subtitle = result.type === 'release'
+              ? [result.label, result.year].filter(Boolean).join(' · ') || 'Release'
+              : isBc
+                ? ['Bandcamp', result.location, result.genre].filter(Boolean).join(' · ')
+                : result.type === 'label' ? 'Label' : 'Artist';
+            return (
+              <button key={`${result.type}-${result.id}`} type="button" onClick={() => actions.pickResult(result)} className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left hover:bg-muted">
+                <div className="relative size-9 shrink-0">
+                  {result.thumb ? <img className="size-9 rounded-[7px] border border-border object-cover" src={result.thumb} alt="" /> : <div className="flex size-9 items-center justify-center rounded-[7px] border border-border bg-secondary">{result.type === 'label' || result.type === 'bcLabel' ? '🎵' : result.type === 'release' ? '💿' : '🎤'}</div>}
+                  <span className={`absolute -bottom-1 -right-1 rounded px-1 text-[8px] font-bold ${isBc ? 'bg-foreground text-background' : 'bg-primary text-primary-foreground'}`}>{badge}</span>
+                </div>
+                <span className="min-w-0">
+                  <span className="block truncate text-[13px] font-medium">{result.title}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">{subtitle}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
       {isTextMode && !showResults && state.chips.length > 0 && (

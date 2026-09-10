@@ -9,23 +9,27 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   const playlistRef = useDismiss(playlistOpen, () => setPlaylistOpen(false));
   const helpRef = useDismiss(helpOpen, () => setHelpOpen(false));
 
-  // Playback source resolution, in priority order (user 2026-09-10):
+  // Playback source resolution, in priority order:
+  //   0. Bandcamp — the artist's OWN official full-length stream, present
+  //      only on bcArtist/bcLabel nodes and the "only on Bandcamp"
+  //      supplement (track.bcMp3). Beats everything else outright — it IS
+  //      the canonical audio for that track.
   //   1. Deezer  — a 30-second preview in our own <audio> player, zero
-  //      YouTube quota. Tried FIRST, even when a Discogs video exists —
-  //      that video is offered as a "full track" shortcut in the
-  //      mini-player instead (see RightPanel), not the primary playback.
+  //      YouTube quota. Tried before YouTube, even when a Discogs video
+  //      exists — that video becomes a "full track" shortcut in the
+  //      mini-player (see RightPanel) instead of the primary playback.
   //   2. YouTube — the Discogs-embedded videoId, else an API search, but
   //      only once Deezer has come up empty (a Deezer hit spends no
   //      search quota at all — getTrackVideo isn't even called).
   //   3. Record stores — Hard Wax → Yoyaku → Deejay.de → Clone.nl, each
   //      only consulted once every source before it also came up empty.
-  const deezerRelease = actions.getDeezerRelease(releaseArtist, releaseTitle, catno, releaseLabel);
+  const bcMp3 = track.bcMp3 || null;
+  const deezerRelease = !bcMp3 ? actions.getDeezerRelease(releaseArtist, releaseTitle, catno, releaseLabel) : null;
   const deezerId = deezerRelease ? actions.matchDeezerTrack(deezerRelease.tracks, track.title, trackIndex, releaseTrackCount) : null;
-  // While Deezer is still resolving (undefined), OR once it has matched,
-  // nothing below runs — no YouTube search fires until Deezer has
-  // definitively come up empty (deezerRelease === null, or a resolved
-  // release this track just isn't on).
-  const deezerBlocks = deezerRelease === undefined || !!deezerId;
+  // With a Bandcamp stream in hand, OR while Deezer is still resolving,
+  // OR once Deezer has matched — nothing below runs. No YouTube search
+  // fires until every earlier source has definitively come up empty.
+  const deezerBlocks = !!bcMp3 || deezerRelease === undefined || !!deezerId;
 
   // A raw Discogs videoId only counts once it's known to actually play —
   // one that already failed (embedding disabled, or gone) is exactly as
@@ -48,6 +52,7 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   // rides through to AudioPreviewControls (it decides proxy vs direct
   // playback) but is never surfaced to the user.
   const audioPreview =
+    bcMp3 ? { kind: 'store', mp3Url: bcMp3, source: 'bandcamp' } :
     deezerId ? { kind: 'deezer', deezerId } :
     hardwaxPreview ? { kind: 'store', mp3Url: hardwaxPreview, source: 'hardwax' } :
     yoyakuPreview ? { kind: 'store', mp3Url: yoyakuPreview, source: 'yoyaku' } :
