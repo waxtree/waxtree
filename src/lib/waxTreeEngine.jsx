@@ -1757,8 +1757,14 @@ function playAdjacentTrack(dir){
   // Same Deezer-first order as the track rows (see TrackRow) — but a peek
   // at the already-resolved cache only, no fetch of its own from here; if
   // this release wasn't matched on Deezer while its card rendered, fall
-  // straight through to the video.
-  const dz=peekDeezerMatch(next.releaseArtistName||next.trackArtistName||artist,next.album||next.title,next.catno,next.id,next.title);
+  // straight through to the video. matchDeezerTrack needs this track's
+  // position within its OWN release (not the flat node list) — the flat
+  // list keeps a release's tracks contiguous and in order, so filtering
+  // by the Discogs release-id prefix recovers both.
+  const relId=String(next.id).split('-')[0];
+  const relTracks=tracks.filter(t=>String(t.id).split('-')[0]===relId);
+  const relIndex=relTracks.findIndex(t=>t.id===next.id);
+  const dz=peekDeezerMatch(next.releaseArtistName||next.trackArtistName||artist,next.album||next.title,next.catno,next.title,relIndex,relTracks.length);
   if(dz){playDeezerPreview(next.id,dz,next.title,artist);return;}
   doPlay(next.id,next.videoId,next.title,artist);
 }
@@ -5078,25 +5084,39 @@ function getDeezerRelease(artist,title,catno,label){
   return undefined;
 }
 // Returns the numeric Deezer track id (NOT a url — those expire, see
-// getDeezerPreviewUrl), or null. Deezer numbers tracks sequentially, not
-// by vinyl side, so this always title-matches (same as Deejay/Clone).
-function matchDeezerTrack(tracks,trackId,trackTitle){
+// getDeezerPreviewUrl), or null. `index`/`count` are this track's own
+// position in the Discogs tracklist and that tracklist's length.
+//
+// Positional alignment is the PRIMARY strategy: a Deezer album is stored
+// in tracklist order, so when both sides agree on the track count,
+// tracks[index] is unambiguously this track. It's also the only thing
+// that tells near-identical titles apart — "The Forget" / "The Regret"
+// (a fuzzy matcher pairs them on the shared word "the"), or
+// "Blinded By The Exit Light" vs its "(Tension Mix)" (one is a prefix of
+// the other) — both of which used to resolve BOTH rows to whichever
+// track came first (user report 2026-09-10). A UNIQUE fuzzy title match
+// is the fallback for when the counts differ (a bonus track, a single,
+// a compilation cut); a non-unique one is worse than none.
+function matchDeezerTrack(tracks,trackTitle,index,count){
   if(!tracks?.length)return null;
+  if(count===tracks.length&&index>=0&&tracks[index])return tracks[index].id;
   const titleN=normalizeStr(trackTitle||'');
   if(!titleN)return null;
-  const hit=tracks.find(t=>{
+  const exact=tracks.filter(t=>normalizeStr(t.title||'')===titleN);
+  if(exact.length===1)return exact[0].id;
+  const fuzzy=tracks.filter(t=>{
     const tN=normalizeStr(t.title||'');
     return bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN);
   });
-  return hit?hit.id:null;
+  return fuzzy.length===1?fuzzy[0].id:null;
 }
 // Non-triggering peek at an already-resolved Deezer release — for
 // playAdjacentTrack, which shouldn't kick off a fetch of its own.
-function peekDeezerMatch(artist,title,catno,trackId,trackTitle){
+function peekDeezerMatch(artist,title,catno,trackTitle,index,count){
   if(!title)return null;
   const cached=lsGet(deezerCacheKey(artist,title,catno));
   if(!cached||cached.no||!cached.tracks)return null;
-  return matchDeezerTrack(cached.tracks,trackId,trackTitle);
+  return matchDeezerTrack(cached.tracks,trackTitle,index,count);
 }
 // deezer track id -> fresh 30s preview url. Kept in memory only (the urls
 // expire ~15 min after issue, so localStorage would just serve stale

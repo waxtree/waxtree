@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { useDismiss } from '@/lib/useDismiss';
 
-export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl, releaseArtist, releaseTitle, releaseLabel, catno }) => {
+export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl, releaseArtist, releaseTitle, releaseLabel, catno, trackIndex, releaseTrackCount }) => {
   const artist = isLabel ? track.label : (track.trackArtistName || track.releaseArtistName || node.name);
   const [helpOpen, setHelpOpen] = useState(false);
   const playlistRef = useDismiss(playlistOpen, () => setPlaylistOpen(false));
@@ -20,7 +20,7 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   //   3. Record stores — Hard Wax → Yoyaku → Deejay.de → Clone.nl, each
   //      only consulted once every source before it also came up empty.
   const deezerRelease = actions.getDeezerRelease(releaseArtist, releaseTitle, catno, releaseLabel);
-  const deezerId = deezerRelease ? actions.matchDeezerTrack(deezerRelease.tracks, track.id, track.title) : null;
+  const deezerId = deezerRelease ? actions.matchDeezerTrack(deezerRelease.tracks, track.title, trackIndex, releaseTrackCount) : null;
   // While Deezer is still resolving (undefined), OR once it has matched,
   // nothing below runs — no YouTube search fires until Deezer has
   // definitively come up empty (deezerRelease === null, or a resolved
