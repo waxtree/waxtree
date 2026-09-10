@@ -2503,21 +2503,34 @@ let ytMatches=loadYtMatches();
 // hack precisely because "false" never expired), and ~46% of the SHARED
 // verdicts table was measured (2026-08-31) to be no-matches frozen under
 // whatever criteria happened to be live when each was first tried. A "no"
-// older than this TTL simply stops blocking: the next render re-runs the
-// exact same strict verification, so this can never introduce a wrong
-// match — it only changes when a re-attempt is allowed. Confirmed matches
-// stay permanent as before (a found video doesn't need re-verifying).
+// from a PREVIOUS Pacific day (see pacificDayKey — the same boundary
+// YouTube's own daily quota actually resets on, not an arbitrary rolling
+// window) simply stops blocking: the next render re-runs the exact same
+// strict verification, so this can never introduce a wrong match — it
+// only changes when a re-attempt is allowed. Confirmed matches stay
+// permanent as before (a found video doesn't need re-verifying).
 // Timestamps live in their own small map (trackId → epoch ms) because
 // ytMatches' value shape (videoId string | false) is read for truthiness
 // all over — a legacy false entry with no timestamp here reads as ts 0,
-// i.e. long expired, which is exactly the retro-unblock the old frozen
-// verdicts need.
-const YT_NO_MATCH_TTL_MS=30*24*3600000;
+// i.e. a day that's always in the past, which is exactly the retro-unblock
+// the old frozen verdicts need.
+//
+// Was a flat 30-day TTL until 2026-09-09 — confirmed live via
+// yt_match_corrections (see project_waxtree_yt_match_training memory):
+// several tracks whose auto-match had genuinely been blocked by a
+// quota-exhausted day stayed stuck behind that same 30-day wall long
+// after the NEXT day's quota reset would have found them fine, only
+// escaped early because the user manually submitted the real link.
+// Retrying on the very next Pacific day (matching Google's own reset)
+// instead of waiting a month directly targets that — the daily 95-call
+// search budget (see trySpendYtCalls) is what actually keeps this from
+// burning quota re-checking the same stale misses constantly, same as
+// it already does for brand-new tracks.
 function loadYtNoMatchAt(){try{const r=localStorage.getItem('wt-yt-nomatch-at');return r?JSON.parse(r):{};}catch{return{};}}
 function saveYtNoMatchAt(){try{localStorage.setItem('wt-yt-nomatch-at',JSON.stringify(ytNoMatchAt));}catch{}}
 let ytNoMatchAt=loadYtNoMatchAt();
 function isExpiredNoMatch(trackId){
-  return ytMatches[trackId]===false&&Date.now()-(ytNoMatchAt[trackId]||0)>YT_NO_MATCH_TTL_MS;
+  return ytMatches[trackId]===false&&pacificDayKey(new Date(ytNoMatchAt[trackId]||0))!==pacificDayKey();
 }
 // One-time remediation, bumped each time something that affects a "no
 // match" verdict changes (budget-exhaustion bug, then matching-criteria
@@ -2570,8 +2583,8 @@ const ytAutoMatchInFlight=new Set();
 const YT_SEARCH_CALLS_DAILY_LIMIT=95; // real cap is 100 — small headroom only, raised from 80 (2026-08-31) since the old margin was getting hit during normal active testing/browsing, not just edge cases
 const YT_GENERAL_CALLS_DAILY_LIMIT=9000; // real cap is 10,000 — rarely the binding constraint
 const YT_DAILY_BUDGET_KEY='wt-yt-daily-budget';
-function pacificDayKey(){
-  return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+function pacificDayKey(date){
+  return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(date||new Date());
 }
 // kind: 'search' (1 search.list + 1 videos.list = 2 general calls, 1 of
 // which counts against the tight search-specific quota) or 'channel' (3
@@ -2679,11 +2692,11 @@ async function fetchSharedYtMatches(trackIds){
     if(error||!data)return;
     let changed=false;
     data.forEach(row=>{
-      // A shared no-match past its TTL is deliberately NOT imported —
-      // leaving the track absent from ytMatches is what lets
+      // A shared no-match from a PREVIOUS Pacific day is deliberately NOT
+      // imported — leaving the track absent from ytMatches is what lets
       // resolveTrackVideoId give it a real fresh attempt (and the new
       // verdict then refreshes/upgrades the shared row via pushSharedYtMatch).
-      if(!row.video_id&&Date.now()-new Date(row.matched_at).getTime()>YT_NO_MATCH_TTL_MS)return;
+      if(!row.video_id&&pacificDayKey(new Date(row.matched_at))!==pacificDayKey())return;
       if(!(row.track_id in ytMatches)){
         ytMatches[row.track_id]=row.video_id||false;
         if(!row.video_id)ytNoMatchAt[row.track_id]=new Date(row.matched_at).getTime();
@@ -2698,12 +2711,13 @@ function pushSharedYtMatch(trackId,videoId){
     .then(({error})=>{if(error)console.warn('WaxTree: could not publish shared YouTube match:',error);});
   // ignoreDuplicates above means an EXISTING row is never touched — right
   // for the first-writer-wins race between two auto-matches, but a re-check
-  // of an expired no-match (see YT_NO_MATCH_TTL_MS) has to be able to land
-  // its outcome on the old row too: a found video upgrades it, another
-  // "no" refreshes matched_at so the shared retry clock actually restarts
+  // of an expired (previous-day) no-match has to be able to land its
+  // outcome on the old row too: a found video upgrades it, another "no"
+  // refreshes matched_at so the shared retry clock actually restarts
   // (otherwise every user re-burns quota on the same dead track every
-  // render past the TTL). The .is('video_id',null) filter is what keeps
-  // this from ever downgrading someone else's real confirmed match.
+  // render past the day boundary). The .is('video_id',null) filter is
+  // what keeps this from ever downgrading someone else's real confirmed
+  // match.
   sb.from('yt_video_matches').update({video_id:videoId||null,matched_at:new Date().toISOString()}).eq('track_id',trackId).is('video_id',null)
     .then(({error})=>{if(error)console.warn('WaxTree: could not refresh shared YouTube no-match:',error);});
 }
@@ -2820,7 +2834,7 @@ function matchYtCandidate(r,titleN,artistN,labelN,expectedSec){
 }
 function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
   // A videoId is permanent; a false (confirmed no match) only holds until
-  // its TTL runs out (see YT_NO_MATCH_TTL_MS), then it's dropped so the
+  // the next Pacific day (see isExpiredNoMatch), then it's dropped so the
   // full strict resolution below gets a genuine fresh attempt.
   if(trackId in ytMatches){
     if(!isExpiredNoMatch(trackId))return ytMatches[trackId];
@@ -2844,11 +2858,12 @@ function resolveTrackVideoId(trackId,title,artistName,duration,labelName){
         ytSharedChecked.add(trackId);
         try{
           const{data}=await sb.from('yt_video_matches').select('video_id,matched_at').eq('track_id',trackId).maybeSingle();
-          // Same TTL rule as fetchSharedYtMatches: an expired shared
-          // no-match is treated as never checked, so the real attempt
-          // below runs — and publishToShared stays true, so its outcome
-          // refreshes/upgrades the stale row for everyone else too.
-          if(data&&(data.video_id||Date.now()-new Date(data.matched_at).getTime()<=YT_NO_MATCH_TTL_MS)){result=data.video_id||null;publishToShared=false;}
+          // Same day-boundary rule as fetchSharedYtMatches: an expired
+          // (previous-day) shared no-match is treated as never checked,
+          // so the real attempt below runs — and publishToShared stays
+          // true, so its outcome refreshes/upgrades the stale row for
+          // everyone else too.
+          if(data&&(data.video_id||pacificDayKey(new Date(data.matched_at))===pacificDayKey())){result=data.video_id||null;publishToShared=false;}
         }catch{}
       }
 
@@ -4483,6 +4498,25 @@ const hardwaxInFlight=new Set();
 // next normal render, same as any other miss; no boot-time sweep needed
 // since this cache (unlike node.data) is only ever read from inside
 // ReleaseCard's own render.
+// A confirmed "no match" from Hard Wax/Yoyaku/Deejay.de is only trusted
+// for the rest of the LOCAL calendar day it was found on, not lsGet's own
+// blanket 30-day cache TTL — same "retry sooner than a month" reasoning
+// as YouTube's own isExpiredNoMatch/pacificDayKey (added the same day,
+// 2026-09-09, after several genuinely-findable YouTube matches sat stuck
+// behind that same 30-day wall — see project_waxtree_yt_match_training
+// memory), just keyed to the browser's own local day rather than
+// Pacific: these three have no external quota that resets specifically
+// at Pacific midnight the way YouTube's search.list does, so the
+// day boundary that actually matches "the user came back tomorrow" is
+// their own. A bare legacy `false` (written before this shape existed)
+// is treated as already-stale — one fresh recheck, then it re-caches in
+// the new {no,day} shape like any other negative from here on.
+function localDayKey(date){
+  return new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(date||new Date());
+}
+function isStaleFallbackNoMatch(cached){
+  return cached===false||(cached&&cached.no===true&&cached.day!==localDayKey());
+}
 function hardwaxCacheKey(artist,title,catno){
   return catno?'hw:v2:cat:'+normalizeStr(catno):'hw:v2:at:'+normalizeStr(stripDiscogsSuffix(artist||''))+'|'+normalizeStr(title||'');
 }
@@ -4551,7 +4585,7 @@ async function fetchHardwaxComment(ck,artist,title,catno){
       hit=actResults.find(matches);
     }
     const result=hit?{comment:hit.comment,url:hit.url}:null;
-    lsSet(ck,result===null?false:result); // lsGet/lsSet can't store a bare null — false means "confirmed no match", same convention as getResolvedRemixArtist
+    lsSet(ck,result===null?{no:true,day:localDayKey()}:result); // {no,day}: retried fresh the next local day, not lsGet's own 30-day TTL — see isStaleFallbackNoMatch
     rr();
   }catch{
     // Network/edge-function failure — leave uncached (not "confirmed no
@@ -4568,7 +4602,7 @@ function getHardwaxComment(artist,title,catno){
   if(!title)return null;
   const ck=hardwaxCacheKey(artist,title,catno);
   const cached=lsGet(ck);
-  if(cached!==null)return cached||null; // false (confirmed no match) -> null
+  if(cached!==null&&!isStaleFallbackNoMatch(cached))return cached.no?null:cached; // {no,day} from today -> null; a real {comment,url} -> itself
   if(!hardwaxInFlight.has(ck))fetchHardwaxComment(ck,artist,title,catno);
   return undefined;
 }
@@ -4743,10 +4777,10 @@ async function fetchYoyakuRelease(ck,artist,title,catno){
     if(catno)await tryFind(catno);
     if(!hit&&artist&&title)await tryFind(`${artist} ${title}`);
     if(!hit&&artist)await tryFind(artist);
-    if(!hit){lsSet(ck,false);rr();return;} // lsGet/lsSet can't store a bare null — false means "confirmed no match", same convention as getResolvedRemixArtist
+    if(!hit){lsSet(ck,{no:true,day:localDayKey()});rr();return;} // {no,day}: retried fresh the next local day, not lsGet's own 30-day TTL — see isStaleFallbackNoMatch
     const{data,error}=await sb.functions.invoke('yoyaku-release',{body:{id:hit.id}});
     if(error)throw new Error(error.message);
-    lsSet(ck,data?.resolved?{url:data.url,tracks:data.tracks||[]}:false);
+    lsSet(ck,data?.resolved?{url:data.url,tracks:data.tracks||[]}:{no:true,day:localDayKey()});
     rr();
   }catch{
     // Network/edge-function failure — leave uncached (not "confirmed no
@@ -4761,7 +4795,7 @@ function getYoyakuRelease(artist,title,catno){
   if(!title)return null;
   const ck=yoyakuCacheKey(artist,title,catno);
   const cached=lsGet(ck);
-  if(cached!==null)return cached||null; // false (confirmed no match) -> null
+  if(cached!==null&&!isStaleFallbackNoMatch(cached))return cached.no?null:cached; // {no,day} from today -> null; a real {url,tracks} -> itself
   if(!yoyakuInFlight.has(ck))fetchYoyakuRelease(ck,artist,title,catno);
   return undefined;
 }
@@ -4841,7 +4875,7 @@ async function fetchDeejayRelease(ck,artist,title,catno){
     if(catno)await tryFind(catno);
     if(!hit&&artist&&title)await tryFind(`${artist} ${title}`);
     if(!hit&&artist)await tryFind(artist);
-    lsSet(ck,hit?{url:hit.url,tracks:hit.tracks||[]}:false); // lsGet/lsSet can't store a bare null — false means "confirmed no match", same convention as getResolvedRemixArtist
+    lsSet(ck,hit?{url:hit.url,tracks:hit.tracks||[]}:{no:true,day:localDayKey()}); // {no,day}: retried fresh the next local day, not lsGet's own 30-day TTL — see isStaleFallbackNoMatch
     rr();
   }catch{
     // Network/edge-function failure — leave uncached (not "confirmed no
@@ -4854,7 +4888,7 @@ function getDeejayRelease(artist,title,catno){
   if(!title)return null;
   const ck=deejayCacheKey(artist,title,catno);
   const cached=lsGet(ck);
-  if(cached!==null)return cached||null; // false (confirmed no match) -> null
+  if(cached!==null&&!isStaleFallbackNoMatch(cached))return cached.no?null:cached; // {no,day} from today -> null; a real {url,tracks} -> itself
   if(!deejayInFlight.has(ck))fetchDeejayRelease(ck,artist,title,catno);
   return undefined;
 }
@@ -5903,8 +5937,8 @@ function getGenreYearReleaseDetail(releaseId){return genreYearReleaseCache[relea
 function isNoEmbedVideo(videoId){return!!videoId&&(noEmbedIds.has(videoId)||invalidYtIds.has(videoId));}
 function getTrackVideo(track,artistName,nodeName){
   if(track.videoId&&!isNoEmbedVideo(track.videoId))return track.videoId;
-  // An expired no-match falls through to resolveTrackVideoId, which drops
-  // the stale verdict and re-attempts (see YT_NO_MATCH_TTL_MS).
+  // An expired (previous-day) no-match falls through to resolveTrackVideoId,
+  // which drops the stale verdict and re-attempts (see isExpiredNoMatch).
   if(track.id in ytMatches&&!isExpiredNoMatch(track.id))return ytMatches[track.id]||null;
   return resolveTrackVideoId(track.id,track.title,artistName,track.duration,nodeName);
 }
