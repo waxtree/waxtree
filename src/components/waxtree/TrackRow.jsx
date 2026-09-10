@@ -3,43 +3,67 @@ import { useEffect, useState } from 'react';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { useDismiss } from '@/lib/useDismiss';
 
-export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl, releaseArtist, releaseTitle, releaseLabel, catno }) => {
+export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl, releaseArtist, releaseTitle, releaseLabel, catno, trackIndex, releaseTrackCount }) => {
   const artist = isLabel ? track.label : (track.trackArtistName || track.releaseArtistName || node.name);
   const [helpOpen, setHelpOpen] = useState(false);
   const playlistRef = useDismiss(playlistOpen, () => setPlaylistOpen(false));
   const helpRef = useDismiss(helpOpen, () => setHelpOpen(false));
-  // A raw Discogs videoId only counts here once it's known to actually
-  // play — one that already failed (embedding disabled, or gone) is
-  // exactly as "no video" as never having had one, and getTrackVideo
-  // itself now falls through to the auto-match search for either case.
-  const videoId = track.videoId && !actions.isNoEmbedVideo(track.videoId) ? track.videoId : null;
-  useEffect(() => { if (!videoId) actions.getTrackVideo(track, artist, isLabel ? node.name : track.label); }, [actions, artist, isLabel, node.name, track, videoId]);
-  const resolvedVideo = actions.getTrackVideo(track, artist, isLabel ? node.name : track.label) || null;
-  // Last-resort fallback, only ever worth checking once YouTube has
-  // genuinely come up empty — an actual audio clip beats no audio at all.
-  // Hard Wax first, then Yoyaku, then Deejay.de, then Clone.nl — each next
-  // source only gets consulted (and only then does its own release-level
-  // fetch even fire — see getYoyakuRelease/getDeejayRelease/
-  // getCloneRelease's own comments) once every source before it came up
-  // empty, added 2026-09-07 (Yoyaku + Deejay.de) and 2026-09-10 (Clone.nl)
-  // after the user found each carrying previews the source(s) before it
-  // didn't have. Just decides whether the headphone button shows at all;
-  // clicking it routes through playAudioPreview into the real mini-player
-  // (RightPanel/AudioPreviewControls) exactly like the main Play button
-  // does for a YouTube match, rather than a bare inline audio widget.
-  const hardwaxPreview = !resolvedVideo ? actions.getHardwaxAudioPreview(hardwaxUrl, track.id, track.title) : null;
-  const yoyakuRelease = !resolvedVideo && !hardwaxPreview ? actions.getYoyakuRelease(releaseArtist, releaseTitle, catno) : null;
+
+  // Playback source resolution, in priority order (user 2026-09-10):
+  //   1. Deezer  — a 30-second preview in our own <audio> player, zero
+  //      YouTube quota. Tried FIRST, even when a Discogs video exists —
+  //      that video is offered as a "full track" shortcut in the
+  //      mini-player instead (see RightPanel), not the primary playback.
+  //   2. YouTube — the Discogs-embedded videoId, else an API search, but
+  //      only once Deezer has come up empty (a Deezer hit spends no
+  //      search quota at all — getTrackVideo isn't even called).
+  //   3. Record stores — Hard Wax → Yoyaku → Deejay.de → Clone.nl, each
+  //      only consulted once every source before it also came up empty.
+  const deezerRelease = actions.getDeezerRelease(releaseArtist, releaseTitle, catno, releaseLabel);
+  const deezerId = deezerRelease ? actions.matchDeezerTrack(deezerRelease.tracks, track.title, trackIndex, releaseTrackCount) : null;
+  // While Deezer is still resolving (undefined), OR once it has matched,
+  // nothing below runs — no YouTube search fires until Deezer has
+  // definitively come up empty (deezerRelease === null, or a resolved
+  // release this track just isn't on).
+  const deezerBlocks = deezerRelease === undefined || !!deezerId;
+
+  // A raw Discogs videoId only counts once it's known to actually play —
+  // one that already failed (embedding disabled, or gone) is exactly as
+  // "no video" as never having had one.
+  const discogsVideo = track.videoId && !actions.isNoEmbedVideo(track.videoId) ? track.videoId : null;
+  useEffect(() => {
+    if (!deezerBlocks && !discogsVideo) actions.getTrackVideo(track, artist, isLabel ? node.name : track.label);
+  }, [actions, artist, deezerBlocks, discogsVideo, isLabel, node.name, track]);
+  const resolvedVideo = deezerBlocks ? null : (actions.getTrackVideo(track, artist, isLabel ? node.name : track.label) || null);
+
+  const hardwaxPreview = !deezerBlocks && !resolvedVideo ? actions.getHardwaxAudioPreview(hardwaxUrl, track.id, track.title) : null;
+  const yoyakuRelease = !deezerBlocks && !resolvedVideo && !hardwaxPreview ? actions.getYoyakuRelease(releaseArtist, releaseTitle, catno) : null;
   const yoyakuPreview = yoyakuRelease ? actions.matchYoyakuTrack(yoyakuRelease.tracks, track.id, track.title) : null;
-  const deejayRelease = !resolvedVideo && !hardwaxPreview && !yoyakuPreview ? actions.getDeejayRelease(releaseArtist, releaseTitle, catno) : null;
+  const deejayRelease = !deezerBlocks && !resolvedVideo && !hardwaxPreview && !yoyakuPreview ? actions.getDeejayRelease(releaseArtist, releaseTitle, catno) : null;
   const deejayPreview = deejayRelease ? actions.matchDeejayTrack(deejayRelease.tracks, track.id, track.title) : null;
-  const cloneRelease = !resolvedVideo && !hardwaxPreview && !yoyakuPreview && !deejayPreview ? actions.getCloneRelease(releaseArtist, releaseTitle, catno, releaseLabel) : null;
+  const cloneRelease = !deezerBlocks && !resolvedVideo && !hardwaxPreview && !yoyakuPreview && !deejayPreview ? actions.getCloneRelease(releaseArtist, releaseTitle, catno, releaseLabel) : null;
   const clonePreview = cloneRelease ? actions.matchCloneTrack(cloneRelease.tracks, track.id, track.title) : null;
-  // `source` still rides along for playAudioPreview → AudioPreviewControls
-  // (which store the mp3 is from decides proxy vs direct playback), but it
-  // is deliberately never surfaced to the user anywhere in the UI — the
-  // preview just reads as "a preview", not "a preview from <shop>".
-  const preview = hardwaxPreview ? { mp3Url: hardwaxPreview, source: 'hardwax' } : yoyakuPreview ? { mp3Url: yoyakuPreview, source: 'yoyaku' } : deejayPreview ? { mp3Url: deejayPreview, source: 'deejay' } : clonePreview ? { mp3Url: clonePreview, source: 'clone' } : null;
-  const previewPlaying = state.nowPlaying?.trackId === track.id && !!state.nowPlaying?.previewMp3Url;
+
+  // What the single Play button does. `source` on a store preview still
+  // rides through to AudioPreviewControls (it decides proxy vs direct
+  // playback) but is never surfaced to the user.
+  const audioPreview =
+    deezerId ? { kind: 'deezer', deezerId } :
+    hardwaxPreview ? { kind: 'store', mp3Url: hardwaxPreview, source: 'hardwax' } :
+    yoyakuPreview ? { kind: 'store', mp3Url: yoyakuPreview, source: 'yoyaku' } :
+    deejayPreview ? { kind: 'store', mp3Url: deejayPreview, source: 'deejay' } :
+    clonePreview ? { kind: 'store', mp3Url: clonePreview, source: 'clone' } : null;
+  const playBest = () => {
+    if (audioPreview?.kind === 'deezer') { actions.playDeezerPreview(track.id, audioPreview.deezerId, track.title, artist); return; }
+    if (audioPreview?.kind === 'store') { actions.playAudioPreview(track.id, audioPreview.mp3Url, track.title, artist, audioPreview.source); return; }
+    // No preview source (yet) — play a video if one is known, else this
+    // routes into the "search on YouTube" flow. `discogsVideo` covers the
+    // brief window where Deezer is still resolving on a track that also
+    // has an embedded video.
+    actions.doPlay(track.id, resolvedVideo || discogsVideo, track.title, artist);
+  };
+  const hasPlayable = !!resolvedVideo || !!audioPreview || !!discogsVideo;
+
   const liked = !!state.likes[track.id];
   const queued = state.dasAscoltare.some(item => item.id === track.id);
   const trackWithArtist = { ...track, artistName: artist };
@@ -50,38 +74,21 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
 
   return (
     <div className="relative flex min-w-0 items-center gap-[6px]">
-      {/* Always reserves this 22px slot, filled or not — otherwise a
-          headphone button only on SOME rows shifts just those rows'
-          Play button (and everything after it, title included) out of
-          vertical alignment with every other track's, in this release
-          and every other one, since nothing else in the row has a fixed
-          position to anchor against. Reserving it unconditionally keeps
-          every row's Play button at the same x regardless of whether
-          that particular track happens to have a Hard Wax preview. */}
-      <div className="flex size-[22px] shrink-0 items-center justify-center">
-        {preview && (
-          <button
-            type="button"
-            title={previewPlaying ? 'Playing preview' : 'No video found — play a preview instead'}
-            onClick={() => actions.playAudioPreview(track.id, preview.mp3Url, track.title, artist, preview.source)}
-            className="flex size-[22px] items-center justify-center rounded-full border border-primary bg-background text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-          >
-            <Headphones className="size-3" />
-          </button>
-        )}
-      </div>
-      {/* Explicit border on both — without it, the "off" state (no
-          resolved video, text-muted-foreground on the same bg-background
-          as every other state) reads as visually absent next to the
-          headphone button beside it, since only the icon's own fill
-          color was ever what carried "on" vs "off" here. */}
+      {/* One Play button per row. It plays the best available source
+          (Deezer preview → Discogs/YouTube video → store preview); the
+          icon is a headphone when that turns out to be a short audio
+          preview, a triangle for a full video or the "search YouTube"
+          fallback. Explicit border on both states — the "off" state
+          (text-muted-foreground on the same bg as every other state)
+          reads as visually absent otherwise, since only the icon fill
+          ever carried on/off here. */}
       <button
         type="button"
-        onClick={() => actions.doPlay(track.id, resolvedVideo, track.title, artist)}
-        title={resolvedVideo ? 'Play' : 'Search on YouTube'}
-        className={`flex size-[22px] shrink-0 items-center justify-center rounded-full border bg-background transition-colors hover:border-primary hover:bg-primary hover:text-primary-foreground ${resolvedVideo ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}
+        onClick={playBest}
+        title={audioPreview ? 'Play preview' : (resolvedVideo || discogsVideo) ? 'Play' : 'Search on YouTube'}
+        className={`flex size-[22px] shrink-0 items-center justify-center rounded-full border bg-background transition-colors hover:border-primary hover:bg-primary hover:text-primary-foreground ${hasPlayable ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}
       >
-        <Play className="size-2.5 fill-current" />
+        {audioPreview ? <Headphones className="size-3" /> : <Play className="size-2.5 fill-current" />}
       </button>
       <span className="min-w-0 flex-[0_1_auto] truncate text-[12.5px] font-medium">{track.title}</span>
       {featuring.length > 0 && <span className="max-w-28 shrink-0 truncate text-[11px] italic text-muted-foreground/70">with {featuring.join(', ')}</span>}
@@ -95,7 +102,7 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
         </button>
         {playlistOpen && <PlaylistDrop track={trackWithArtist} node={node} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}
       </div>
-      {!resolvedVideo && (
+      {!resolvedVideo && !discogsVideo && (
         <div ref={helpRef} className="relative shrink-0">
           <button type="button" title="No video found" onClick={() => setHelpOpen(value => !value)} className="flex shrink-0 items-center rounded-[5px] border border-border px-[5px] py-px text-muted-foreground/70 transition-colors hover:border-primary hover:text-primary">
             <ChevronDown className="size-3" />
