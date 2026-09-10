@@ -1754,6 +1754,12 @@ function playAdjacentTrack(dir){
   if(!next)return;
   const node=getNode(st.selectedId);
   const artist=node?.type==='label'?next.artistName||'':node?.name||'';
+  // Same Deezer-first order as the track rows (see TrackRow) — but a peek
+  // at the already-resolved cache only, no fetch of its own from here; if
+  // this release wasn't matched on Deezer while its card rendered, fall
+  // straight through to the video.
+  const dz=peekDeezerMatch(next.releaseArtistName||next.trackArtistName||artist,next.album||next.title,next.catno,next.id,next.title);
+  if(dz){playDeezerPreview(next.id,dz,next.title,artist);return;}
   doPlay(next.id,next.videoId,next.title,artist);
 }
 
@@ -5000,6 +5006,135 @@ function matchCloneTrack(tracks,trackId,trackTitle){
   return byTitle?byTitle.mp3:null;
 }
 
+// ── Deezer previews — the FIRST rung, ahead of YouTube ──────────────────
+// On the user's call 2026-09-10: a 30-second Deezer preview playing in our
+// own <audio> mini-player beats an embedded YouTube frame for how the
+// tool reads, and it spends zero YouTube search quota. So every track is
+// matched on Deezer first — even one that already has a Discogs-embedded
+// videoId (that video is offered as a "full track" shortcut in the
+// mini-player instead, see RightPanel). Only when Deezer has nothing does
+// TrackRow fall through to the Discogs videoId → a YouTube search → the
+// record-store previews, exactly as before.
+//
+// Deezer's public API needs no key/auth but sends no CORS headers, so it
+// goes through edge functions like the rest. Two-step release resolution
+// (deezer-match on search/album, then deezer-album for the tracklist —
+// album search is far more reliable than Deezer's finicky advanced
+// track-search), then a THIRD call at playback time: the per-track
+// `preview` mp3 urls are signed and expire ~15 min after issue, so only
+// the numeric Deezer track id is cached and deezer-track fetches a fresh
+// url the moment the user presses play (see getDeezerPreviewUrl).
+const deezerInFlight=new Set();
+function deezerCacheKey(artist,title,catno){
+  return catno?'dz:v1:cat:'+normalizeStr(catno):'dz:v1:at:'+normalizeStr(stripDiscogsSuffix(artist||''))+'|'+normalizeStr(title||'');
+}
+async function fetchDeezerRelease(ck,artist,title,catno,label){
+  deezerInFlight.add(ck);
+  try{
+    const titleNorm=normalizeStr(title);
+    const artistNorm=normalizeStr(stripDiscogsSuffix(artist||''));
+    // Same predicate as the other release matchers — fuzzy title AND
+    // (various-artists, see the Hard Wax block's note, OR fuzzy artist).
+    const matches=r=>bcOnlyMatches(titleNorm,normalizeStr(r.title))&&(artistNorm==='various artists'||bcOnlyArtistMatches(r.artist,artistNorm));
+    const runQuery=async query=>{
+      const{data,error}=await sb.functions.invoke('deezer-match',{body:{query}});
+      if(error)throw new Error(error.message);
+      return data?.results||[];
+    };
+    let hit,errored=false;
+    const tryFind=async query=>{
+      try{hit=(await runQuery(query)).find(matches);}catch{errored=true;/* this tier failed — the next one still gets a chance */}
+    };
+    if(artist&&title)await tryFind(`${artist} ${title}`);
+    if(!hit&&title)await tryFind(title);
+    if(!hit&&label&&title)await tryFind(`${label} ${title}`);
+    if(!hit){
+      // Only a clean "Deezer returned results, none matched" is a real no-
+      // match worth caching. A thrown tier (a 429 under a burst of
+      // per-release lookups, a transient blip) leaves it uncached so the
+      // next render retries — otherwise one rate-limited moment poisons
+      // every track on the release for the rest of the day.
+      if(!errored)lsSet(ck,{no:true,day:localDayKey()}); // {no,day}: retried the next local day, not lsGet's 30-day TTL — see isStaleFallbackNoMatch
+      rr();return;
+    }
+    const{data,error}=await sb.functions.invoke('deezer-album',{body:{id:hit.id}});
+    if(error)throw new Error(error.message);
+    lsSet(ck,data?.resolved?{url:data.url,tracks:data.tracks||[]}:{no:true,day:localDayKey()});
+    rr();
+  }catch{
+    // Network/edge-function failure — leave uncached so a later render retries.
+  }finally{
+    deezerInFlight.delete(ck);
+  }
+}
+// Synchronous cache lookup for use inside ReleaseCard's render — same
+// self-triggering pattern as getYoyakuRelease/getCloneRelease.
+function getDeezerRelease(artist,title,catno,label){
+  if(!title)return null;
+  const ck=deezerCacheKey(artist,title,catno);
+  const cached=lsGet(ck);
+  if(cached!==null&&!isStaleFallbackNoMatch(cached))return cached.no?null:cached; // {no,day} today -> null; {url,tracks} -> itself
+  if(!deezerInFlight.has(ck))fetchDeezerRelease(ck,artist,title,catno,label);
+  return undefined;
+}
+// Returns the numeric Deezer track id (NOT a url — those expire, see
+// getDeezerPreviewUrl), or null. Deezer numbers tracks sequentially, not
+// by vinyl side, so this always title-matches (same as Deejay/Clone).
+function matchDeezerTrack(tracks,trackId,trackTitle){
+  if(!tracks?.length)return null;
+  const titleN=normalizeStr(trackTitle||'');
+  if(!titleN)return null;
+  const hit=tracks.find(t=>{
+    const tN=normalizeStr(t.title||'');
+    return bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN);
+  });
+  return hit?hit.id:null;
+}
+// Non-triggering peek at an already-resolved Deezer release — for
+// playAdjacentTrack, which shouldn't kick off a fetch of its own.
+function peekDeezerMatch(artist,title,catno,trackId,trackTitle){
+  if(!title)return null;
+  const cached=lsGet(deezerCacheKey(artist,title,catno));
+  if(!cached||cached.no||!cached.tracks)return null;
+  return matchDeezerTrack(cached.tracks,trackId,trackTitle);
+}
+// deezer track id -> fresh 30s preview url. Kept in memory only (the urls
+// expire ~15 min after issue, so localStorage would just serve stale
+// ones); re-fetched on demand past ~12 min. undefined while a fetch is in
+// flight, a url string on success, null on a confirmed failure.
+const deezerPreviewCache=new Map(); // id -> {url:string|null, t:number}
+const deezerPreviewInFlight=new Set();
+const DEEZER_PREVIEW_TTL_MS=12*60*1000;
+async function fetchDeezerPreviewUrl(id){
+  deezerPreviewInFlight.add(id);
+  try{
+    const{data,error}=await sb.functions.invoke('deezer-track',{body:{id}});
+    if(error)throw new Error(error.message);
+    deezerPreviewCache.set(id,{url:data?.preview||null,t:Date.now()});
+  }catch{
+    deezerPreviewCache.set(id,{url:null,t:Date.now()});
+  }finally{
+    deezerPreviewInFlight.delete(id);
+    rr();
+  }
+}
+function getDeezerPreviewUrl(id){
+  if(id==null)return null;
+  const hit=deezerPreviewCache.get(id);
+  if(hit&&Date.now()-hit.t<DEEZER_PREVIEW_TTL_MS)return hit.url;
+  if(!deezerPreviewInFlight.has(id))fetchDeezerPreviewUrl(id);
+  return undefined;
+}
+// Mirrors playAudioPreview, but the mp3 url isn't known yet at click time
+// (see getDeezerPreviewUrl) — AudioPreviewControls resolves it once it
+// mounts, keyed off nowPlaying.deezerId.
+function playDeezerPreview(trackId,deezerId,title,artistName){
+  killYt();
+  st.ytError=null;
+  st.nowPlaying={trackId,videoId:null,title,artistName,previewMp3Url:null,previewSource:'deezer',deezerId};
+  rr();
+}
+
 // Hard Wax's own CDN (media.hardwax.com) blocks a direct in-browser load of
 // the mp3 from any other site — confirmed live: the exact same URL that
 // curl fetches fine (200, access-control-allow-origin:*) comes back as a
@@ -6113,7 +6248,7 @@ export const waxTreeActions={
   playAdjacentTrack,playAudioPreview,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
-  badgeListened,baseTitleKey,extractRemixCandidate,getCloneRelease,getDeejayRelease,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchCloneTrack,matchDeejayTrack,matchYoyakuTrack,normalizeStr,
+  badgeListened,baseTitleKey,extractRemixCandidate,getCloneRelease,getDeejayRelease,getDeezerRelease,getDeezerPreviewUrl,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchCloneTrack,matchDeejayTrack,matchDeezerTrack,matchYoyakuTrack,normalizeStr,playDeezerPreview,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,

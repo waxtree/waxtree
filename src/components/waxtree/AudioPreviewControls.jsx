@@ -11,26 +11,28 @@ const fmtTime = seconds => {
 // YtCustomControls polls because getCurrentTime() is genuinely all the YT
 // postMessage API offers, but a native <audio> element already fires
 // timeupdate/play/pause/loadedmetadata directly, so there's no reason to
-// re-poll something the browser is already telling us. mp3Url is the
-// already-resolved preview track url (see playAudioPreview) from whichever
-// fallback source actually matched (source: 'hardwax' | 'yoyaku' | 'deejay'
-// | 'clone' — see TrackRow.jsx). Only Hard Wax needs the proxy dance:
-// media.hardwax.com blocks a direct in-browser load by Sec-Fetch-Site (see
-// getHardwaxAudioBlobUrl's own comment), so that source routes through our
-// own edge function and only gets the actual bytes once this mounts.
-// Yoyaku's, Deejay.de's and Clone.nl's own mp3s all live on hosts that
-// serve them fine to a cross-origin <audio> element (each confirmed live
-// from a genuinely different origin, not just curl — 2026-09-07 for the
-// first two, 2026-09-10 for Clone.nl) — playable directly, no proxy or
-// extra round trip needed at all.
-export const AudioPreviewControls = ({ trackId, mp3Url, source, title, artistName, actions }) => {
+// re-poll something the browser is already telling us. Source of the clip
+// (source: 'deezer' | 'hardwax' | 'yoyaku' | 'deejay' | 'clone' — see
+// TrackRow.jsx). Two of the five resolve their url HERE rather than
+// arriving with a ready mp3Url:
+//   - 'hardwax': media.hardwax.com blocks a direct in-browser load by
+//     Sec-Fetch-Site (see getHardwaxAudioBlobUrl), so it's proxied
+//     through our edge function and only pulls the bytes once this mounts.
+//   - 'deezer': the 30s preview url is signed and expires ~15 min after
+//     issue, so only the numeric track id was cached — getDeezerPreviewUrl
+//     fetches a fresh url now, at mount, keyed off nowPlaying.deezerId.
+// Yoyaku's, Deejay.de's and Clone.nl's mp3s (and Deezer's, once resolved)
+// all serve cross-origin fine to an <audio> element — playable directly.
+export const AudioPreviewControls = ({ trackId, mp3Url, source, deezerId, title, artistName, actions }) => {
   const audioRef = useRef(null);
   const seekRef = useRef(null);
   const curRef = useRef(null);
   const durRef = useRef(null);
   const scrubbingRef = useRef(false);
   const [playing, setPlaying] = useState(false);
-  const blobUrl = source === 'hardwax' ? actions.getHardwaxAudioBlobUrl(mp3Url) : mp3Url;
+  const blobUrl = source === 'hardwax' ? actions.getHardwaxAudioBlobUrl(mp3Url)
+    : source === 'deezer' ? actions.getDeezerPreviewUrl(deezerId)
+    : mp3Url;
 
   useEffect(() => {
     scrubbingRef.current = false;

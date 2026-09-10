@@ -1,4 +1,4 @@
-import { ArrowUpRight, ChevronDown, Headphones, Heart, SkipBack, SkipForward, Tag, X } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, Headphones, Heart, Play, SkipBack, SkipForward, Tag, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { AudioPreviewControls } from '@/components/waxtree/AudioPreviewControls';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
@@ -24,6 +24,11 @@ export const RightPanel = ({ state, actions }) => {
   const fallbackUrl = playing ? `https://www.youtube.com/results?search_query=${encodeURIComponent(`${playing.artistName} ${playing.title}`)}` : '';
   const openTarget = target => { actions.addNode(target.type, target.id, target.name, null, state.activeBranchId); setExploreOpen(false); };
   const liked = playing && !!state.likes[playing.trackId];
+  // When a Deezer 30s preview is playing but the track DOES have a
+  // Discogs-embedded YouTube video, offer it as a one-tap "full track"
+  // switch — costs zero API calls (the id was already in the Discogs
+  // data), see the priority note in TrackRow.
+  const previewVideoId = playing?.previewSource === 'deezer' && fullTrack?.videoId && !actions.isNoEmbedVideo(fullTrack.videoId) ? fullTrack.videoId : null;
   // Below sm this whole panel used to just be display:none (max-[900px]:
   // hidden, same rule that also drops it for tablet widths) — including
   // the div the YouTube player itself attaches to (#yt-iframe-host,
@@ -64,13 +69,18 @@ export const RightPanel = ({ state, actions }) => {
                   silently vanish on auto-matched tracks. */}
               <div className="max-sm:hidden"><YtCustomControls key={playing.trackId} trackId={playing.trackId} actions={actions} /></div>
             </>
-          ) : playing.previewMp3Url ? (
+          ) : playing.previewSource ? (
             <>
               <div className="flex flex-col items-center justify-center gap-1.5 bg-secondary p-4 text-center">
                 <Headphones className="size-5 text-muted-foreground/50" />
-                <p className="text-[11px] text-muted-foreground/70">No video found — playing a preview</p>
+                <p className="text-[11px] text-muted-foreground/70">{previewVideoId ? 'Playing a 30-second preview' : 'No video found — playing a preview'}</p>
+                {previewVideoId && (
+                  <button type="button" onClick={() => actions.doPlay(playing.trackId, previewVideoId, playing.title, playing.artistName)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline">
+                    <Play className="size-2.5 fill-current" /> Play full track
+                  </button>
+                )}
               </div>
-              <AudioPreviewControls key={playing.trackId} trackId={playing.trackId} mp3Url={playing.previewMp3Url} source={playing.previewSource} title={playing.title} artistName={playing.artistName} actions={actions} />
+              <AudioPreviewControls key={playing.trackId} trackId={playing.trackId} mp3Url={playing.previewMp3Url} source={playing.previewSource} deezerId={playing.deezerId} title={playing.title} artistName={playing.artistName} actions={actions} />
             </>
           ) : (
             <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-secondary p-4 text-center max-sm:aspect-auto max-sm:py-3">
