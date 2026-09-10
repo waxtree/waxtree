@@ -5577,6 +5577,17 @@ function getAvatarUrl(){return localStorage.getItem(AVATAR_KEY)||null;}
 // whichever copy already has the most complete data and fills in gaps from
 // the rest, recording their ids as altIds so inDiscogsCollection()/
 // inDiscogsWantlist() still catch a match on ANY variant afterwards.
+
+// Does this track already resolve to a playable YouTube video by any of
+// its ids? Either an embeddable Discogs-supplied videoId, or a positive
+// hit in the shared/auto-match cache (ytMatches is keyed by track.id, so
+// which variant row survives the merges below is what decides whether the
+// Play button lights up). A cached `false` — a no-match verdict — is not
+// playable.
+function trackHasPlayableVideo(t){
+  if(t.videoId&&!isNoEmbedVideo(t.videoId))return true;
+  return[t.id,...(t.altIds||[])].some(id=>typeof ytMatches[id]==='string'&&!!ytMatches[id]);
+}
 function mergeReleaseVariantTracks(tracks){
   const byTitle=new Map();
   tracks.forEach(t=>{
@@ -5587,16 +5598,59 @@ function mergeReleaseVariantTracks(tracks){
     // resetting to empty; a track with only one title-row on this page
     // still needs its own altIds checked, not just merged duplicates.
     if(!existing){byTitle.set(key,{...t,altIds:[...(t.altIds||[])]});return;}
-    if(t.id!==existing.id)existing.altIds.push(t.id);
-    if(t.altIds?.length)existing.altIds.push(...t.altIds);
-    if(!existing.duration&&t.duration)existing.duration=t.duration;
-    if(!existing.videoId&&t.videoId)existing.videoId=t.videoId;
-    if(!existing.bpm&&t.bpm)existing.bpm=t.bpm;
-    if(!existing.thumbUrl&&t.thumbUrl)existing.thumbUrl=t.thumbUrl;
-    if(t.hasVinyl)existing.hasVinyl=true;
-    if(t.digital)existing.digital=true;
+    // Keep the variant that actually plays as the surviving row —
+    // getTrackVideo()/doPlay key the auto-match cache on the row's own
+    // track.id, so folding a resolving twin into a non-resolving
+    // first-seen one would leave a dead Play button even though a sibling
+    // Discogs listing of the identical release plays fine (user report
+    // 2026-09-10: Makam's "Reconstructed Disk 1" typo vs "...Disc I").
+    const winner=(!trackHasPlayableVideo(existing)&&trackHasPlayableVideo(t))?{...t,altIds:[...(t.altIds||[])]}:existing;
+    const loser=winner===existing?t:existing;
+    if(loser.id!==winner.id)winner.altIds.push(loser.id);
+    if(loser.altIds?.length)winner.altIds.push(...loser.altIds);
+    if(!winner.duration&&loser.duration)winner.duration=loser.duration;
+    if(!winner.videoId&&loser.videoId)winner.videoId=loser.videoId;
+    if(!winner.bpm&&loser.bpm)winner.bpm=loser.bpm;
+    if(!winner.thumbUrl&&loser.thumbUrl)winner.thumbUrl=loser.thumbUrl;
+    if(loser.hasVinyl)winner.hasVinyl=true;
+    if(loser.digital)winner.digital=true;
+    byTitle.set(key,winner);
   });
   return[...byTitle.values()];
+}
+// Second-level dedup: two Discogs listings of the SAME record that a
+// human titled inconsistently ("Reconstructed Disk 1" vs "...Disc I",
+// user report 2026-09-10) key differently in groupTracksByRelease and
+// render as two near-identical cards — one often missing Play buttons the
+// other has. When two groups carry the exact same set of normalized
+// track titles they ARE the same release: fold them into one, orienting
+// the merge so the group with more already-playable tracks keeps its
+// title/key, and mergeReleaseVariantTracks() then unions the videos per
+// title. Guarded to >=2 distinct titles so unrelated white-label singles
+// that happen to share one generic title ("Untitled", "A1") never
+// collapse; both groups always come from the same artist/label node here
+// (groupTracksByRelease is called per node), which is the real safety
+// net against merging genuinely different records.
+function releaseGroupTitleSig(g){
+  return[...new Set(g.tracks.map(t=>normalizeStr(t.title)).filter(Boolean))].sort();
+}
+function mergeReleaseGroupsByTracklist(groups){
+  if(groups.length<2)return groups;
+  const out=[];
+  for(const g of groups){
+    const sig=releaseGroupTitleSig(g);
+    const twin=sig.length>=2?out.find(o=>o._sig.length===sig.length&&o._sig.every((s,i)=>s===sig[i])):null;
+    if(!twin){out.push({...g,_sig:sig});continue;}
+    const gPlayable=g.tracks.filter(trackHasPlayableVideo).length;
+    const twinPlayable=twin.tracks.filter(trackHasPlayableVideo).length;
+    // The more-complete group stays the base — its key and its first
+    // track (hence the displayed release title) win. Ties keep the
+    // first-seen group as base.
+    if(gPlayable>twinPlayable){twin.key=g.key;twin.tracks=[...g.tracks,...twin.tracks];}
+    else twin.tracks=[...twin.tracks,...g.tracks];
+  }
+  out.forEach(o=>{delete o._sig;});
+  return out;
 }
 // A node counts as fully explored when nothing is left in its normal
 // browsable list — mirrors exactly what buildNodePanel already computes to
@@ -5644,8 +5698,9 @@ function groupTracksByRelease(tracks){
     if(!g){g={key,tracks:[]};byKey.set(key,g);groups.push(g);}
     g.tracks.push(t);
   }
-  groups.forEach(g=>{g.tracks=mergeReleaseVariantTracks(g.tracks);});
-  return groups;
+  const deduped=mergeReleaseGroupsByTracklist(groups);
+  deduped.forEach(g=>{g.tracks=mergeReleaseVariantTracks(g.tracks);});
+  return deduped;
 }
 
 sb.auth.onAuthStateChange((event)=>{
