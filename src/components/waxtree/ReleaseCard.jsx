@@ -2,6 +2,7 @@ import { ArrowUpRight, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 import { StoreButton } from '@/components/waxtree/StoreButton';
 import { TrackRow } from '@/components/waxtree/TrackRow';
+import { useDismiss } from '@/lib/useDismiss';
 
 const actionButton = 'inline-flex shrink-0 items-center whitespace-nowrap rounded-[20px] border-[1.5px] px-[11px] py-[5px] text-[11px] text-muted-foreground transition-colors';
 const exploreHighlighted = 'border-primary/50 bg-primary/[.08] font-bold text-primary hover:border-primary hover:bg-primary/[.18]';
@@ -12,6 +13,7 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
   const first = tracks[0];
   const [openPlaylist, setOpenPlaylist] = useState(null);
   const [exploreOpen, setExploreOpen] = useState(false);
+  const exploreRef = useDismiss(exploreOpen, () => setExploreOpen(false));
   const allPlayed = tracks.length > 0 && tracks.every(track => state.listens[track.id]?.badged);
   const listened = state.alreadyListened.includes(group.key);
   let primaryArtist = null;
@@ -126,7 +128,7 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
           <div className="flex flex-wrap items-center justify-end gap-[5px] max-sm:justify-start">
             {explore.length === 1 && <button type="button" onClick={() => exploreItem(explore[0])} className={`${actionButton} ${explore[0].highlighted ? exploreHighlighted : exploreDefault}`}>{explore[0].label} ›</button>}
             {explore.length > 1 && (
-              <div className="relative shrink-0">
+              <div ref={exploreRef} className="relative shrink-0">
                 <button type="button" onClick={() => setExploreOpen(value => !value)} className={`${actionButton} gap-1 ${highlightedExplore ? exploreHighlighted : exploreDefault}`}>
                   Explore {exploreOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
                 </button>

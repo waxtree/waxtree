@@ -4,6 +4,7 @@ import { AudioPreviewControls } from '@/components/waxtree/AudioPreviewControls'
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { RelatedCard } from '@/components/waxtree/RelatedCard';
 import { YtCustomControls } from '@/components/waxtree/YtCustomControls';
+import { useDismiss } from '@/lib/useDismiss';
 import { buttonSecondary } from '@/lib/waxtreeUi';
 
 export const RightPanel = ({ state, actions }) => {
@@ -11,6 +12,8 @@ export const RightPanel = ({ state, actions }) => {
   const playing = state.nowPlaying;
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
+  const playlistRef = useDismiss(playlistOpen, () => setPlaylistOpen(false));
+  const exploreRef = useDismiss(exploreOpen, () => setExploreOpen(false));
   useEffect(() => { if (playing) actions.syncYtPlayer(); }, [actions, playing?.trackId, playing?.videoId]);
   useEffect(() => { setPlaylistOpen(false); setExploreOpen(false); }, [playing?.trackId]);
   const fullTrack = playing ? actions.findTrack(playing.trackId) : null;
@@ -81,7 +84,7 @@ export const RightPanel = ({ state, actions }) => {
             <button type="button" title="Like" onClick={() => actions.toggleLike(playing.trackId)} className={`flex items-center justify-center ${liked ? 'text-primary' : 'text-muted-foreground/70'}`}>
               <Heart className={`size-4 ${liked ? 'fill-current' : ''}`} />
             </button>
-            <div className="relative flex items-center">
+            <div ref={playlistRef} className="relative flex items-center">
               <button type="button" title="Add to playlist" onClick={() => setPlaylistOpen(value => !value)} className={`flex items-center justify-center ${queued ? 'text-primary' : 'text-muted-foreground/70'}`}>
                 <Tag className="size-4" />
               </button>
@@ -89,7 +92,7 @@ export const RightPanel = ({ state, actions }) => {
             </div>
             {exploreTargets.length === 1 && <button type="button" onClick={() => openTarget(exploreTargets[0])} className="ml-auto text-[10px] text-primary">Explore</button>}
             {exploreTargets.length > 1 && (
-              <div className="relative ml-auto">
+              <div ref={exploreRef} className="relative ml-auto">
                 <button type="button" onClick={() => setExploreOpen(value => !value)} className="flex items-center gap-0.5 text-[10px] text-primary">Explore <ChevronDown className="size-3" /></button>
                 {exploreOpen && (
                   <div className="absolute right-0 top-full z-50 min-w-[170px] overflow-hidden rounded-lg border border-border bg-card shadow-[var(--wt-shadow)]">

@@ -1,10 +1,13 @@
 import { ChevronDown, Headphones, Heart, Play, Tag } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
+import { useDismiss } from '@/lib/useDismiss';
 
 export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl, releaseArtist, releaseTitle, catno }) => {
   const artist = isLabel ? track.label : (track.trackArtistName || track.releaseArtistName || node.name);
   const [helpOpen, setHelpOpen] = useState(false);
+  const playlistRef = useDismiss(playlistOpen, () => setPlaylistOpen(false));
+  const helpRef = useDismiss(helpOpen, () => setHelpOpen(false));
   // A raw Discogs videoId only counts here once it's known to actually
   // play — one that already failed (embedding disabled, or gone) is
   // exactly as "no video" as never having had one, and getTrackVideo
@@ -81,14 +84,14 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
       <button type="button" title="Like" onClick={() => actions.toggleLike(track.id)} className={`flex shrink-0 items-center justify-center transition hover:scale-[1.15] ${liked ? 'text-primary' : 'text-muted-foreground/70'}`}>
         <Heart className={`size-3.5 ${liked ? 'fill-current' : ''}`} />
       </button>
-      <div className="relative flex shrink-0 items-center">
+      <div ref={playlistRef} className="relative flex shrink-0 items-center">
         <button type="button" title="Add to playlist" onClick={() => setPlaylistOpen(!playlistOpen)} className={`flex items-center justify-center transition hover:scale-[1.1] ${queued ? 'text-primary' : 'text-muted-foreground/70'}`}>
           <Tag className="size-3.5" />
         </button>
         {playlistOpen && <PlaylistDrop track={trackWithArtist} node={node} state={state} actions={actions} onClose={() => setPlaylistOpen(false)} />}
       </div>
       {!resolvedVideo && (
-        <div className="relative shrink-0">
+        <div ref={helpRef} className="relative shrink-0">
           <button type="button" title="No video found" onClick={() => setHelpOpen(value => !value)} className="flex shrink-0 items-center rounded-[5px] border border-border px-[5px] py-px text-muted-foreground/70 transition-colors hover:border-primary hover:text-primary">
             <ChevronDown className="size-3" />
           </button>
