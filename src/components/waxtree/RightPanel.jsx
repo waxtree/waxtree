@@ -68,7 +68,7 @@ export const RightPanel = ({ state, actions }) => {
             <>
               <div className="flex flex-col items-center justify-center gap-1.5 bg-secondary p-4 text-center">
                 <Headphones className="size-5 text-muted-foreground/50" />
-                <p className="text-[11px] text-muted-foreground/70">No video found — playing a preview from <span className="font-semibold">{playing.previewSource === 'hardwax' ? 'Hard Wax' : playing.previewSource === 'yoyaku' ? 'Yoyaku' : 'Deejay.de'}</span></p>
+                <p className="text-[11px] text-muted-foreground/70">No video found — playing a preview</p>
               </div>
               <AudioPreviewControls key={playing.trackId} trackId={playing.trackId} mp3Url={playing.previewMp3Url} source={playing.previewSource} title={playing.title} artistName={playing.artistName} actions={actions} />
             </>
