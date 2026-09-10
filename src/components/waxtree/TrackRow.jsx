@@ -34,8 +34,11 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   const deejayPreview = deejayRelease ? actions.matchDeejayTrack(deejayRelease.tracks, track.id, track.title) : null;
   const cloneRelease = !resolvedVideo && !hardwaxPreview && !yoyakuPreview && !deejayPreview ? actions.getCloneRelease(releaseArtist, releaseTitle, catno, releaseLabel) : null;
   const clonePreview = cloneRelease ? actions.matchCloneTrack(cloneRelease.tracks, track.id, track.title) : null;
+  // `source` still rides along for playAudioPreview → AudioPreviewControls
+  // (which store the mp3 is from decides proxy vs direct playback), but it
+  // is deliberately never surfaced to the user anywhere in the UI — the
+  // preview just reads as "a preview", not "a preview from <shop>".
   const preview = hardwaxPreview ? { mp3Url: hardwaxPreview, source: 'hardwax' } : yoyakuPreview ? { mp3Url: yoyakuPreview, source: 'yoyaku' } : deejayPreview ? { mp3Url: deejayPreview, source: 'deejay' } : clonePreview ? { mp3Url: clonePreview, source: 'clone' } : null;
-  const previewSourceLabel = preview?.source === 'hardwax' ? 'Hard Wax' : preview?.source === 'yoyaku' ? 'Yoyaku' : preview?.source === 'deejay' ? 'Deejay.de' : 'Clone.nl';
   const previewPlaying = state.nowPlaying?.trackId === track.id && !!state.nowPlaying?.previewMp3Url;
   const liked = !!state.likes[track.id];
   const queued = state.dasAscoltare.some(item => item.id === track.id);
@@ -59,7 +62,7 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
         {preview && (
           <button
             type="button"
-            title={previewPlaying ? `Playing ${previewSourceLabel} preview` : `No video found — play a preview from ${previewSourceLabel} instead`}
+            title={previewPlaying ? 'Playing preview' : 'No video found — play a preview instead'}
             onClick={() => actions.playAudioPreview(track.id, preview.mp3Url, track.title, artist, preview.source)}
             className="flex size-[22px] items-center justify-center rounded-full border border-primary bg-background text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
           >
