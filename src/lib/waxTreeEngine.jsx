@@ -3178,19 +3178,19 @@ function stopPlay(){
   st.nowPlaying=null;rr();
 }
 // Mirrors doPlay's shape, for the "not on YouTube at all" fallback —
-// Hard Wax first, Yoyaku second (see getYoyakuRelease/matchYoyakuTrack
-// below) — but unlike doPlay there's no further matching to attempt
-// here: the caller (TrackRow) has already resolved mp3Url synchronously
-// by the time this can even be called (it's what makes the headphone
-// button clickable in the first place), so this just hands the already-
-// confirmed URL and its source to the real mini-player (RightPanel/
-// AudioPreviewControls) instead of the small inline popover player it
-// originally replaced. The actual audio bytes are still only fetched
-// once that mini-player actually mounts, same "only once truly needed"
-// discipline as before — and only for Hard Wax at all (proxied through
-// hardwax-audio, see getHardwaxAudioBlobUrl): Yoyaku's own mp3s are
-// directly playable cross-origin (confirmed live 2026-09-07), so
-// `source` is what tells AudioPreviewControls which of the two to do.
+// Hard Wax, then Yoyaku, then Deejay.de, then Clone.nl (see each
+// getXRelease/matchXTrack below) — but unlike doPlay there's no further
+// matching to attempt here: the caller (TrackRow) has already resolved
+// mp3Url synchronously by the time this can even be called (it's what
+// makes the headphone button clickable in the first place), so this just
+// hands the already-confirmed URL and its source to the real mini-player
+// (RightPanel/AudioPreviewControls) instead of the small inline popover
+// player it originally replaced. The actual audio bytes are still only
+// fetched once that mini-player actually mounts, same "only once truly
+// needed" discipline as before — and only for Hard Wax is a proxy
+// involved (through hardwax-audio, see getHardwaxAudioBlobUrl); Yoyaku's,
+// Deejay.de's and Clone.nl's own mp3s are all directly playable
+// cross-origin, so `source` is what tells AudioPreviewControls which to do.
 function playAudioPreview(trackId,mp3Url,title,artistName,source){
   killYt();
   st.ytError=null;
@@ -4908,6 +4908,98 @@ function matchDeejayTrack(tracks,trackId,trackTitle){
   return byTitle?byTitle.mp3:null;
 }
 
+// ── Clone.nl audio previews — fourth fallback, after Hard Wax, Yoyaku and Deejay.de ──
+// Same reasoning/shape again (see the Yoyaku block above), added
+// 2026-09-10 after the user found a Makam release ("How Long Is Now?",
+// SushP017) that ONLY clone.nl had any preview for. Two-step like Hard
+// Wax and Yoyaku, for a Cloudflare-shaped reason: clone.nl's own site
+// search (/all/search) is behind a "Just a moment…" JS challenge that a
+// server-side fetch can never clear, but its /all/artist/<name> and
+// /all/label/<name> browse pages aren't — clone-match reads the release
+// id/title/artist/catno off one of those, then clone-release pulls the
+// full tracklist + mp3 urls from the item page itself (the browse page
+// only ever shows the first 2-4 tracks of each release). The mp3s play
+// directly, no proxy — verified from a genuinely cross-origin <audio>
+// element on waxtree.vercel.app, the same careful way Hard Wax's own
+// Sec-Fetch-Site block was caught (see getHardwaxAudioBlobUrl).
+const cloneInFlight=new Set();
+function cloneCacheKey(artist,title,catno){
+  return catno?'cl:v1:cat:'+normalizeStr(catno):'cl:v1:at:'+normalizeStr(stripDiscogsSuffix(artist||''))+'|'+normalizeStr(title||'');
+}
+async function fetchCloneRelease(ck,artist,title,catno,label){
+  cloneInFlight.add(ck);
+  try{
+    const titleNorm=normalizeStr(title);
+    const artistNorm=normalizeStr(stripDiscogsSuffix(artist||''));
+    // Spaces/hyphens in a catalog number are pure formatting noise that
+    // Discogs and clone.nl each render their own way ("SUSH-P017" /
+    // "SushP017" / "SUSH P017") — compared with those stripped out too.
+    const catnoNorm=normalizeStr(catno||'').replace(/\s+/g,'');
+    // clone-match hands back each release's OWN catalog number inline
+    // (the other three sites' match functions only ever get to SEARCH a
+    // catno string) — an exact catno hit is effectively unique on its
+    // own, the same bar every one of these already trusts it at, so it
+    // satisfies the match by itself. Otherwise: fuzzy title AND (various-
+    // artists, see the Hard Wax block's own note on that WaxTree-internal
+    // display string, OR fuzzy artist).
+    const matches=r=>(!!catnoNorm&&normalizeStr(r.catno||'').replace(/\s+/g,'')===catnoNorm)||(bcOnlyMatches(titleNorm,normalizeStr(r.title))&&(artistNorm==='various artists'||bcOnlyArtistMatches(r.artist,artistNorm)));
+    const runQuery=async body=>{
+      const{data,error}=await sb.functions.invoke('clone-match',{body});
+      if(error)throw new Error(error.message);
+      return data?.results||[];
+    };
+    let hit;
+    const tryFind=async body=>{
+      try{hit=(await runQuery(body)).find(matches);}catch{/* this tier failed — the next one still gets a chance */}
+    };
+    // Artist browse page first (skipped for a various-artists compilation
+    // — clone.nl has no "Various Artists" artist page), then the label
+    // page only if that turned up nothing.
+    if(artist&&artistNorm!=='various artists')await tryFind({name:artist,kind:'artist'});
+    if(!hit&&label)await tryFind({name:label,kind:'label'});
+    if(hit){
+      const{data,error}=await sb.functions.invoke('clone-release',{body:{id:hit.id}});
+      if(error)throw new Error(error.message);
+      const tracks=data?.resolved?(data.tracks||[]):[];
+      lsSet(ck,tracks.length?{url:data.url||hit.url,tracks}:{no:true,day:localDayKey()});
+    }else{
+      lsSet(ck,{no:true,day:localDayKey()}); // {no,day}: retried fresh the next local day, not lsGet's own 30-day TTL — see isStaleFallbackNoMatch
+    }
+    rr();
+  }catch{
+    // Network/edge-function failure — leave uncached (not "confirmed no
+    // match") so a later render can retry instead of failing permanently.
+  }finally{
+    cloneInFlight.delete(ck);
+  }
+}
+// Synchronous cache lookup for use inside ReleaseCard's render — same
+// self-triggering pattern as getYoyakuRelease/getDeejayRelease.
+function getCloneRelease(artist,title,catno,label){
+  if(!title)return null;
+  const ck=cloneCacheKey(artist,title,catno);
+  const cached=lsGet(ck);
+  if(cached!==null&&!isStaleFallbackNoMatch(cached))return cached.no?null:cached; // {no,day} from today -> null; a real {url,tracks} -> itself
+  if(!cloneInFlight.has(ck))fetchCloneRelease(ck,artist,title,catno,label);
+  return undefined;
+}
+// clone.nl numbers a release's tracks sequentially ("01".."12") rather
+// than by vinyl side, so isVinylPosition rejects them and this always
+// falls through to title matching (see matchDeejayTrack, same shape).
+function matchCloneTrack(tracks,trackId,trackTitle){
+  if(!tracks?.length)return null;
+  const position=trackPositionFromId(trackId);
+  const byPosition=position&&tracks.find(t=>isVinylPosition(t.position)&&t.position.toLowerCase()===position.toLowerCase());
+  if(byPosition)return byPosition.mp3;
+  const titleN=normalizeStr(trackTitle||'');
+  if(!titleN)return null;
+  const byTitle=tracks.find(t=>{
+    const tN=normalizeStr(t.title||'');
+    return bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN);
+  });
+  return byTitle?byTitle.mp3:null;
+}
+
 // Hard Wax's own CDN (media.hardwax.com) blocks a direct in-browser load of
 // the mp3 from any other site — confirmed live: the exact same URL that
 // curl fetches fine (200, access-control-allow-origin:*) comes back as a
@@ -6021,7 +6113,7 @@ export const waxTreeActions={
   playAdjacentTrack,playAudioPreview,playRelated,registerRelatedTrack,removeBranch,removeNode,removeTag,renameBranch,reorderBranch,repositionNode,retryGenreYearNode,retryNode,scanFollowsForNewReleases,
   resolveStoreUrl,selectNode,setTheme,stopPlay,submitYoutubeLink,syncDiscogsAccount,syncYtPlayer,toggleExploreStyle,toggleFollow,toggleLike,togglePin,uploadAvatar,
   ytGetSnapshot,ytSeekFraction,ytTogglePlayPause,
-  badgeListened,baseTitleKey,extractRemixCandidate,getDeejayRelease,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchDeejayTrack,matchYoyakuTrack,normalizeStr,
+  badgeListened,baseTitleKey,extractRemixCandidate,getCloneRelease,getDeejayRelease,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchCloneTrack,matchDeejayTrack,matchYoyakuTrack,normalizeStr,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   supabase:sb,

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { useDismiss } from '@/lib/useDismiss';
 
-export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl, releaseArtist, releaseTitle, catno }) => {
+export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, playlistOpen, setPlaylistOpen, hardwaxUrl, releaseArtist, releaseTitle, releaseLabel, catno }) => {
   const artist = isLabel ? track.label : (track.trackArtistName || track.releaseArtistName || node.name);
   const [helpOpen, setHelpOpen] = useState(false);
   const playlistRef = useDismiss(playlistOpen, () => setPlaylistOpen(false));
@@ -17,23 +17,25 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
   const resolvedVideo = actions.getTrackVideo(track, artist, isLabel ? node.name : track.label) || null;
   // Last-resort fallback, only ever worth checking once YouTube has
   // genuinely come up empty — an actual audio clip beats no audio at all.
-  // Hard Wax first, then Yoyaku, then Deejay.de — each next source only
-  // gets consulted (and only then does its own release-level fetch even
-  // fire — see getYoyakuRelease/getDeejayRelease's own comments) once
-  // every source before it came up empty, added 2026-09-07 after the
-  // user found each of Yoyaku and (the same day) Deejay.de carrying
-  // previews the source(s) before it didn't have. Just decides whether
-  // the headphone button shows at all; clicking it routes through
-  // playAudioPreview into the real mini-player (RightPanel/
-  // AudioPreviewControls) exactly like the main Play button does for a
-  // YouTube match, rather than a bare inline audio widget.
+  // Hard Wax first, then Yoyaku, then Deejay.de, then Clone.nl — each next
+  // source only gets consulted (and only then does its own release-level
+  // fetch even fire — see getYoyakuRelease/getDeejayRelease/
+  // getCloneRelease's own comments) once every source before it came up
+  // empty, added 2026-09-07 (Yoyaku + Deejay.de) and 2026-09-10 (Clone.nl)
+  // after the user found each carrying previews the source(s) before it
+  // didn't have. Just decides whether the headphone button shows at all;
+  // clicking it routes through playAudioPreview into the real mini-player
+  // (RightPanel/AudioPreviewControls) exactly like the main Play button
+  // does for a YouTube match, rather than a bare inline audio widget.
   const hardwaxPreview = !resolvedVideo ? actions.getHardwaxAudioPreview(hardwaxUrl, track.id, track.title) : null;
   const yoyakuRelease = !resolvedVideo && !hardwaxPreview ? actions.getYoyakuRelease(releaseArtist, releaseTitle, catno) : null;
   const yoyakuPreview = yoyakuRelease ? actions.matchYoyakuTrack(yoyakuRelease.tracks, track.id, track.title) : null;
   const deejayRelease = !resolvedVideo && !hardwaxPreview && !yoyakuPreview ? actions.getDeejayRelease(releaseArtist, releaseTitle, catno) : null;
   const deejayPreview = deejayRelease ? actions.matchDeejayTrack(deejayRelease.tracks, track.id, track.title) : null;
-  const preview = hardwaxPreview ? { mp3Url: hardwaxPreview, source: 'hardwax' } : yoyakuPreview ? { mp3Url: yoyakuPreview, source: 'yoyaku' } : deejayPreview ? { mp3Url: deejayPreview, source: 'deejay' } : null;
-  const previewSourceLabel = preview?.source === 'hardwax' ? 'Hard Wax' : preview?.source === 'yoyaku' ? 'Yoyaku' : 'Deejay.de';
+  const cloneRelease = !resolvedVideo && !hardwaxPreview && !yoyakuPreview && !deejayPreview ? actions.getCloneRelease(releaseArtist, releaseTitle, catno, releaseLabel) : null;
+  const clonePreview = cloneRelease ? actions.matchCloneTrack(cloneRelease.tracks, track.id, track.title) : null;
+  const preview = hardwaxPreview ? { mp3Url: hardwaxPreview, source: 'hardwax' } : yoyakuPreview ? { mp3Url: yoyakuPreview, source: 'yoyaku' } : deejayPreview ? { mp3Url: deejayPreview, source: 'deejay' } : clonePreview ? { mp3Url: clonePreview, source: 'clone' } : null;
+  const previewSourceLabel = preview?.source === 'hardwax' ? 'Hard Wax' : preview?.source === 'yoyaku' ? 'Yoyaku' : preview?.source === 'deejay' ? 'Deejay.de' : 'Clone.nl';
   const previewPlaying = state.nowPlaying?.trackId === track.id && !!state.nowPlaying?.previewMp3Url;
   const liked = !!state.likes[track.id];
   const queued = state.dasAscoltare.some(item => item.id === track.id);

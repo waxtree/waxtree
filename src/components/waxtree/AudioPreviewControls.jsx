@@ -14,13 +14,14 @@ const fmtTime = seconds => {
 // re-poll something the browser is already telling us. mp3Url is the
 // already-resolved preview track url (see playAudioPreview) from whichever
 // fallback source actually matched (source: 'hardwax' | 'yoyaku' | 'deejay'
-// — see TrackRow.jsx). Only Hard Wax needs the proxy dance:
+// | 'clone' — see TrackRow.jsx). Only Hard Wax needs the proxy dance:
 // media.hardwax.com blocks a direct in-browser load by Sec-Fetch-Site (see
 // getHardwaxAudioBlobUrl's own comment), so that source routes through our
 // own edge function and only gets the actual bytes once this mounts.
-// Yoyaku's and Deejay.de's own mp3s both live on public, openly
-// cross-origin hosts (each confirmed live from a genuinely different
-// origin, not just curl, 2026-09-07) — playable directly, no proxy or
+// Yoyaku's, Deejay.de's and Clone.nl's own mp3s all live on hosts that
+// serve them fine to a cross-origin <audio> element (each confirmed live
+// from a genuinely different origin, not just curl — 2026-09-07 for the
+// first two, 2026-09-10 for Clone.nl) — playable directly, no proxy or
 // extra round trip needed at all.
 export const AudioPreviewControls = ({ trackId, mp3Url, source, title, artistName, actions }) => {
   const audioRef = useRef(null);
