@@ -1338,7 +1338,9 @@ async function pushStateToCloud(){
       const base=loadSyncBase();
       payload.playlists=threeWayMergePlaylists(base?.playlists,payload.playlists,c.playlists);
       payload.dasAscoltare=threeWayMergeById(base?.dasAscoltare,payload.dasAscoltare,c.dasAscoltare,t=>t.id);
-      payload.follows=threeWayMergeById(base?.follows,payload.follows,c.follows,f=>f.discogs_id+':'+f.type);
+      // bc_url fills in for discogs_id on a Bandcamp follow (null there) —
+      // see the identical fix + comment on the pull-side merge below.
+      payload.follows=threeWayMergeById(base?.follows,payload.follows,c.follows,f=>(f.discogs_id??f.bc_url??'')+':'+f.type);
       payload.likedTracks=threeWayMergeDict(base?.likedTracks,payload.likedTracks,c.likedTracks);
       payload.likes={...(c.likes||{}),...(payload.likes||{})}; // plain boolean flip, never deleted — local's own value always correctly wins
       payload.listens={...(c.listens||{}),...(payload.listens||{})}; // only ever set, never removed — a plain union is exact, no base needed
@@ -1503,7 +1505,12 @@ async function hydrateFromCloud(){
     const base=loadSyncBase();
     if(c.playlists){const merged=threeWayMergePlaylists(base?.playlists,st.playlists,c.playlists);if(JSON.stringify(merged)!==JSON.stringify(st.playlists)){st.playlists=merged;mergedAnything=true;}}
     if(c.dasAscoltare){const merged=threeWayMergeById(base?.dasAscoltare,st.dasAscoltare,c.dasAscoltare,t=>t.id);if(merged.length!==(st.dasAscoltare?.length||0)){st.dasAscoltare=merged;mergedAnything=true;}}
-    if(c.follows){const merged=threeWayMergeById(base?.follows,st.follows,c.follows,f=>f.discogs_id+':'+f.type);if(merged.length!==(st.follows?.length||0)){st.follows=merged;mergedAnything=true;}}
+    // discogs_id alone used to be the identity key here — null for every
+    // Bandcamp follow (see followIdentity), which collapsed ALL of a
+    // user's bc follows onto one shared key and let a merge drop every
+    // one but the last. bc_url (unique per bc follow, absent on every
+    // Discogs one) fills the same slot discogs_id does for those.
+    if(c.follows){const merged=threeWayMergeById(base?.follows,st.follows,c.follows,f=>(f.discogs_id??f.bc_url??'')+':'+f.type);if(merged.length!==(st.follows?.length||0)){st.follows=merged;mergedAnything=true;}}
     if(c.likedTracks){const merged=threeWayMergeDict(base?.likedTracks,st.likedTracks,c.likedTracks);if(Object.keys(merged).length!==Object.keys(st.likedTracks||{}).length){st.likedTracks=merged;mergedAnything=true;}}
     if(c.likes){const merged={...c.likes,...st.likes};if(Object.keys(merged).length!==Object.keys(st.likes||{}).length){st.likes=merged;mergedAnything=true;}} // plain boolean flip, never deleted — no base needed
     if(c.listens){const merged={...c.listens,...st.listens};if(Object.keys(merged).length!==Object.keys(st.listens||{}).length){st.listens=merged;mergedAnything=true;}} // only ever set, never removed — no base needed
@@ -5816,13 +5823,25 @@ function findBcMatch(parentNodeId,title){
 
 // ── Follow ──────────────────────────────────────────────────
 function loadFollows(){}
+// A Bandcamp-backed node (see project_waxtree_bandcamp_catalog) has no
+// discogsId — its identity for follow purposes is its Bandcamp URL
+// instead. Two different bc artists would otherwise both match
+// discogs_id:null+type:'bcArtist' and collide (following the second
+// would silently unfollow the first, and the cloud 3-way merge's own
+// identity key has the identical problem — see its own fix below).
+function followIdentity(node){
+  const isBc=node.type==='bcArtist'||node.type==='bcLabel';
+  return{isBc,bcUrl:isBc?(node.params?.bcUrl||node.data?.bandUrl||null):null};
+}
 function toggleFollow(node){
-  const existing=st.follows.find(f=>f.discogs_id===node.discogsId&&f.type===node.type);
+  const{isBc,bcUrl}=followIdentity(node);
+  const matches=f=>isBc?(f.bc_url===bcUrl&&f.type===node.type):(f.discogs_id===node.discogsId&&f.type===node.type);
+  const existing=st.follows.find(matches);
   if(existing){
-    st.follows=st.follows.filter(f=>f.discogs_id!==node.discogsId||f.type!==node.type);
+    st.follows=st.follows.filter(f=>!matches(f));
   } else {
-    st.follows=[{id:Date.now(),discogs_id:node.discogsId,type:node.type,name:node.name,thumb:node.data?.imageUrl||null,followed_at:new Date().toISOString()},...st.follows];
-    logEvent('follow',{type:node.type,discogs_id:node.discogsId,name:node.name});
+    st.follows=[{id:Date.now(),discogs_id:node.discogsId,bc_url:bcUrl,type:node.type,name:node.name,thumb:node.data?.imageUrl||null,followed_at:new Date().toISOString()},...st.follows];
+    logEvent('follow',{type:node.type,discogs_id:node.discogsId,bc_url:bcUrl,name:node.name});
   }
   saveSt();rr();
 }
@@ -5848,8 +5867,14 @@ async function scanFollowsForNewReleases(){
   followScanRunning=true;
   const found=[];
   try{
-    for(let i=0;i<st.follows.length;i+=FOLLOW_SCAN_BATCH){
-      const batch=st.follows.slice(i,i+FOLLOW_SCAN_BATCH);
+    // Bandcamp follows (see followIdentity) have no discogs_id — nothing
+    // here to query Discogs' own /artists or /labels releases endpoint
+    // with. Skipped rather than let each one burn a guaranteed-404 every
+    // scan; a Bandcamp-side "new release" check needs its own
+    // re-scrape-and-diff approach, not built yet.
+    const discogsFollows=st.follows.filter(f=>f.discogs_id!=null);
+    for(let i=0;i<discogsFollows.length;i+=FOLLOW_SCAN_BATCH){
+      const batch=discogsFollows.slice(i,i+FOLLOW_SCAN_BATCH);
       const results=await Promise.all(batch.map(async f=>{
         const key=f.type+':'+f.discogs_id;
         try{

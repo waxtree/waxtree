@@ -21,6 +21,11 @@ export const BandcampNode = ({ node, state, actions }) => {
   const data = node.data;
   const isLabel = node.type === 'bcLabel';
   const releases = data?.releases || [];
+  // Same identity toggleFollow itself uses for a Bandcamp node (no
+  // discogsId to key off) — the Bandcamp URL, params first since that
+  // survives a reload before data has re-loaded.
+  const bcUrl = node.params?.bcUrl || data?.bandUrl || null;
+  const followed = state.follows.some(item => item.type === node.type && item.bc_url === bcUrl);
   const [openPlaylist, setOpenPlaylist] = useState(null);
   const [page, setPage] = useState(0);
   const totalPages = Math.max(1, Math.ceil(releases.length / PAGE_SIZE));
@@ -45,6 +50,13 @@ export const BandcampNode = ({ node, state, actions }) => {
             <span className="rounded border border-border bg-secondary px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/80">Bandcamp · not on Discogs</span>
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => actions.toggleFollow(node)}
+          className={`shrink-0 rounded-full border-[1.5px] px-3.5 py-1.5 text-xs font-semibold ${followed ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary'}`}
+        >
+          {followed ? '✓ Following' : '+ Follow'}
+        </button>
         {data?.bandUrl && (
           <a href={data.bandUrl} target="_blank" rel="noreferrer" className={`${buttonSecondary} inline-flex shrink-0 items-center gap-0.5`}>
             Bandcamp <ArrowUpRight className="size-3" />
