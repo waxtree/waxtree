@@ -5678,15 +5678,48 @@ function renameBranch(id,name){const b=getBranch(id);if(b&&name.trim())b.name=na
 // toward the search-count gamification metric. searchGen guards against an older
 // in-flight request overwriting results from a newer, still-being-typed query.
 let searchDebTimer=null,searchGen=0;
-// Discogs is primary and always leads the list; Bandcamp results are
-// appended after (capped, badged in the UI) as the "not on Discogs"
-// supplement. Each side is independently fault-tolerant — a Discogs
+// A "profile" result (artist/label, either source) outranks a release —
+// searching a name is almost always about the act itself — and an exact
+// name match outranks a partial one. Deliberately coarse (three tiers,
+// no fuzzy scoring beyond substring containment) — this only has to fix
+// ordering, not replace Discogs' or Bandcamp's own relevance ranking
+// within each source.
+function searchResultRank(r,qNorm){
+  const titleNorm=normalizeStr(r.title||'');
+  let score=r.type==='release'?0:2;
+  if(titleNorm===qNorm)score+=10;
+  else if(titleNorm.startsWith(qNorm)||qNorm.startsWith(titleNorm))score+=5;
+  else if(qNorm&&titleNorm.includes(qNorm))score+=2;
+  return score;
+}
+// Discogs stays primary — the fallback ranking below (title-match tier,
+// which both sides compete on equally) still resolves every EXACT tie in
+// Discogs' favor, via the stable-sort index tiebreak on this concatenation
+// order. But a genuinely well-known Bandcamp act no longer sits pinned
+// after all 12 Discogs hits regardless of how loosely those actually
+// matched — user report 2026-09-11: a real, popular hard-techno "Adrián
+// Mills" landed below Discogs' own same-named-artist "(2)"/"(5)"
+// disambiguation entries, an unrelated "Adrian Godfrey" fuzzy match, and
+// a release. Each side stays independently fault-tolerant (a Discogs
 // timeout still shows Bandcamp hits and vice versa; only both failing is
-// a real "No results". NOT name-deduped against Discogs on purpose: the
-// digger may want the Bandcamp act precisely BECAUSE the same-named
-// Discogs artist is the wrong one.
-function mergeSearchResults(disc,bc){
-  return[...disc.slice(0,12),...bc.slice(0,5)];
+// a real "No results").
+//
+// Deliberately NOT deduped by name when the same artist genuinely exists
+// on both platforms — matching on a bare name here is exactly what
+// conflated this session's own reported Discogs "Adrian Mills" with the
+// unrelated Bandcamp "Adrián Mills"; normalizeStr's accent-stripping
+// alone would make those two compare EQUAL. A safe merge needs a real
+// cross-reference (Discogs' own artist profile linking that Bandcamp
+// domain), which WaxTree already resolves — just downstream, once the
+// Discogs node is actually open (resolveBandcampCatalogUrl / the "only on
+// Bandcamp" section), where it can verify instead of guess from a name
+// alone in a results list.
+function mergeSearchResults(disc,bc,q){
+  const qNorm=normalizeStr(q||'');
+  return[...disc.slice(0,12),...bc.slice(0,5)]
+    .map((r,i)=>({r,i,score:searchResultRank(r,qNorm)}))
+    .sort((a,b)=>b.score-a.score||a.i-b.i)
+    .map(x=>x.r);
 }
 function doSearch(){
   if(searchDebTimer){clearTimeout(searchDebTimer);searchDebTimer=null;}
@@ -5696,7 +5729,7 @@ function doSearch(){
   Promise.all([searchDiscogs(q).then(r=>({r})).catch(e=>({e})),searchBandcamp(q).catch(()=>[])]).then(([disc,bc])=>{
     if(myGen!==searchGen)return;
     st.loading=false;incrementSearch();
-    const res=mergeSearchResults(disc.r||[],bc);
+    const res=mergeSearchResults(disc.r||[],bc,q);
     if(!res.length){st.err=disc.e?disc.e.message:'No results';rr();return;}
     if(res.length===1){pickResult(res[0]);return;}
     st.results=res;rr();
@@ -5710,7 +5743,7 @@ function liveSearchTick(){
   Promise.all([searchDiscogs(q).then(r=>({r})).catch(e=>({e})),searchBandcamp(q).catch(()=>[])]).then(([disc,bc])=>{
     if(myGen!==searchGen)return;
     st.loading=false;
-    const res=mergeSearchResults(disc.r||[],bc);
+    const res=mergeSearchResults(disc.r||[],bc,q);
     if(!res.length){st.err=disc.e?disc.e.message:'No results';st.results=[];rr();return;}
     st.results=res;rr();
   }).catch(e=>{if(myGen!==searchGen)return;st.loading=false;st.err=e.message;rr();});
