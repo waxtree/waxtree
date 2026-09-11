@@ -1338,7 +1338,9 @@ async function pushStateToCloud(){
       const base=loadSyncBase();
       payload.playlists=threeWayMergePlaylists(base?.playlists,payload.playlists,c.playlists);
       payload.dasAscoltare=threeWayMergeById(base?.dasAscoltare,payload.dasAscoltare,c.dasAscoltare,t=>t.id);
-      payload.follows=threeWayMergeById(base?.follows,payload.follows,c.follows,f=>f.discogs_id+':'+f.type);
+      // bc_url fills in for discogs_id on a Bandcamp follow (null there) —
+      // see the identical fix + comment on the pull-side merge below.
+      payload.follows=threeWayMergeById(base?.follows,payload.follows,c.follows,f=>(f.discogs_id??f.bc_url??'')+':'+f.type);
       payload.likedTracks=threeWayMergeDict(base?.likedTracks,payload.likedTracks,c.likedTracks);
       payload.likes={...(c.likes||{}),...(payload.likes||{})}; // plain boolean flip, never deleted — local's own value always correctly wins
       payload.listens={...(c.listens||{}),...(payload.listens||{})}; // only ever set, never removed — a plain union is exact, no base needed
@@ -1503,7 +1505,12 @@ async function hydrateFromCloud(){
     const base=loadSyncBase();
     if(c.playlists){const merged=threeWayMergePlaylists(base?.playlists,st.playlists,c.playlists);if(JSON.stringify(merged)!==JSON.stringify(st.playlists)){st.playlists=merged;mergedAnything=true;}}
     if(c.dasAscoltare){const merged=threeWayMergeById(base?.dasAscoltare,st.dasAscoltare,c.dasAscoltare,t=>t.id);if(merged.length!==(st.dasAscoltare?.length||0)){st.dasAscoltare=merged;mergedAnything=true;}}
-    if(c.follows){const merged=threeWayMergeById(base?.follows,st.follows,c.follows,f=>f.discogs_id+':'+f.type);if(merged.length!==(st.follows?.length||0)){st.follows=merged;mergedAnything=true;}}
+    // discogs_id alone used to be the identity key here — null for every
+    // Bandcamp follow (see followIdentity), which collapsed ALL of a
+    // user's bc follows onto one shared key and let a merge drop every
+    // one but the last. bc_url (unique per bc follow, absent on every
+    // Discogs one) fills the same slot discogs_id does for those.
+    if(c.follows){const merged=threeWayMergeById(base?.follows,st.follows,c.follows,f=>(f.discogs_id??f.bc_url??'')+':'+f.type);if(merged.length!==(st.follows?.length||0)){st.follows=merged;mergedAnything=true;}}
     if(c.likedTracks){const merged=threeWayMergeDict(base?.likedTracks,st.likedTracks,c.likedTracks);if(Object.keys(merged).length!==Object.keys(st.likedTracks||{}).length){st.likedTracks=merged;mergedAnything=true;}}
     if(c.likes){const merged={...c.likes,...st.likes};if(Object.keys(merged).length!==Object.keys(st.likes||{}).length){st.likes=merged;mergedAnything=true;}} // plain boolean flip, never deleted — no base needed
     if(c.listens){const merged={...c.listens,...st.listens};if(Object.keys(merged).length!==Object.keys(st.listens||{}).length){st.listens=merged;mergedAnything=true;}} // only ever set, never removed — no base needed
@@ -1741,6 +1748,12 @@ function getPlaylistTracks(){
     }
     return[];
   }
+  // A Bandcamp node's tracks live in bcOnlyDetailCache (per release, lazy)
+  // — flatten the ones already loaded, in the node's own release order,
+  // same "look elsewhere for the flat list" reasoning as genreYear above.
+  if(node?.type==='bcArtist'||node?.type==='bcLabel'){
+    return(node.data?.releases||[]).flatMap(r=>bcOnlyDetailCache[r.bcUrl]?.tracks||[]);
+  }
   if(!node?.data?.tracks?.length)return[];
   return applyFilters(node.data.tracks);
 }
@@ -1761,6 +1774,9 @@ function playAdjacentTrack(dir){
   // position within its OWN release (not the flat node list) — the flat
   // list keeps a release's tracks contiguous and in order, so filtering
   // by the Discogs release-id prefix recovers both.
+  // A Bandcamp-native track carries its own stream — play that, same
+  // rung-0 priority as its row (see TrackRow).
+  if(next.bcMp3){playAudioPreview(next.id,next.bcMp3,next.title,artist,'bandcamp');return;}
   const relId=String(next.id).split('-')[0];
   const relTracks=tracks.filter(t=>String(t.id).split('-')[0]===relId);
   const relIndex=relTracks.findIndex(t=>t.id===next.id);
@@ -3542,6 +3558,34 @@ async function searchDiscogs(q,{background=false}={}){
   );
   lsSet('s:'+q,r);return r;
 }
+// The Bandcamp side of the search bar — Discogs stays primary (see
+// doSearch), this is the supplement for artists/labels Discogs doesn't
+// have at all: Bandcamp-native acts, newer names, scenes that skew
+// Bandcamp over vinyl (hard techno, makina, …). bc-artist-search hits
+// Bandcamp's own search index, band/label hits only, each with a
+// location + genre so the results list can tell two acts sharing a name
+// apart (the whole reason this exists — a Discogs "Adrian Mills" match
+// isn't necessarily THE Adrián Mills the digger meant). A bc result
+// opens a Bandcamp-backed node (addBandcampNode), not a Discogs one.
+async function searchBandcamp(q){
+  if(!q.trim())return[];
+  const ck='bcs:'+q.trim().toLowerCase();
+  const cached=lsGet(ck);if(cached)return cached;
+  try{
+    const{data,error}=await sb.functions.invoke('bc-artist-search',{body:{query:q.trim()}});
+    if(error)throw new Error(error.message);
+    const r=(data?.results||[]).map(h=>({
+      id:'bc:'+h.id,
+      type:h.isLabel?'bcLabel':'bcArtist',
+      title:h.name,
+      thumb:h.img||null,
+      bcUrl:h.url,
+      location:h.location||null,
+      genre:h.genre||null,
+    }));
+    lsSet(ck,r);return r;
+  }catch{return[];}
+}
 // Favorite Artists search — same underlying search bar backs both (real
 // Discogs matches, same 7s ceiling, same shared cache), filtered to
 // artist-only results since that's the only thing a Favorite Artists pick
@@ -3618,6 +3662,73 @@ function retryGenreYearNode(nodeId){
   const n=getNode(nodeId);if(!n||n.type!=='genreYear')return;
   n.error=null;n.loading=true;rr();
   fetchGenreYearResults(nodeId,n.params?.styles||[],n.params?.years||[]);
+}
+
+// ── Bandcamp-backed node (bcArtist / bcLabel) ──────────────────────────
+// The digger picked a Bandcamp result out of the search bar — an artist/
+// label Discogs doesn't have. Same node shape/flow as addGenreYearNode
+// (no discogsId; the Bandcamp URL lives in params so a rehydrated node
+// can reload it — see retryNode). Its whole content comes from
+// bc-discography + bc-release-detail (fetchBcNodeData), rendered by
+// BandcampNodeView, NOT the Discogs-shaped NodeDetails.
+function addBandcampNode(bcUrl,name,isLabel,thumb,parentId,branchId){
+  const bid=branchId||st.activeBranchId;
+  const norm=(bcUrl||'').replace(/\/$/,'');
+  const existing=st.nodes.find(n=>(n.params?.bcUrl||'')===norm&&n.branchId===bid);
+  if(existing){st.nodes=[existing,...st.nodes.filter(n=>n.id!==existing.id)];selectNode(existing.id);return;}
+  if(!st.isPremium&&st.nodes.filter(n=>n.branchId===bid).length>=FREE_NODE_LIMIT){st.premiumModal=true;rr();return;}
+  const parent=parentId?getNode(parentId):null;
+  logEvent('explore',{type:isLabel?'bcLabel':'bcArtist',discogs_id:null,name,
+    parent_type:parent?.type||null,parent_discogs_id:parent?.discogsId||null,parent_name:parent?.name||null});
+  const id='n'+Date.now();
+  const prevLvl=getLevelFromCount(st.nodes.length);
+  const node={id,branchId:bid,type:isLabel?'bcLabel':'bcArtist',discogsId:null,name,parentId:parentId||null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null,params:{bcUrl:norm},thumbUrl:thumb||null};
+  st.nodes=[node,...st.nodes];
+  st.selectedId=id;st.activeBranchId=bid;
+  st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
+  const newLvl=getLevelFromCount(st.nodes.length);
+  if(newLvl.level>prevLvl.level)showLevelUpToast(newLvl);
+  if(!st.chips.some(c=>chipName(c)===name))st.chips=[{name,type:'search'},...st.chips.slice(0,11)];
+  rr();
+  fetchBcNodeData(id);
+}
+async function fetchBcNodeData(nodeId){
+  const node=getNode(nodeId);if(!node)return;
+  const bcUrl=node.params?.bcUrl;
+  if(!bcUrl){node.error='Missing Bandcamp URL';node.loading=false;rr();return;}
+  node.error=null;node.loading=true;rr();
+  const cancelled=startNodeLoad(nodeId);
+  try{
+    const{data,error}=await sb.functions.invoke('bc-discography',{body:{knownBandUrl:bcUrl}});
+    if(cancelled())return;
+    if(error)throw new Error(error.message);
+    if(!data?.resolved)throw new Error("Couldn't load this Bandcamp page");
+    const isLabel=node.type==='bcLabel';
+    const releases=(data.releases||[]).map(bcRel=>{
+      const rid='bcn:'+nodeId+':'+bcRel.url;
+      const creditedArtist=isLabel?((bcRel.artist||'').split(',')[0].trim()||null):null;
+      const track={
+        id:rid,title:bcRel.title,album:bcRel.title,
+        trackArtistName:isLabel?null:(data.bandName||node.name),
+        releaseArtistName:isLabel?null:(data.bandName||node.name),
+        label:isLabel?creditedArtist:null,
+        videoId:null,duration:null,year:null,genre:null,
+        bcUrl:bcRel.url,thumbUrl:bcRel.thumbUrl||null,
+      };
+      discoveredTracks[rid]=track; // so play/like/queue resolve it, same pattern the bc-only supplement uses
+      return track;
+    });
+    const n=getNode(nodeId);
+    if(n){
+      if(data.bandName)n.name=data.bandName;
+      n.data={name:data.bandName||node.name,bandUrl:data.bandUrl||bcUrl,imageUrl:data.bandImage||node.thumbUrl||null,trackCount:releases.length,releases,isBandcamp:true};
+      n.loaded=true;n.loading=false;
+    }
+    rr();
+  }catch(e){
+    if(cancelled())return;
+    const n=getNode(nodeId);if(n){n.error=e.message;n.loading=false;}rr();
+  }
 }
 // Recent Searches chips saved before genreYear chips carried real
 // {styles,years} data (see addGenreYearNode's own chip push) are just the
@@ -5310,9 +5421,16 @@ async function fetchBcOnlyReleaseDetails(releases){
           // is falsy). Rare (verified against several real releases,
           // including a well-known label's), but zero-cost to use.
           id,title:t.title,album:r.album,duration:t.duration||null,
-          trackArtistName:r.trackArtistName,releaseArtistName:r.releaseArtistName,
+          // The clean per-track artist from Bandcamp when it has one (a
+          // collab/compilation cut credits more than the page owner) —
+          // falls back to the release-level credit otherwise.
+          trackArtistName:t.artist||r.trackArtistName,releaseArtistName:r.releaseArtistName,
           label:r.label,videoId:t.youtubeId||null,year:null,genre:null,thumbUrl:r.thumbUrl,
           bcUrl:r.bcUrl, // resolveCosineTrackId's own Bandcamp-release fallback candidate
+          // The artist's OWN official full-length stream — TrackRow plays
+          // this ahead of everything else (rung 0). Signed ~24h; a bc node
+          // is browsed well within that, and a stale one just re-fetches.
+          bcMp3:t.mp3||null,
         };
         discoveredTracks[id]=track; // so play/like/queue resolve it, same pattern Related Tracks uses
         return track;
@@ -5411,6 +5529,7 @@ function retryNode(nodeId){
   // (boot restore, cloud restore), so the type check has to live here,
   // not just at that one call site.
   if(node.type==='genreYear'){retryGenreYearNode(nodeId);return;}
+  if(node.type==='bcArtist'||node.type==='bcLabel'){fetchBcNodeData(nodeId);return;}
   node.error=null;
   // A cache hit applies instantly, no loading flash at all — previously
   // this always set loading=true first and let fetchArtistData/
@@ -5559,15 +5678,59 @@ function renameBranch(id,name){const b=getBranch(id);if(b&&name.trim())b.name=na
 // toward the search-count gamification metric. searchGen guards against an older
 // in-flight request overwriting results from a newer, still-being-typed query.
 let searchDebTimer=null,searchGen=0;
+// A "profile" result (artist/label, either source) outranks a release —
+// searching a name is almost always about the act itself — and an exact
+// name match outranks a partial one. Deliberately coarse (three tiers,
+// no fuzzy scoring beyond substring containment) — this only has to fix
+// ordering, not replace Discogs' or Bandcamp's own relevance ranking
+// within each source.
+function searchResultRank(r,qNorm){
+  const titleNorm=normalizeStr(r.title||'');
+  let score=r.type==='release'?0:2;
+  if(titleNorm===qNorm)score+=10;
+  else if(titleNorm.startsWith(qNorm)||qNorm.startsWith(titleNorm))score+=5;
+  else if(qNorm&&titleNorm.includes(qNorm))score+=2;
+  return score;
+}
+// Discogs stays primary — the fallback ranking below (title-match tier,
+// which both sides compete on equally) still resolves every EXACT tie in
+// Discogs' favor, via the stable-sort index tiebreak on this concatenation
+// order. But a genuinely well-known Bandcamp act no longer sits pinned
+// after all 12 Discogs hits regardless of how loosely those actually
+// matched — user report 2026-09-11: a real, popular hard-techno "Adrián
+// Mills" landed below Discogs' own same-named-artist "(2)"/"(5)"
+// disambiguation entries, an unrelated "Adrian Godfrey" fuzzy match, and
+// a release. Each side stays independently fault-tolerant (a Discogs
+// timeout still shows Bandcamp hits and vice versa; only both failing is
+// a real "No results").
+//
+// Deliberately NOT deduped by name when the same artist genuinely exists
+// on both platforms — matching on a bare name here is exactly what
+// conflated this session's own reported Discogs "Adrian Mills" with the
+// unrelated Bandcamp "Adrián Mills"; normalizeStr's accent-stripping
+// alone would make those two compare EQUAL. A safe merge needs a real
+// cross-reference (Discogs' own artist profile linking that Bandcamp
+// domain), which WaxTree already resolves — just downstream, once the
+// Discogs node is actually open (resolveBandcampCatalogUrl / the "only on
+// Bandcamp" section), where it can verify instead of guess from a name
+// alone in a results list.
+function mergeSearchResults(disc,bc,q){
+  const qNorm=normalizeStr(q||'');
+  return[...disc.slice(0,12),...bc.slice(0,5)]
+    .map((r,i)=>({r,i,score:searchResultRank(r,qNorm)}))
+    .sort((a,b)=>b.score-a.score||a.i-b.i)
+    .map(x=>x.r);
+}
 function doSearch(){
   if(searchDebTimer){clearTimeout(searchDebTimer);searchDebTimer=null;}
   const q=st.q.trim();if(!q)return;
   const myGen=++searchGen;
   st.loading=true;st.err='';st.results=[];rr();
-  searchDiscogs(q).then(res=>{
+  Promise.all([searchDiscogs(q).then(r=>({r})).catch(e=>({e})),searchBandcamp(q).catch(()=>[])]).then(([disc,bc])=>{
     if(myGen!==searchGen)return;
     st.loading=false;incrementSearch();
-    if(!res.length){st.err='No results';rr();return;}
+    const res=mergeSearchResults(disc.r||[],bc,q);
+    if(!res.length){st.err=disc.e?disc.e.message:'No results';rr();return;}
     if(res.length===1){pickResult(res[0]);return;}
     st.results=res;rr();
   }).catch(e=>{if(myGen!==searchGen)return;st.loading=false;st.err=e.message;rr();});
@@ -5577,16 +5740,18 @@ function liveSearchTick(){
   if(q.length<2)return;
   const myGen=++searchGen;
   st.loading=true;st.err='';rr();
-  searchDiscogs(q).then(res=>{
+  Promise.all([searchDiscogs(q).then(r=>({r})).catch(e=>({e})),searchBandcamp(q).catch(()=>[])]).then(([disc,bc])=>{
     if(myGen!==searchGen)return;
     st.loading=false;
-    if(!res.length){st.err='No results';st.results=[];rr();return;}
+    const res=mergeSearchResults(disc.r||[],bc,q);
+    if(!res.length){st.err=disc.e?disc.e.message:'No results';st.results=[];rr();return;}
     st.results=res;rr();
   }).catch(e=>{if(myGen!==searchGen)return;st.loading=false;st.err=e.message;rr();});
 }
 function pickResult(r){
   st.results=[];st.q='';st.loading=false;st.err='';
   if(r.type==='release'){resolveReleaseAndOpen(r);return;}
+  if(r.type==='bcArtist'||r.type==='bcLabel'){addBandcampNode(r.bcUrl,r.title,r.type==='bcLabel',r.thumb,null,st.activeBranchId);return;}
   addNode(r.type,r.id,r.title,null,st.activeBranchId);
 }
 // A release isn't a node type the tree understands on its own — resolve it
@@ -5691,13 +5856,25 @@ function findBcMatch(parentNodeId,title){
 
 // ── Follow ──────────────────────────────────────────────────
 function loadFollows(){}
+// A Bandcamp-backed node (see project_waxtree_bandcamp_catalog) has no
+// discogsId — its identity for follow purposes is its Bandcamp URL
+// instead. Two different bc artists would otherwise both match
+// discogs_id:null+type:'bcArtist' and collide (following the second
+// would silently unfollow the first, and the cloud 3-way merge's own
+// identity key has the identical problem — see its own fix below).
+function followIdentity(node){
+  const isBc=node.type==='bcArtist'||node.type==='bcLabel';
+  return{isBc,bcUrl:isBc?(node.params?.bcUrl||node.data?.bandUrl||null):null};
+}
 function toggleFollow(node){
-  const existing=st.follows.find(f=>f.discogs_id===node.discogsId&&f.type===node.type);
+  const{isBc,bcUrl}=followIdentity(node);
+  const matches=f=>isBc?(f.bc_url===bcUrl&&f.type===node.type):(f.discogs_id===node.discogsId&&f.type===node.type);
+  const existing=st.follows.find(matches);
   if(existing){
-    st.follows=st.follows.filter(f=>f.discogs_id!==node.discogsId||f.type!==node.type);
+    st.follows=st.follows.filter(f=>!matches(f));
   } else {
-    st.follows=[{id:Date.now(),discogs_id:node.discogsId,type:node.type,name:node.name,thumb:node.data?.imageUrl||null,followed_at:new Date().toISOString()},...st.follows];
-    logEvent('follow',{type:node.type,discogs_id:node.discogsId,name:node.name});
+    st.follows=[{id:Date.now(),discogs_id:node.discogsId,bc_url:bcUrl,type:node.type,name:node.name,thumb:node.data?.imageUrl||null,followed_at:new Date().toISOString()},...st.follows];
+    logEvent('follow',{type:node.type,discogs_id:node.discogsId,bc_url:bcUrl,name:node.name});
   }
   saveSt();rr();
 }
@@ -5723,8 +5900,14 @@ async function scanFollowsForNewReleases(){
   followScanRunning=true;
   const found=[];
   try{
-    for(let i=0;i<st.follows.length;i+=FOLLOW_SCAN_BATCH){
-      const batch=st.follows.slice(i,i+FOLLOW_SCAN_BATCH);
+    // Bandcamp follows (see followIdentity) have no discogs_id — nothing
+    // here to query Discogs' own /artists or /labels releases endpoint
+    // with. Skipped rather than let each one burn a guaranteed-404 every
+    // scan; a Bandcamp-side "new release" check needs its own
+    // re-scrape-and-diff approach, not built yet.
+    const discogsFollows=st.follows.filter(f=>f.discogs_id!=null);
+    for(let i=0;i<discogsFollows.length;i+=FOLLOW_SCAN_BATCH){
+      const batch=discogsFollows.slice(i,i+FOLLOW_SCAN_BATCH);
       const results=await Promise.all(batch.map(async f=>{
         const key=f.type+':'+f.discogs_id;
         try{

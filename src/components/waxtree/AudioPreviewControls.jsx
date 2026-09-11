@@ -12,9 +12,11 @@ const fmtTime = seconds => {
 // postMessage API offers, but a native <audio> element already fires
 // timeupdate/play/pause/loadedmetadata directly, so there's no reason to
 // re-poll something the browser is already telling us. Source of the clip
-// (source: 'deezer' | 'hardwax' | 'yoyaku' | 'deejay' | 'clone' — see
-// TrackRow.jsx). Two of the five resolve their url HERE rather than
-// arriving with a ready mp3Url:
+// (source: 'bandcamp' | 'deezer' | 'hardwax' | 'yoyaku' | 'deejay' |
+// 'clone' — see TrackRow.jsx). 'bandcamp' is the artist's own official
+// full-length stream (bcArtist nodes) and plays straight from mp3Url like
+// the store previews. Two of the sources resolve their url HERE rather
+// than arriving with a ready mp3Url:
 //   - 'hardwax': media.hardwax.com blocks a direct in-browser load by
 //     Sec-Fetch-Site (see getHardwaxAudioBlobUrl), so it's proxied
 //     through our edge function and only pulls the bytes once this mounts.

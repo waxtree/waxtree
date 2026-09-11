@@ -73,7 +73,7 @@ export const RightPanel = ({ state, actions }) => {
             <>
               <div className="flex flex-col items-center justify-center gap-1.5 bg-secondary p-4 text-center">
                 <Headphones className="size-5 text-muted-foreground/50" />
-                <p className="text-[11px] text-muted-foreground/70">{previewVideoId ? 'Playing a 30-second preview' : 'No video found — playing a preview'}</p>
+                <p className="text-[11px] text-muted-foreground/70">{playing.previewSource === 'bandcamp' ? 'Playing this track' : previewVideoId ? 'Playing a 30-second preview' : 'No video found — playing a preview'}</p>
                 {previewVideoId && (
                   <button type="button" onClick={() => actions.doPlay(playing.trackId, previewVideoId, playing.title, playing.artistName)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline">
                     <Play className="size-2.5 fill-current" /> Play full track
