@@ -4558,13 +4558,31 @@ const ROMAN_NUMERAL_VALUE={i:1,ii:2,iii:3,iv:4,v:5,vi:6,vii:7,viii:8,ix:9,x:10,x
 // collapse two genuinely different releases into "already on Discogs".
 // Confirmed with a real Bandcamp label catalog before this guard existed.
 function trailingSeriesNumber(words){
-  const last=words[words.length-1];
-  if(/^\d+$/.test(last))return Number(last);
+  const last=words[words.length-1]||'';
+  // A trailing digit RUN, not "the whole last word is a number" — a
+  // catalog-code-style title ("MP10", "AMTK007") fuses the number onto a
+  // letter prefix with no space at all, so requiring the whole word to be
+  // numeric made this guard see a number on one side only whenever the
+  // other side (often the SAME title from a different site) happened to
+  // put a space before it ("MP 10"). Confirmed live 2026-09-11: Discogs'
+  // own "MP 10" against Deejay.de's "MP10" for the exact same Magic Power
+  // release tripped this guard and hid a real, confirmed match.
+  const m=last.match(/(\d+)$/);
+  if(m)return Number(m[1]);
   return ROMAN_NUMERAL_VALUE[last]??null;
 }
 function bcOnlyMatches(a,b){
   if(!a||!b)return false;
   if(a===b)return true;
+  // Same title, just chunked into words differently around a catalog-code
+  // suffix ("MP 10" vs "MP10") — identical once whitespace is ignored, so
+  // trusted outright rather than falling into the word-overlap scoring
+  // below, which tokenizes "MP 10" as two words against "MP10" as one and
+  // finds zero of either kind of overlap. Only fires on a TRUE match
+  // (every character equal once spacing is stripped) — doesn't loosen
+  // anything else this function already rejects, e.g. "Phylyps Trak" vs
+  // "Phylyps Trak II" remain "phylypstrak" vs "phylypstrakii", still unequal.
+  if(a.replace(/\s+/g,'')===b.replace(/\s+/g,''))return true;
   const aw=a.split(' ').filter(w=>w.length>0),bw=b.split(' ').filter(w=>w.length>0);
   const an=trailingSeriesNumber(aw),bn=trailingSeriesNumber(bw);
   // "Part III" vs "Part IV" — never the same release. Also catches the
