@@ -4016,6 +4016,51 @@ async function fetchDiscogsBandcampUrl(type,discogsId){
 // own page — so a single verified hit is accepted immediately there.
 // Only once samples run out without enough agreement does this give up as
 // unresolved, same as before.
+// A candidate domain from bc-search only ever got verified against ONE
+// sampled release's own credited ARTIST (or, for a label, artist-OR-label
+// — see bc-search's own verifyHit/wantNames, an OR check) — never against
+// the actual thing resolveBandcampCatalogUrl is trying to confirm: "is
+// this domain itself name's own storefront". Confirmed live 2026-09-11:
+// the label "Speshall Edishon" sampled two Ron Hardy edit releases that
+// each independently verified (via that artist-name-only OR check) onto
+// deepcutsvinyl.bandcamp.com — a completely different, much bigger
+// reissue label (Deep Cuts, Paris) that ALSO presses Ron Hardy edits.
+// "Two samples agreeing" was never a real disambiguator here since both
+// false hits shared the identical root cause; the caller then dumped
+// Deep Cuts' entire ~880-release catalog as Speshall Edishon's own
+// "Only on Bandcamp" list, and its Bandcamp button linked to the wrong
+// label outright. This is the fix: before trusting a domain, ask what
+// the domain itself is — the same bandName field bc-discography already
+// extracts (its own <meta property="og:title">, added for the bcArtist/
+// bcLabel node feature, see project_waxtree_bandcamp_catalog) — and
+// require IT to match `name`. Fails closed (treats an unreadable name or
+// a request error as "not verified") on the same "unresolved beats
+// confidently wrong" principle bc-discography's own comment already
+// states for the missing-Discogs-link case.
+// Short-lived, url-keyed only (not persisted like bandcampUrlCache/
+// bcOnlyCacheMap, which own the real long-term caching one layer up) —
+// exists purely so verifying a domain's identity here and then actually
+// loading its release list moments later (fetchBandcampOnly, right after
+// resolveBandcampCatalogUrl returns) don't each independently fetch and
+// parse the exact same /music page.
+let bcDiscographyCache={}; // knownBandUrl -> Promise<data>
+function fetchBcDiscographyCached(knownBandUrl){
+  if(!(knownBandUrl in bcDiscographyCache)){
+    bcDiscographyCache[knownBandUrl]=sb.functions.invoke('bc-discography',{body:{knownBandUrl}})
+      .then(({data,error})=>{if(error)throw new Error(error.message);return data;})
+      .catch(e=>{delete bcDiscographyCache[knownBandUrl];throw e;}); // don't let a transient failure poison this for the real fetch right after
+  }
+  return bcDiscographyCache[knownBandUrl];
+}
+async function verifyBandcampDomainIdentity(domain,name){
+  try{
+    const data=await fetchBcDiscographyCached('https://'+domain);
+    if(!data?.resolved||!data?.bandName)return false;
+    return bcOnlyMatches(normalizeStr(stripDiscogsSuffix(name||'')),normalizeStr(data.bandName));
+  }catch{
+    return false;
+  }
+}
 async function resolveBandcampCatalogUrl(type,discogsId,name,isLabelNode,sampleReleases){
   const key=type+':'+discogsId;
   const fromDiscogs=await fetchDiscogsBandcampUrl(type,discogsId);
@@ -4046,8 +4091,16 @@ async function resolveBandcampCatalogUrl(type,discogsId,name,isLabelNode,sampleR
       const{data,error}=await sb.functions.invoke('bc-search',{body:{artist:name}});
       const hitUrl=error?null:data?.tracks?.[0]?.url||null;
       const hostMatch=hitUrl?hitUrl.match(/^https?:\/\/([^/?#]+\.bandcamp\.com)/i)?.[1]:null;
-      if(hostMatch){
-        const resolved='https://'+stripWwwBandcamp(hostMatch);
+      // The single-hit trust this shortcut relies on is exactly what a
+      // scattered-across-other-labels artist can't tell apart from a
+      // genuine own-page hit without this — see verifyBandcampDomainIdentity's
+      // own comment. A real own page (the case this shortcut exists for)
+      // passes it trivially; a stray "found on someone else's storefront"
+      // hit now correctly falls through to the sampling loop below instead
+      // of being adopted outright.
+      const domain=hostMatch?stripWwwBandcamp(hostMatch):null;
+      if(domain&&await verifyBandcampDomainIdentity(domain,name)){
+        const resolved='https://'+domain;
         bandcampUrlCache[key]=resolved;
         return resolved;
       }
@@ -4068,6 +4121,7 @@ async function resolveBandcampCatalogUrl(type,discogsId,name,isLabelNode,sampleR
   // artists one — there was never a real reason for the two cases to
   // trust this differently.
   const domainHits={}; // domain → count
+  const rejectedDomains=new Set(); // failed verifyBandcampDomainIdentity already — don't re-check every time a further sample lands on the same wrong domain
   for(const rel of sampleReleases){
     if(!rel.title)continue;
     let domain=null;
@@ -4086,12 +4140,23 @@ async function resolveBandcampCatalogUrl(type,discogsId,name,isLabelNode,sampleR
       // does, for the same reason (see its own comment).
       domain=hostMatch?stripWwwBandcamp(hostMatch):null;
     }catch{/* try the next sample title */}
-    if(!domain)continue;
+    if(!domain||rejectedDomains.has(domain))continue;
     domainHits[domain]=(domainHits[domain]||0)+1;
+    // TWO samples agreeing used to be trusted outright — but both can
+    // agree for the exact same wrong reason (bc-search's own artist-only
+    // OR-check, not this label/artist's own identity — see
+    // verifyBandcampDomainIdentity's own comment on the Speshall Edishon/
+    // Deep Cuts case this caught live). A failed check here doesn't
+    // abandon the whole resolution — it just disqualifies this one domain
+    // and keeps sampling; a genuinely correct domain still gets found if
+    // enough further samples agree on it instead.
     if(domainHits[domain]>=2){
-      const resolved='https://'+domain;
-      bandcampUrlCache[key]=resolved;
-      return resolved;
+      if(await verifyBandcampDomainIdentity(domain,name)){
+        const resolved='https://'+domain;
+        bandcampUrlCache[key]=resolved;
+        return resolved;
+      }
+      rejectedDomains.add(domain);
     }
   }
   bandcampUrlCache[key]=null; // every sample checked, nothing confirmed — same confirmed-absence caching fetchDiscogsBandcampUrl already does for its own source
@@ -5372,8 +5437,12 @@ async function fetchBandcampOnly(nodeId){
     const bcSampleSize=isLabelNode?8:5;
     const knownBandUrl=await resolveBandcampCatalogUrl(node.type,node.discogsId,name,isLabelNode,discogsReleases.slice(0,bcSampleSize));
     if(!knownBandUrl){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
-    const{data:bcData,error:bcErr}=await sb.functions.invoke('bc-discography',{body:{knownBandUrl}});
-    if(bcErr)throw new Error(bcErr.message);
+    // fetchBcDiscographyCached, not a fresh invoke — resolveBandcampCatalogUrl's
+    // own identity check (verifyBandcampDomainIdentity) already fetched this
+    // exact url a moment ago to confirm it before returning it at all
+    // (see that function's own comment); this reuses that same response
+    // instead of scraping the same /music page a second time in a row.
+    const bcData=await fetchBcDiscographyCached(knownBandUrl);
     if(!bcData?.resolved){bcOnlyCacheMap[nodeId]={status:'unresolved',releases:[]};rr();return;}
     const discogsEntries=discogsReleases.map(r=>({
       title:normalizeStr(r.title||''),
