@@ -55,12 +55,6 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
   const safePage = Math.min(page, totalPages - 1);
   const visibleGroups = pages[safePage] || [];
   const genres = [...new Set((data.tracks || []).flatMap(track => track.genre ? track.genre.split(' · ') : []))].sort();
-  const genreFocus = actions.getGenreFocus(data.tracks);
-  // genreFocus is already sorted most- to least-dominant — the top 2 (not
-  // just whatever's tied for #1, which in real data rarely happens) are
-  // the "main" pills; anything past that is secondary.
-  const genreFocusPrimary = genreFocus?.slice(0, 2) || [];
-  const genreFocusSecondary = genreFocus?.slice(2) || [];
 
   useEffect(() => {
     const target = state.scrollToRelease;
@@ -90,46 +84,6 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
           never actually gets set by the real fetchArtistData/fetchLabelData
           (only a hardcoded DEMO_NODES fallback used it), so there was
           nothing worth preserving from this block. */}
-      {/* What this act is actually known for, from its own catalog — not a
-          Discogs field, computed client-side (getGenreFocus) from the
-          genre/style tag on every release already loaded for this node.
-          Only renders once there's a real sample to characterize (see
-          that function's own guards) rather than restating one or two
-          releases' own tags right back at the digger. */}
-      {genreFocus && (
-        <div className="mb-4">
-          <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Genre focus</span>
-          {/* No raw numbers — two explicit groups instead: the top 2 tags
-              as bigger, solid "main" pills, then a plain-text "also"
-              separator before the rest as smaller, lighter ones. Grouping
-              + a word reads unambiguously; a subtle color/fill difference
-              alone (tried first) turned out too subtle to tell apart at a
-              glance. */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {genreFocusPrimary.map(({ genre }) => {
-              const color = actions.genreColor(genre);
-              return (
-                <span key={genre} style={{ backgroundColor: `${color}33`, borderColor: color, color }} className="inline-flex items-center whitespace-nowrap rounded-[10px] border px-2.5 py-1 text-[12.5px] font-bold">
-                  {genre}
-                </span>
-              );
-            })}
-            {genreFocusSecondary.length > 0 && (
-              <>
-                <span className="text-[10.5px] font-medium text-muted-foreground/60">also</span>
-                {genreFocusSecondary.map(({ genre }) => {
-                  const color = actions.genreColor(genre);
-                  return (
-                    <span key={genre} style={{ backgroundColor: `${color}14`, borderColor: `${color}4d`, color }} className="inline-flex items-center whitespace-nowrap rounded-[10px] border px-2 py-0.5 text-[10.5px] font-semibold opacity-80">
-                      {genre}
-                    </span>
-                  );
-                })}
-              </>
-            )}
-          </div>
-        </div>
-      )}
       {!isLabel && data.correlatedArtists?.length > 0 && (
         <div className="mb-4">
           <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Related artists</span>

@@ -38,6 +38,14 @@ export const Content = ({ state, actions }) => {
   const data = node.data;
   const isLabel = node.type === 'label';
   const followed = state.follows.some(item => item.discogs_id === node.discogsId && item.type === node.type);
+  // What this act is actually known for, from its own catalog — not a
+  // Discogs field, computed client-side from the genre/style tag on every
+  // release already loaded for this node. Sits right of "Label/Artist ·
+  // N releases" instead of its own row further down, filling the empty
+  // space that line otherwise leaves before the Follow button.
+  const genreFocus = data ? actions.getGenreFocus(data.tracks) : null;
+  const genreFocusPrimary = genreFocus?.slice(0, 2) || [];
+  const genreFocusSecondary = genreFocus?.slice(2) || [];
 
   return (
     <main className="min-w-0 overflow-y-auto px-7 pb-28 pt-7 max-sm:px-3.5 max-sm:pb-56">
@@ -55,7 +63,42 @@ export const Content = ({ state, actions }) => {
         {data?.imageUrl ? <img className="size-20 shrink-0 rounded-2xl border border-border object-cover max-sm:size-14" src={data.imageUrl} alt={node.name} /> : <div className="flex size-20 shrink-0 items-center justify-center rounded-2xl border border-border bg-secondary text-muted-foreground max-sm:size-14">{isLabel ? <LabelIcon className="size-8" /> : <ArtistIcon className="size-8" />}</div>}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[28px] font-bold leading-tight max-sm:text-xl">{node.name}</h1>
-          {data && <p className="mt-0.5 text-[13px] text-muted-foreground">{isLabel ? 'Label' : 'Artist'} · {data.trackCount} releases</p>}
+          {data && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+              <p className="shrink-0 text-[13px] text-muted-foreground">{isLabel ? 'Label' : 'Artist'} · {data.trackCount} releases</p>
+              {genreFocus && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {/* No raw numbers — two explicit groups instead: the top 2
+                      tags as bigger, solid "main" pills, then a plain-text
+                      "also" separator before the rest as smaller, lighter
+                      ones. Grouping + a word reads unambiguously; a subtle
+                      color/fill difference alone (tried first) turned out
+                      too subtle to tell apart at a glance. */}
+                  {genreFocusPrimary.map(({ genre }) => {
+                    const color = actions.genreColor(genre);
+                    return (
+                      <span key={genre} style={{ backgroundColor: `${color}33`, borderColor: color, color }} className="inline-flex items-center whitespace-nowrap rounded-[10px] border px-2.5 py-1 text-[12.5px] font-bold">
+                        {genre}
+                      </span>
+                    );
+                  })}
+                  {genreFocusSecondary.length > 0 && (
+                    <>
+                      <span className="text-[10.5px] font-medium text-muted-foreground/60">also</span>
+                      {genreFocusSecondary.map(({ genre }) => {
+                        const color = actions.genreColor(genre);
+                        return (
+                          <span key={genre} style={{ backgroundColor: `${color}14`, borderColor: `${color}4d`, color }} className="inline-flex items-center whitespace-nowrap rounded-[10px] border px-2 py-0.5 text-[10.5px] font-semibold opacity-80">
+                            {genre}
+                          </span>
+                        );
+                      })}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <button
           type="button"
