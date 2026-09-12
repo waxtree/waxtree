@@ -56,6 +56,7 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
   const visibleGroups = pages[safePage] || [];
   const genres = [...new Set((data.tracks || []).flatMap(track => track.genre ? track.genre.split(' · ') : []))].sort();
   const genreFocus = actions.getGenreFocus(data.tracks);
+  const genreFocusTopPct = genreFocus?.[0].pct;
 
   useEffect(() => {
     const target = state.scrollToRelease;
@@ -95,11 +96,21 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
         <div className="mb-4">
           <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Genre focus</span>
           <div className="flex flex-wrap gap-1.5">
+            {/* No raw numbers — genreFocus is already sorted most- to
+                least-dominant, so left-to-right order carries the ranking.
+                The tag(s) tied for the top share get a filled pill, the
+                rest a lighter outline, so the dominant genre still reads
+                at a glance without a percentage next to it. */}
             {genreFocus.map(({ genre, pct }) => {
               const color = actions.genreColor(genre);
+              const isPrimary = pct === genreFocusTopPct;
               return (
-                <span key={genre} style={{ backgroundColor: `${color}1A`, borderColor: `${color}66`, color }} className="inline-flex items-center gap-1 whitespace-nowrap rounded-[10px] border px-2 py-0.5 text-[11px] font-bold">
-                  <span>{genre}</span><span className="font-medium opacity-70">{pct}%</span>
+                <span
+                  key={genre}
+                  style={{ backgroundColor: `${color}${isPrimary ? '33' : '14'}`, borderColor: `${color}${isPrimary ? '99' : '4d'}`, color }}
+                  className="inline-flex items-center whitespace-nowrap rounded-[10px] border px-2 py-0.5 text-[11px] font-bold"
+                >
+                  {genre}
                 </span>
               );
             })}
