@@ -56,9 +56,11 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
   const visibleGroups = pages[safePage] || [];
   const genres = [...new Set((data.tracks || []).flatMap(track => track.genre ? track.genre.split(' · ') : []))].sort();
   const genreFocus = actions.getGenreFocus(data.tracks);
-  const genreFocusTopPct = genreFocus?.[0].pct;
-  const genreFocusPrimary = genreFocus?.filter(g => g.pct === genreFocusTopPct) || [];
-  const genreFocusSecondary = genreFocus?.filter(g => g.pct !== genreFocusTopPct) || [];
+  // genreFocus is already sorted most- to least-dominant — the top 2 (not
+  // just whatever's tied for #1, which in real data rarely happens) are
+  // the "main" pills; anything past that is secondary.
+  const genreFocusPrimary = genreFocus?.slice(0, 2) || [];
+  const genreFocusSecondary = genreFocus?.slice(2) || [];
 
   useEffect(() => {
     const target = state.scrollToRelease;
@@ -97,12 +99,12 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
       {genreFocus && (
         <div className="mb-4">
           <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Genre focus</span>
-          {/* No raw numbers — two explicit groups instead: the tag(s) tied
-              for the top share as bigger, solid pills, then a plain-text
-              "also" separator before the rest as smaller, lighter ones.
-              Grouping + a word reads unambiguously; a subtle color/fill
-              difference alone (tried first) turned out too subtle to
-              tell apart at a glance. */}
+          {/* No raw numbers — two explicit groups instead: the top 2 tags
+              as bigger, solid "main" pills, then a plain-text "also"
+              separator before the rest as smaller, lighter ones. Grouping
+              + a word reads unambiguously; a subtle color/fill difference
+              alone (tried first) turned out too subtle to tell apart at a
+              glance. */}
           <div className="flex flex-wrap items-center gap-1.5">
             {genreFocusPrimary.map(({ genre }) => {
               const color = actions.genreColor(genre);
