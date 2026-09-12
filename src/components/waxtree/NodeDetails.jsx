@@ -55,6 +55,7 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
   const safePage = Math.min(page, totalPages - 1);
   const visibleGroups = pages[safePage] || [];
   const genres = [...new Set((data.tracks || []).flatMap(track => track.genre ? track.genre.split(' · ') : []))].sort();
+  const genreFocus = actions.getGenreFocus(data.tracks);
 
   useEffect(() => {
     const target = state.scrollToRelease;
@@ -84,6 +85,27 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
           never actually gets set by the real fetchArtistData/fetchLabelData
           (only a hardcoded DEMO_NODES fallback used it), so there was
           nothing worth preserving from this block. */}
+      {/* What this act is actually known for, from its own catalog — not a
+          Discogs field, computed client-side (getGenreFocus) from the
+          genre/style tag on every release already loaded for this node.
+          Only renders once there's a real sample to characterize (see
+          that function's own guards) rather than restating one or two
+          releases' own tags right back at the digger. */}
+      {genreFocus && (
+        <div className="mb-4">
+          <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Genre focus</span>
+          <div className="flex flex-wrap gap-1.5">
+            {genreFocus.map(({ genre, pct }) => {
+              const color = actions.genreColor(genre);
+              return (
+                <span key={genre} style={{ backgroundColor: `${color}1A`, borderColor: `${color}66`, color }} className="inline-flex items-center gap-1 whitespace-nowrap rounded-[10px] border px-2 py-0.5 text-[11px] font-bold">
+                  <span>{genre}</span><span className="font-medium opacity-70">{pct}%</span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {!isLabel && data.correlatedArtists?.length > 0 && (
         <div className="mb-4">
           <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Related artists</span>

@@ -3927,6 +3927,50 @@ function genreColor(g){
   let h=5381;for(let i=0;i<g.length;i++)h=((h<<5)+h+g.charCodeAt(i))&0x7FFFFFFF;
   return['#E8834A','#4AB8E8','#9B59B6','#C8D840','#E84A4A','#4AE8A4','#E84A9E','#4A9EE8','#E8C84A','#8B4AE8','#4AE8C4','#E86A4A'][h%12];
 }
+// "What is this artist/label actually about" — shown right in the node
+// header, alongside the name/photo/related-artists block. A track's own
+// `genre` string is really the RELEASE's (every track on the same
+// release repeats it — see ReleaseCard's own `first.genre` convention),
+// so this counts each DISTINCT release once via groupTracksByRelease,
+// not once per track — a 10-track LP would otherwise out-vote a 2-track
+// EP purely on row count, not on it being one genuine artistic decision.
+// Two guards keep this from over-claiming on thin data: a real sample
+// size first (GENRE_FOCUS_MIN_RELEASES — one or two releases just
+// repeats what's already sitting right there on their own cards, not a
+// genuine pattern), then only genres actually covering a real share of
+// that sample (GENRE_FOCUS_MIN_SHARE), capped to the top few
+// (GENRE_FOCUS_MAX_TAGS) so this reads as "known for", not the full tag
+// cloud. Returns null (render nothing) rather than a low-confidence
+// guess when either guard isn't met.
+//
+// Runs on node.data.tracks as loaded — for a prolific artist/label past
+// fetchArtistData/fetchLabelData's own 200-track fetch cap (newest-first,
+// see their own comments), that's their most RECENT catalog, not
+// necessarily their whole career. Same accepted tradeoff the "TRACKS (X
+// Discogs, Y loaded)" label next to this already surfaces elsewhere;
+// not re-litigated here.
+const GENRE_FOCUS_MIN_RELEASES=3;
+const GENRE_FOCUS_MIN_SHARE=0.15;
+const GENRE_FOCUS_MAX_TAGS=4;
+function getGenreFocus(tracks){
+  if(!tracks?.length)return null;
+  const releases=groupTracksByRelease(tracks).filter(r=>r.tracks[0]?.genre);
+  if(releases.length<GENRE_FOCUS_MIN_RELEASES)return null;
+  const counts=new Map();
+  for(const r of releases){
+    const tags=new Set(r.tracks[0].genre.split(' · ').map(g=>g.trim()).filter(Boolean));
+    for(const tag of tags)counts.set(tag,(counts.get(tag)||0)+1);
+  }
+  const ranked=[...counts.entries()]
+    .map(([genre,count])=>({genre,pct:Math.round(count/releases.length*100)}))
+    .filter(item=>item.pct>=GENRE_FOCUS_MIN_SHARE*100)
+    .sort((a,b)=>b.pct-a.pct||a.genre.localeCompare(b.genre))
+    .slice(0,GENRE_FOCUS_MAX_TAGS);
+  // .slice() always returns an array, even empty — never falsy, so an
+  // explicit length check is the only correct way to fall back to null
+  // when nothing clears the share guard.
+  return ranked.length?ranked:null;
+}
 
 // Discogs suffixes an artist name with " (N)" to disambiguate same-named
 // artists (e.g. "Artist Name (2)") — strip it for display everywhere.
@@ -6531,7 +6575,7 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  exploreCorrelatedArtist,findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampArtistUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
+  exploreCorrelatedArtist,findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampArtistUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getGenreFocus,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
