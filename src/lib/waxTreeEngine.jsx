@@ -1227,11 +1227,11 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 // gets the same treatment (toggleLike does `delete st.likedTracks[id]` on
 // unlike) — but NOT likes itself (a plain boolean flip, never deleted —
 // {...remote,...local} already lets local's own false correctly win) or
-// listens (only ever set, never removed anywhere in the app). Deliberately
-// NOT extended to nodes/branches (the actual explored tree): that's
-// structural, not a flat collection, edits happen in place (pin/tag/move),
-// and a naive merge there could easily produce a broken tree — it stays
-// on the existing overwrite+looksLikeDataWipe safety net below, unchanged.
+// listens (only ever set, never removed anywhere in the app). Originally
+// NOT extended to nodes/branches (the actual explored tree, structural
+// rather than a flat collection) — see threeWayMergeTree below for why
+// that turned out to be the wrong call too, and what it took to merge
+// safely instead.
 function threeWayMergeById(base,local,remote,keyFn){
   const baseIds=new Set((base||[]).map(keyFn));
   const localById=new Map((local||[]).map(item=>[keyFn(item),item]));
@@ -1266,6 +1266,45 @@ function threeWayMergePlaylists(base,local,remote){
     out.push({...(lp||rp),tracks:threeWayMergeById(bp?.tracks,lp?.tracks,rp?.tracks,t=>t.id)});
   });
   return out;
+}
+// Extends the same base/local/remote union to the actual explored tree
+// (branches + nodes) — previously deliberately left out of three-way
+// merging (see threeWayMergeById's own comment above) on the theory that
+// a naive by-id merge could produce a broken tree. Confirmed live
+// 2026-09-14 that leaving it a straight overwrite is worse: two Chrome
+// profiles on the same account, one with a much larger explored DUB
+// branch than the other, and the smaller one's next unrelated auto-save
+// (any debounced pushStateToCloud — liking a track, toggling a filter)
+// silently replaced the cloud's fuller tree with its own shorter one.
+// looksLikeDataWipe's coarse node-count check doesn't catch a partial
+// loss like this (it only fires on a much bigger drop), so nothing
+// stopped it.
+//
+// The union half is exactly as safe here as it already is for playlists/
+// follows/likedTracks — a branch or node new on either side is genuinely
+// new, keep it; one missing from local or remote but present in base was
+// deliberately removed there, and that wins over the other side merely
+// still having it. Two structural risks a plain union alone doesn't
+// cover, both handled below:
+//   - a node whose branchId no longer resolves once branches are merged
+//     (its branch was deleted on the OTHER side — removeBranch's own
+//     real behavior is to drop every node under a deleted branch, not
+//     leave them dangling);
+//   - a node whose parentId no longer resolves once nodes are merged
+//     (its parent was deleted on the OTHER side — removeNode's own real
+//     behavior is to reparent orphaned children to root, not cascade
+//     their removal).
+// Operates on the LIGHT node shape (id/branchId/parentId/type/discogsId/
+// name/pinned/tags/params — exactly what pushStateToCloud already strips
+// nodes down to for the cloud); callers reconcile the result back to
+// their own full shape (heavy Discogs cache included) afterward.
+function threeWayMergeTree(baseBranches,localBranches,remoteBranches,baseNodes,localNodes,remoteNodes){
+  const branches=threeWayMergeById(baseBranches,localBranches,remoteBranches,b=>b.id);
+  const branchIds=new Set(branches.map(b=>b.id));
+  let nodes=threeWayMergeById(baseNodes,localNodes,remoteNodes,n=>n.id).filter(n=>branchIds.has(n.branchId));
+  const nodeIds=new Set(nodes.map(n=>n.id));
+  nodes=nodes.map(n=>n.parentId&&!nodeIds.has(n.parentId)?{...n,parentId:null}:n);
+  return{branches,nodes};
 }
 // The stored "base" snapshot three-way merging needs — written after
 // every successful push (to exactly what was just pushed) and pull (to
@@ -1344,6 +1383,11 @@ async function pushStateToCloud(){
       payload.likedTracks=threeWayMergeDict(base?.likedTracks,payload.likedTracks,c.likedTracks);
       payload.likes={...(c.likes||{}),...(payload.likes||{})}; // plain boolean flip, never deleted — local's own value always correctly wins
       payload.listens={...(c.listens||{}),...(payload.listens||{})}; // only ever set, never removed — a plain union is exact, no base needed
+      // The actual explored tree — see threeWayMergeTree's own comment for
+      // why this used to be a straight overwrite and what broke because of it.
+      const mergedTree=threeWayMergeTree(base?.branches,payload.branches,c.branches,base?.nodes,payload.nodes,c.nodes);
+      payload.branches=mergedTree.branches;
+      payload.nodes=mergedTree.nodes;
     }
     if(existing?.data&&looksLikeDataWipe(payload,existing.data)){
       console.warn('WaxTree: refusing to sync — new state looks like an unexplained wipe compared to the existing cloud backup.');
@@ -1352,7 +1396,7 @@ async function pushStateToCloud(){
     }
     const{error}=await sb.from('user_state').upsert({user_id:wtSession.user.id,data:payload});
     if(error)throw error;
-    saveSyncBase({playlists:payload.playlists,dasAscoltare:payload.dasAscoltare,follows:payload.follows,likedTracks:payload.likedTracks});
+    saveSyncBase({playlists:payload.playlists,dasAscoltare:payload.dasAscoltare,follows:payload.follows,likedTracks:payload.likedTracks,branches:payload.branches,nodes:payload.nodes});
     maybeSnapshotHistory(payload);
   }catch(e){
     console.warn('WaxTree: cloud backup failed (will retry on next change):',e);
@@ -1514,7 +1558,34 @@ async function hydrateFromCloud(){
     if(c.likedTracks){const merged=threeWayMergeDict(base?.likedTracks,st.likedTracks,c.likedTracks);if(Object.keys(merged).length!==Object.keys(st.likedTracks||{}).length){st.likedTracks=merged;mergedAnything=true;}}
     if(c.likes){const merged={...c.likes,...st.likes};if(Object.keys(merged).length!==Object.keys(st.likes||{}).length){st.likes=merged;mergedAnything=true;}} // plain boolean flip, never deleted — no base needed
     if(c.listens){const merged={...c.listens,...st.listens};if(Object.keys(merged).length!==Object.keys(st.listens||{}).length){st.listens=merged;mergedAnything=true;}} // only ever set, never removed — no base needed
-    saveSyncBase({playlists:st.playlists,dasAscoltare:st.dasAscoltare,follows:st.follows,likedTracks:st.likedTracks}); // this device has now accounted for exactly this cloud state
+    // The actual explored tree — see threeWayMergeTree's own comment for
+    // why this used to be a straight overwrite (further down, gated on the
+    // timestamp check below) and what broke because of it. Runs on the
+    // LIGHT node shape (mirroring what's actually stored in base/cloud),
+    // then reconciles back onto st.nodes so a node this device already
+    // has loaded keeps its cached Discogs data instead of being reset to
+    // loaded:false like a genuinely new-from-remote node has to be.
+    if(c.branches||c.nodes){
+      const localNodesLight=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags,params:n.params}));
+      const mergedTree=threeWayMergeTree(base?.branches,st.branches,c.branches||st.branches,base?.nodes,localNodesLight,c.nodes||localNodesLight);
+      const localById=new Map(st.nodes.map(n=>[n.id,n]));
+      const nextNodes=mergedTree.nodes.map(n=>{
+        const existing=localById.get(n.id);
+        if(existing)return existing.parentId===n.parentId?existing:{...existing,parentId:n.parentId};
+        return{...n,pinned:!!n.pinned,tags:n.tags||[],loaded:false,loading:false,error:null,data:null};
+      });
+      const mergedIds=new Set(mergedTree.nodes.map(n=>n.id));
+      const nodesChanged=nextNodes.length!==st.nodes.length||st.nodes.some(n=>!mergedIds.has(n.id))||nextNodes.some(n=>localById.get(n.id)?.parentId!==n.parentId);
+      const branchesChanged=JSON.stringify(mergedTree.branches)!==JSON.stringify(st.branches);
+      if(nodesChanged||branchesChanged){
+        st.nodes=nextNodes;
+        st.branches=mergedTree.branches;
+        if(!getBranch(st.activeBranchId))st.activeBranchId=st.branches[0]?.id||st.activeBranchId;
+        if(!getNode(st.selectedId))st.selectedId=st.nodes.filter(n=>n.branchId===st.activeBranchId)[0]?.id||null;
+        mergedAnything=true;
+      }
+    }
+    saveSyncBase({playlists:st.playlists,dasAscoltare:st.dasAscoltare,follows:st.follows,likedTracks:st.likedTracks,branches:st.branches,nodes:st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags,params:n.params}))}); // this device has now accounted for exactly this cloud state
     const cloudTs=new Date(data.updated_at).getTime();
     const localTs=Number(localStorage.getItem(SK+':ts')||0);
     // Timestamp alone isn't reliable — confirmed live twice now
@@ -1553,15 +1624,14 @@ async function hydrateFromCloud(){
       return;
     }
     if(looksWiped)console.warn('WaxTree: local state looks wiped next to a real cloud backup — restoring from cloud despite the local timestamp.');
-    if(c.branches?.length)st.branches=c.branches;
-    if(c.nodes)st.nodes=c.nodes.map(n=>({...n,pinned:!!n.pinned,tags:n.tags||[],loaded:false,loading:false,error:null,data:null}));
     if(c.selectedId!==undefined)st.selectedId=c.selectedId;
     if(c.activeBranchId)st.activeBranchId=c.activeBranchId;
     if(c.chips)st.chips=c.chips;
-    // likes/likedTracks/listens/dasAscoltare/playlists/follows are already
-    // merged (not overwritten) above, independently of this gate — do NOT
-    // reassign them here from the raw cloud copy, or a full restore would
-    // throw away exactly what the merge just preserved.
+    // likes/likedTracks/listens/dasAscoltare/playlists/follows/branches/
+    // nodes are already merged (not overwritten) above, independently of
+    // this gate — do NOT reassign them here from the raw cloud copy, or a
+    // full restore would throw away exactly what the merge just preserved
+    // (a local node's already-loaded Discogs cache included).
     if(c.history)st.history=c.history;
     if(c.followScanKnownIds)st.followScanKnownIds=c.followScanKnownIds;
     if(c.supaIdMap)st.supaIdMap={...c.supaIdMap,...st.supaIdMap}; // merge, don't clobber — this device may have minted mappings the cloud copy predates
