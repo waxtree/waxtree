@@ -86,16 +86,18 @@ export const PlaylistsModal = ({ state, actions }) => {
               state={state}
               actions={actions}
               showMove
-              // Deliberately does NOT close() — pressing play used to
-              // kick the user straight back out to the tree behind this
-              // modal, which made browsing several tracks from a playlist
-              // in a row (the exact point of this modal) impossible.
-              // doPlay() itself still reaches the real mini-player fine
-              // even while this sits on top of it (RightPanel's iframe/
-              // audio element stays mounted, just visually behind this
-              // overlay) — the user can close this whenever they actually
-              // want to see the transport controls.
-              onPlay={() => actions.doPlay(track.id, track.videoId, track.title, track.artistName)}
+              // QueueRow resolves and plays its own best source now
+              // (Deezer preview -> YouTube -> record-store fallbacks, not
+              // just a Discogs videoId) — deliberately does NOT close()
+              // itself, though: pressing play used to kick the user
+              // straight back out to the tree behind this modal, which
+              // made browsing several tracks from a playlist in a row
+              // (the exact point of this modal) impossible. Playback still
+              // reaches the real mini-player fine even while this sits on
+              // top of it (RightPanel's iframe/audio element stays
+              // mounted, just visually behind this overlay) — the user
+              // can close this whenever they actually want to see the
+              // transport controls.
               onRemove={() => removeFromSelected(track)}
             />
           )) : <p className="py-8 text-center text-xs text-muted-foreground/70">No tracks yet — use 🏷️ on any track to add</p>}
