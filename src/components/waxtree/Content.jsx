@@ -74,6 +74,7 @@ export const Content = ({ state, actions }) => {
                       ones. Grouping + a word reads unambiguously; a subtle
                       color/fill difference alone (tried first) turned out
                       too subtle to tell apart at a glance. */}
+                  <span className="text-[10.5px] font-bold uppercase tracking-[.04em] text-muted-foreground/70">Focus:</span>
                   {genreFocusPrimary.map(({ genre }) => {
                     const color = actions.genreColor(genre);
                     return (
