@@ -5325,19 +5325,25 @@ function getDeezerRelease(artist,title,catno,label){
 // getDeezerPreviewUrl), or null. `index`/`count` are this track's own
 // position in the Discogs tracklist and that tracklist's length.
 //
-// Positional alignment is the PRIMARY strategy: a Deezer album is stored
-// in tracklist order, so when both sides agree on the track count,
-// tracks[index] is unambiguously this track. It's also the only thing
-// that tells near-identical titles apart — "The Forget" / "The Regret"
-// (a fuzzy matcher pairs them on the shared word "the"), or
-// "Blinded By The Exit Light" vs its "(Tension Mix)" (one is a prefix of
-// the other) — both of which used to resolve BOTH rows to whichever
-// track came first (user report 2026-09-10). A UNIQUE fuzzy title match
-// is the fallback for when the counts differ (a bonus track, a single,
-// a compilation cut); a non-unique one is worse than none.
+// Position is a TIEBREAKER only, never a blind override — title always
+// gets first say. Originally this trusted tracks[index] outright
+// whenever both sides agreed on count, on the assumption a Deezer album
+// is stored in the same order as the vinyl tracklist. Confirmed live
+// 2026-09-12 that assumption is false: Pulshar's "Umbra/Lux" has the
+// same 17-track count on Deezer as the 4-side vinyl release, but Deezer
+// (like the same release's own Bandcamp upload) runs in the digital
+// distributor's own order, not the vinyl A/B/C/D sequence — position
+// alone silently pointed "Better Than Tears" (vinyl side B, track 1) at
+// Deezer's own track 5, "Mr. Money Man". A title match now has to at
+// least consider a track plausible before position is allowed to pick
+// among candidates — it still resolves near-identical titles a plain
+// fuzzy pass can't tell apart on its own ("The Forget" / "The Regret",
+// or "Blinded By The Exit Light" vs its "(Tension Mix)", both of which
+// used to collapse onto whichever track came first — user report
+// 2026-09-10), just never reaches past that pool to a title with no
+// resemblance at all.
 function matchDeezerTrack(tracks,trackTitle,index,count){
   if(!tracks?.length)return null;
-  if(count===tracks.length&&index>=0&&tracks[index])return tracks[index].id;
   const titleN=normalizeStr(trackTitle||'');
   if(!titleN)return null;
   const exact=tracks.filter(t=>normalizeStr(t.title||'')===titleN);
@@ -5346,7 +5352,12 @@ function matchDeezerTrack(tracks,trackTitle,index,count){
     const tN=normalizeStr(t.title||'');
     return bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN);
   });
-  return fuzzy.length===1?fuzzy[0].id:null;
+  if(fuzzy.length===1)return fuzzy[0].id;
+  if(fuzzy.length>1&&count===tracks.length&&index>=0){
+    const atIndex=tracks[index];
+    if(atIndex&&fuzzy.some(t=>t.id===atIndex.id))return atIndex.id;
+  }
+  return null;
 }
 // Non-triggering peek at an already-resolved Deezer release — for
 // playAdjacentTrack, which shouldn't kick off a fetch of its own.
