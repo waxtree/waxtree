@@ -57,6 +57,8 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
   const genres = [...new Set((data.tracks || []).flatMap(track => track.genre ? track.genre.split(' · ') : []))].sort();
   const genreFocus = actions.getGenreFocus(data.tracks);
   const genreFocusTopPct = genreFocus?.[0].pct;
+  const genreFocusPrimary = genreFocus?.filter(g => g.pct === genreFocusTopPct) || [];
+  const genreFocusSecondary = genreFocus?.filter(g => g.pct !== genreFocusTopPct) || [];
 
   useEffect(() => {
     const target = state.scrollToRelease;
@@ -95,25 +97,34 @@ export const NodeDetails = ({ node, data, isLabel, state, actions, page, setPage
       {genreFocus && (
         <div className="mb-4">
           <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Genre focus</span>
-          <div className="flex flex-wrap gap-1.5">
-            {/* No raw numbers — genreFocus is already sorted most- to
-                least-dominant, so left-to-right order carries the ranking.
-                The tag(s) tied for the top share get a filled pill, the
-                rest a lighter outline, so the dominant genre still reads
-                at a glance without a percentage next to it. */}
-            {genreFocus.map(({ genre, pct }) => {
+          {/* No raw numbers — two explicit groups instead: the tag(s) tied
+              for the top share as bigger, solid pills, then a plain-text
+              "also" separator before the rest as smaller, lighter ones.
+              Grouping + a word reads unambiguously; a subtle color/fill
+              difference alone (tried first) turned out too subtle to
+              tell apart at a glance. */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {genreFocusPrimary.map(({ genre }) => {
               const color = actions.genreColor(genre);
-              const isPrimary = pct === genreFocusTopPct;
               return (
-                <span
-                  key={genre}
-                  style={{ backgroundColor: `${color}${isPrimary ? '33' : '14'}`, borderColor: `${color}${isPrimary ? '99' : '4d'}`, color }}
-                  className="inline-flex items-center whitespace-nowrap rounded-[10px] border px-2 py-0.5 text-[11px] font-bold"
-                >
+                <span key={genre} style={{ backgroundColor: `${color}33`, borderColor: color, color }} className="inline-flex items-center whitespace-nowrap rounded-[10px] border px-2.5 py-1 text-[12.5px] font-bold">
                   {genre}
                 </span>
               );
             })}
+            {genreFocusSecondary.length > 0 && (
+              <>
+                <span className="text-[10.5px] font-medium text-muted-foreground/60">also</span>
+                {genreFocusSecondary.map(({ genre }) => {
+                  const color = actions.genreColor(genre);
+                  return (
+                    <span key={genre} style={{ backgroundColor: `${color}14`, borderColor: `${color}4d`, color }} className="inline-flex items-center whitespace-nowrap rounded-[10px] border px-2 py-0.5 text-[10.5px] font-semibold opacity-80">
+                      {genre}
+                    </span>
+                  );
+                })}
+              </>
+            )}
           </div>
         </div>
       )}
