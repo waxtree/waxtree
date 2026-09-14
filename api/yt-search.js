@@ -78,7 +78,11 @@ export default async function handler(req, res) {
     const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search')
     searchUrl.searchParams.set('part', 'snippet')
     searchUrl.searchParams.set('type', 'video')
-    searchUrl.searchParams.set('videoCategoryId', '10') // Music
+    // No videoCategoryId restriction: confirmed live 2026-09-14 (yt_match_corrections
+    // row for Makam "Brothers love") that a real, correct upload can sit outside
+    // YouTube's own "Music" category (10) — small/unofficial reposts routinely land
+    // under "People & Blogs" instead. This only widens the candidate pool fed into
+    // matchYtCandidate's title/channel/duration checks below, never loosens them.
     searchUrl.searchParams.set('maxResults', '15')
     searchUrl.searchParams.set('q', q)
     searchUrl.searchParams.set('key', YT_API_KEY)
