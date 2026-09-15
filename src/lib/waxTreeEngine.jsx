@@ -3198,9 +3198,24 @@ function createYtPlayer(){
   ytPlayer=new YT.Player('yt-iframe-host',{
     host:'https://www.youtube-nocookie.com',
     height:'191',width:'340',videoId:st.nowPlaying.videoId,
-    playerVars:{autoplay:1,modestbranding:1,rel:0,fs:0,controls:0,disablekb:1,iv_load_policy:3},
+    // autoplay:0, NOT 1 — this playerVars object gets baked straight into
+    // the iframe's own src, and Chrome can reload that iframe on its own
+    // (observed after a laptop wakes from a long system sleep/standby,
+    // likely its media-resource reclamation for a backgrounded tab, not
+    // anything WaxTree's own JS does) without React or this function ever
+    // running again. Confirmed live 2026-09-14: a track left sitting in
+    // the mini player (playing OR already paused) started playing on its
+    // own on wake, every time, with no click — src=...&autoplay=1 firing
+    // again on that browser-level reload is exactly what a persistent
+    // "start playing" instruction baked into a reloadable URL would do.
+    // playVideo() below fires once, in real JS, only when THIS function
+    // actually runs — which only happens from syncYtPlayer in response to
+    // a genuine st.nowPlaying change (a real play action) — so a bare
+    // browser-level iframe reload with no JS re-execution just sits
+    // loaded and paused instead of resuming on its own.
+    playerVars:{autoplay:0,modestbranding:1,rel:0,fs:0,controls:0,disablekb:1,iv_load_policy:3},
     events:{
-      onReady(){},
+      onReady(e){e.target.playVideo();},
       onStateChange(e){
         if(e.data===YT.PlayerState.PLAYING)tryBadge();
       },
