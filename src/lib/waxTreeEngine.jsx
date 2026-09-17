@@ -4557,7 +4557,19 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
     aliases:(artData.aliases||[]).map(a=>({id:a.id,name:a.name,type:'artist'})),
     highlights:{yearRange:minY?(minY===maxY?String(minY):`${minY}–${maxY}`):null,names:labels,labelStr:labels.length?`Released on: ${labels.join(', ')}`:null},
     correlatedArtists:[],
-    tracks,trackCount:relData.pagination.items,
+    // relList.length, NOT relData.pagination.items — that field counts
+    // EVERY release Discogs credits this artist on in ANY role (remix,
+    // compilation appearance, producer, ...), not just their own. relList
+    // is already filtered to role==='Main' above (falling back to the raw
+    // list only if an artist genuinely has zero Main-role credits), the
+    // exact set fetchReleaseBatches actually pulls tracks from — the same
+    // number every "X releases"/"X Discogs, Y loaded" label already reads
+    // this field as. Reported live 2026-09-17 as "why does DJ Minx only
+    // load 43 of 106 tracks" — she doesn't have 106 releases, she has 21
+    // (the other 85 were remix/compilation/producer credits, never meant
+    // to be fetched as her own discography); 43 tracks from 21 releases
+    // is completely normal, the "106" was just measuring the wrong thing.
+    tracks,trackCount:relList.length,
     bandcampUrl:extractBandcampUrl(artData.urls),
     _v:TRACK_DATA_VERSION
   };
