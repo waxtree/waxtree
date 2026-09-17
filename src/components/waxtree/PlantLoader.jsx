@@ -31,6 +31,10 @@ export const PlantLoader = ({ label = 'Loading…' }) => (
         </g>
       </g>
     </svg>
-    {label && <span className="text-xs tracking-[.06em] text-[var(--wt-faint)]">{label}</span>}
+    {/* max-w + text-center: the default short "Loading…" never needed
+        either, but a longer, context-specific label (see Content.jsx's
+        own use for a large-catalog node) wraps cleanly instead of
+        overflowing the narrow center column. */}
+    {label && <span className="max-w-[220px] text-center text-xs tracking-[.06em] text-[var(--wt-faint)]">{label}</span>}
   </div>
 );
