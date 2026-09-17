@@ -31,6 +31,10 @@ export const AudioPreviewControls = ({ trackId, mp3Url, source, deezerId, title,
   const curRef = useRef(null);
   const durRef = useRef(null);
   const scrubbingRef = useRef(false);
+  // Only the FIRST blobUrl resolved for a given trackId should autoplay —
+  // see the [blobUrl] effect's own comment for why a later blobUrl change
+  // for the SAME track must not.
+  const autoPlayedRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const blobUrl = source === 'hardwax' ? actions.getHardwaxAudioBlobUrl(mp3Url)
     : source === 'deezer' ? actions.getDeezerPreviewUrl(deezerId)
@@ -38,6 +42,7 @@ export const AudioPreviewControls = ({ trackId, mp3Url, source, deezerId, title,
 
   useEffect(() => {
     scrubbingRef.current = false;
+    autoPlayedRef.current = false;
     setPlaying(false);
   }, [trackId]);
 
@@ -75,7 +80,22 @@ export const AudioPreviewControls = ({ trackId, mp3Url, source, deezerId, title,
     audio.addEventListener('loadedmetadata', onTime);
     audio.addEventListener('play', onPlay);
     audio.addEventListener('pause', onPause);
-    audio.play().catch(() => {}); // autoplay can be blocked silently — the play/pause button still works either way
+    // Deezer's own signed preview url expires ~12 min after issue (see
+    // getDeezerPreviewUrl) and silently re-fetches a fresh one in the
+    // background once it does — a genuinely different blobUrl string for
+    // the SAME track the user was never asked to restart. Reported live
+    // 2026-09-17: a laptop locked for a while, unlocked, and the preview
+    // was already mid-restart from 0:00 with no click — traced to exactly
+    // this refetch swapping blobUrl while the panel just sat there idle,
+    // which used to call audio.play() unconditionally on every blobUrl
+    // change. Only the first resolved blobUrl for this trackId autoplays;
+    // a later swap (this refresh, or the equivalent Hard Wax blob re-fetch)
+    // just re-wires the listeners onto the new source, ready to resume
+    // instantly if the user presses play, but never starts on its own.
+    if (!autoPlayedRef.current) {
+      autoPlayedRef.current = true;
+      audio.play().catch(() => {}); // autoplay can be blocked silently — the play/pause button still works either way
+    }
     return () => {
       audio.removeEventListener('timeupdate', onTime);
       audio.removeEventListener('loadedmetadata', onTime);
