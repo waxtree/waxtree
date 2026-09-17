@@ -41,6 +41,16 @@ export const AudioPreviewControls = ({ trackId, mp3Url, source, deezerId, title,
     setPlaying(false);
   }, [trackId]);
 
+  // Same fix as the YouTube player (see the engine's own visibilitychange
+  // listener next to killYt) — force a pause the instant the tab goes
+  // hidden, so nothing is left mid-playback for the tab regaining
+  // visibility to resume on its own.
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === 'hidden') audioRef.current?.pause(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !blobUrl) return;

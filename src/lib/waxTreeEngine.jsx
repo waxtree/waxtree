@@ -3255,6 +3255,22 @@ function showYtFallback(msg,np){
   rr();
 }
 function killYt(){if(ytPlayer){ytPlayer.destroy();ytPlayer=null;}}
+// Reported live 2026-09-14/15, repeatable on every hide/show cycle (not
+// just a long system sleep) across two separate Chrome sessions: whatever
+// was loaded in the mini player — even merely paused, not actively
+// playing — silently resumed the instant the tab became visible again,
+// with no click. createYtPlayer's own autoplay:0 fix (see its comment)
+// only closed the door on OUR code somehow reconstructing the player on
+// its own; it does nothing about the YouTube iframe's OWN internal resume
+// behavior once it regains visibility — that happens entirely inside a
+// third-party embed our JS can't observe or prevent from in here. The one
+// lever fully in our control: force a pause ourselves the instant the tab
+// goes hidden, so there's nothing left mid-playback for the iframe (or
+// Chrome, or anything else) to resume once it's visible again — starting
+// it back up always needs a real click after that.
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden')ytPlayer?.pauseVideo?.();
+});
 // Imperative, read-on-demand player access for the custom transport bar
 // (YtCustomControls.jsx) — deliberately NOT routed through st/rr(). That
 // component polls this every 500ms on its own; funnelling position updates
