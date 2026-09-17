@@ -109,7 +109,19 @@ export const Content = ({ state, actions }) => {
           {followed ? '✓ Following' : '+ Follow'}
         </button>
       </div>
-      {node.loading && <PlantLoader />}
+      {/* An artist/label with a genuinely large catalog (100+ releases) can
+          take several minutes on its FIRST ever load — every release needs
+          its own Discogs call, deliberately throttled to protect the
+          shared, no-personal-token proxy every user without their own
+          Discogs account goes through (see rqSharedN/rqSharedW in
+          waxTreeEngine.jsx — tuned after a real rate-limit outage,
+          2026-07-16, not something to raise casually). Reported live
+          2026-09-17 as "stuck" loading DJ Minx (106 releases) — it wasn't
+          stuck, just slow, and the bare "Loading…" gave no hint why. A
+          second visit by anyone is fast again (discogs_node_cache — the
+          shared cross-user cache), so this only ever bites the first
+          person to open a given prolific act. */}
+      {node.loading && <PlantLoader label="Loading… a big catalog can take a few minutes the first time it's opened" />}
       {node.error && (
         <div className="flex flex-col items-center gap-3 px-7 py-12 text-center">
           <div className="text-4xl">🌱</div>
