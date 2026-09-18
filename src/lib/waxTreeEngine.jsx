@@ -1837,21 +1837,39 @@ function playAdjacentTrack(dir){
   if(!next)return;
   const node=getNode(st.selectedId);
   const artist=node?.type==='label'?next.artistName||'':node?.name||'';
-  // Same Deezer-first order as the track rows (see TrackRow) — but a peek
-  // at the already-resolved cache only, no fetch of its own from here; if
-  // this release wasn't matched on Deezer while its card rendered, fall
-  // straight through to the video. matchDeezerTrack needs this track's
-  // position within its OWN release (not the flat node list) — the flat
-  // list keeps a release's tracks contiguous and in order, so filtering
-  // by the Discogs release-id prefix recovers both.
-  // A Bandcamp-native track carries its own stream — play that, same
-  // rung-0 priority as its row (see TrackRow).
+  // Same full priority order as a track's own row (see
+  // useAudioPreviewSource): Bandcamp -> Deezer -> [video, handled by
+  // doPlay's own fallback below] -> Hard Wax -> Yoyaku -> Deejay.de ->
+  // Clone.nl. Every non-Bandcamp/Deezer step here is a PEEK at the
+  // already-resolved cache only, never a fetch of its own — Next/
+  // Previous shouldn't speculatively kick off new store lookups for a
+  // release nobody's actually looked at yet (same reasoning
+  // peekDeezerMatch was built for). Reported live 2026-09-18: skipping
+  // to the next track fell straight through to a fresh YouTube search
+  // even when that track's own row already had a confirmed Hard Wax/
+  // Yoyaku/Deejay.de/Clone.nl preview (headphone icon lit) — those four
+  // sources were never even checked here, only Bandcamp and Deezer were.
+  // matchDeezerTrack (and the store matchers, for their own position
+  // fallback) need this track's position within its OWN release, not the
+  // flat node list — the flat list keeps a release's tracks contiguous
+  // and in order, so filtering by the Discogs release-id prefix recovers
+  // both.
   if(next.bcMp3){playAudioPreview(next.id,next.bcMp3,next.title,artist,'bandcamp');return;}
   const relId=String(next.id).split('-')[0];
   const relTracks=tracks.filter(t=>String(t.id).split('-')[0]===relId);
   const relIndex=relTracks.findIndex(t=>t.id===next.id);
-  const dz=peekDeezerMatch(next.releaseArtistName||next.trackArtistName||artist,next.album||next.title,next.catno,next.title,relIndex,relTracks.length);
+  const releaseArtist=next.releaseArtistName||next.trackArtistName||artist;
+  const releaseTitle=next.album||next.title;
+  const dz=peekDeezerMatch(releaseArtist,releaseTitle,next.catno,next.title,relIndex,relTracks.length);
   if(dz){playDeezerPreview(next.id,dz,next.title,artist);return;}
+  const hw=getHardwaxAudioPreview(peekHardwaxUrl(releaseArtist,releaseTitle,next.catno),next.id,next.title);
+  if(hw){playAudioPreview(next.id,hw,next.title,artist,'hardwax');return;}
+  const yy=peekYoyakuPreview(releaseArtist,releaseTitle,next.catno,next.id,next.title);
+  if(yy){playAudioPreview(next.id,yy,next.title,artist,'yoyaku');return;}
+  const dj=peekDeejayPreview(releaseArtist,releaseTitle,next.catno,next.id,next.title);
+  if(dj){playAudioPreview(next.id,dj,next.title,artist,'deejay');return;}
+  const cl=peekClonePreview(releaseArtist,releaseTitle,next.catno,next.id,next.title);
+  if(cl){playAudioPreview(next.id,cl,next.title,artist,'clone');return;}
   doPlay(next.id,next.videoId,next.title,artist);
 }
 
@@ -5086,6 +5104,21 @@ function getHardwaxAudioPreview(hardwaxUrl,trackId,trackTitle){
   });
   return byTitle?byTitle.mp3:null;
 }
+// Non-triggering peek at an already-confirmed Hard Wax match — for
+// playAdjacentTrack, same reasoning as peekDeezerMatch below: Next/
+// Previous shouldn't kick off a brand new hardwax-match search for a
+// release nobody's actually looked at yet. Only the comment/url lookup
+// itself is peeked this way; the follow-on getHardwaxAudioPreview call
+// still goes through getHardwaxTracks, which is its own narrower,
+// already-cache-first read — it only ever fires one release-detail
+// fetch, and only for a release whose Hard Wax match is already
+// confirmed, never a fresh search.
+function peekHardwaxUrl(artist,title,catno){
+  if(!title)return null;
+  const cached=lsGet(hardwaxCacheKey(artist,title,catno));
+  if(cached===null||isStaleFallbackNoMatch(cached)||cached.no)return null;
+  return cached.url;
+}
 
 // ── Yoyaku audio previews — second fallback, after Hard Wax ──
 // Same reasoning/shape as the Hard Wax preview above (only ever consulted
@@ -5183,6 +5216,14 @@ function matchYoyakuTrack(tracks,trackId,trackTitle){
   });
   return byTitle?byTitle.mp3:null;
 }
+// Non-triggering peek at an already-resolved Yoyaku release — same
+// reasoning as peekDeezerMatch below, for playAdjacentTrack.
+function peekYoyakuPreview(artist,title,catno,trackId,trackTitle){
+  if(!title)return null;
+  const cached=lsGet(yoyakuCacheKey(artist,title,catno));
+  if(cached===null||isStaleFallbackNoMatch(cached)||cached.no)return null;
+  return matchYoyakuTrack(cached.tracks,trackId,trackTitle);
+}
 
 // ── Deejay.de audio previews — third fallback, after Hard Wax and Yoyaku ──
 // Same reasoning/shape again (see the Yoyaku block above), added
@@ -5269,6 +5310,14 @@ function matchDeejayTrack(tracks,trackId,trackTitle){
     return strippedN&&(bcOnlyMatches(titleN,strippedN)||isTitlePrefixMatch(titleN,strippedN)||isTitlePrefixMatch(strippedN,titleN));
   });
   return byTitle?byTitle.mp3:null;
+}
+// Non-triggering peek at an already-resolved Deejay.de release — same
+// reasoning as peekDeezerMatch below, for playAdjacentTrack.
+function peekDeejayPreview(artist,title,catno,trackId,trackTitle){
+  if(!title)return null;
+  const cached=lsGet(deejayCacheKey(artist,title,catno));
+  if(cached===null||isStaleFallbackNoMatch(cached)||cached.no)return null;
+  return matchDeejayTrack(cached.tracks,trackId,trackTitle);
 }
 
 // ── Clone.nl audio previews — fourth fallback, after Hard Wax, Yoyaku and Deejay.de ──
@@ -5361,6 +5410,14 @@ function matchCloneTrack(tracks,trackId,trackTitle){
     return bcOnlyMatches(titleN,tN)||isTitlePrefixMatch(titleN,tN)||isTitlePrefixMatch(tN,titleN);
   });
   return byTitle?byTitle.mp3:null;
+}
+// Non-triggering peek at an already-resolved Clone.nl release — same
+// reasoning as peekDeezerMatch below, for playAdjacentTrack.
+function peekClonePreview(artist,title,catno,trackId,trackTitle){
+  if(!title)return null;
+  const cached=lsGet(cloneCacheKey(artist,title,catno));
+  if(cached===null||isStaleFallbackNoMatch(cached)||cached.no)return null;
+  return matchCloneTrack(cached.tracks,trackId,trackTitle);
 }
 
 // ── Deezer previews — the FIRST rung, ahead of YouTube ──────────────────
