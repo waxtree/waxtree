@@ -1383,6 +1383,19 @@ async function pushStateToCloud(){
       payload.likedTracks=threeWayMergeDict(base?.likedTracks,payload.likedTracks,c.likedTracks);
       payload.likes={...(c.likes||{}),...(payload.likes||{})}; // plain boolean flip, never deleted — local's own value always correctly wins
       payload.listens={...(c.listens||{}),...(payload.listens||{})}; // only ever set, never removed — a plain union is exact, no base needed
+      // Per-follow scan baseline (see scanFollowsForNewReleases) — each
+      // key is fully REWRITTEN on every scan (never incrementally added
+      // to), and there's no user-facing "forget this baseline" action, so
+      // there's nothing here a real per-key deletion could ever mean —
+      // same reasoning as likes/listens, plain union, no base needed.
+      // Was a straight overwrite before (this whole object replaced
+      // wholesale, like nodes/branches used to be — see threeWayMergeTree's
+      // own history), which is exactly what let a stale device's push
+      // silently reset another device's already-dismissed baseline for
+      // follows IT hadn't rescanned recently, surfacing their entire
+      // pre-existing catalog as "New releases" again — reported live
+      // 2026-09-19 as a months-old Ilian Tape release suddenly appearing new.
+      payload.followScanKnownIds={...(c.followScanKnownIds||{}),...(payload.followScanKnownIds||{})};
       // The actual explored tree — see threeWayMergeTree's own comment for
       // why this used to be a straight overwrite and what broke because of it.
       const mergedTree=threeWayMergeTree(base?.branches,payload.branches,c.branches,base?.nodes,payload.nodes,c.nodes);
@@ -1558,6 +1571,12 @@ async function hydrateFromCloud(){
     if(c.likedTracks){const merged=threeWayMergeDict(base?.likedTracks,st.likedTracks,c.likedTracks);if(Object.keys(merged).length!==Object.keys(st.likedTracks||{}).length){st.likedTracks=merged;mergedAnything=true;}}
     if(c.likes){const merged={...c.likes,...st.likes};if(Object.keys(merged).length!==Object.keys(st.likes||{}).length){st.likes=merged;mergedAnything=true;}} // plain boolean flip, never deleted — no base needed
     if(c.listens){const merged={...c.listens,...st.listens};if(Object.keys(merged).length!==Object.keys(st.listens||{}).length){st.listens=merged;mergedAnything=true;}} // only ever set, never removed — no base needed
+    // Per-follow scan baseline — see the push-side merge's own comment for
+    // why this used to be a straight overwrite (further down, gated on the
+    // timestamp check) and what that broke: a stale device's own
+    // unrelated sync could wholesale reset another device's already-
+    // dismissed baseline for follows it hadn't rescanned recently.
+    if(c.followScanKnownIds){const merged={...c.followScanKnownIds,...st.followScanKnownIds};if(Object.keys(merged).length!==Object.keys(st.followScanKnownIds||{}).length){st.followScanKnownIds=merged;mergedAnything=true;}}
     // The actual explored tree — see threeWayMergeTree's own comment for
     // why this used to be a straight overwrite (further down, gated on the
     // timestamp check below) and what broke because of it. Runs on the
@@ -1628,12 +1647,12 @@ async function hydrateFromCloud(){
     if(c.activeBranchId)st.activeBranchId=c.activeBranchId;
     if(c.chips)st.chips=c.chips;
     // likes/likedTracks/listens/dasAscoltare/playlists/follows/branches/
-    // nodes are already merged (not overwritten) above, independently of
-    // this gate — do NOT reassign them here from the raw cloud copy, or a
-    // full restore would throw away exactly what the merge just preserved
-    // (a local node's already-loaded Discogs cache included).
+    // nodes/followScanKnownIds are already merged (not overwritten) above,
+    // independently of this gate — do NOT reassign them here from the raw
+    // cloud copy, or a full restore would throw away exactly what the
+    // merge just preserved (a local node's already-loaded Discogs cache,
+    // or another device's follow-scan baseline, included).
     if(c.history)st.history=c.history;
-    if(c.followScanKnownIds)st.followScanKnownIds=c.followScanKnownIds;
     if(c.supaIdMap)st.supaIdMap={...c.supaIdMap,...st.supaIdMap}; // merge, don't clobber — this device may have minted mappings the cloud copy predates
     if(c.discogsUser)st.discogsUser=c.discogsUser;
     if(c.discogsOAuthToken)st.discogsOAuthToken=c.discogsOAuthToken;
@@ -6225,7 +6244,13 @@ async function scanFollowsForNewReleases(){
         try{
           const path=f.type==='label'?'/labels/'+f.discogs_id+'/releases':'/artists/'+f.discogs_id+'/releases';
           const rd=await dReq(path,{per_page:'25',sort:'year',sort_order:'desc'});
-          let rels=rd.releases||[];
+          // Discogs' own /labels/{id}/releases (confirmed live 2026-09-19
+          // against a real label) can list the SAME release id more than
+          // once in one page — not a WaxTree fetch bug, its response
+          // genuinely repeats entries. Left undeduped, a repeated id could
+          // surface as two identical "New release" cards (React even
+          // warns about the duplicate key) for what's really one release.
+          let rels=[...new Map((rd.releases||[]).map(r=>[r.id,r])).values()];
           // Same "Main" preference fetchArtistData() already uses for an
           // artist's own discography — a remix credit or a various-artists
           // compilation appearance isn't really "a new release BY them" in
