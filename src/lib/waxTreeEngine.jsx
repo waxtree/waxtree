@@ -6272,7 +6272,21 @@ async function scanFollowsForNewReleases(){
         // runs, or the moment the user follows someone new.
         const isFirstCheck=!(key in st.followScanKnownIds);
         const newOnes=isFirstCheck?[]:rels.filter(r=>!known.has(r.id)&&!isOwnedRelease(r));
-        st.followScanKnownIds[key]=rels.map(r=>r.id);
+        // Accumulate onto `known`, never replace it outright — `rels` is
+        // only ever the top 25 most recent (per_page:'25' above), and a
+        // prolific artist/label can have hundreds or thousands of total
+        // releases (Satoshi Tomiie: 1299). Discogs keeps adding entries
+        // to an active back catalog over time (scans, corrections,
+        // reissues), which pushes that fixed 25-release window forward —
+        // an old release sitting right at the edge of it can slide back
+        // INTO the window on a later scan even though nothing about it
+        // actually changed. Replacing the known set wholesale each time
+        // made that "reappearance" look exactly like a genuine new
+        // release; confirmed live 2026-09-21 with a 2019 Satoshi Tomiie
+        // release (13247390, sitting at position 25/25 on the day this
+        // was reported) surfacing as "New" out of nowhere. Once a release
+        // has ever been seen in any scan, it stays known for good.
+        st.followScanKnownIds[key]=[...new Set([...known,...rels.map(r=>r.id)])];
         // Cap how many releases from ONE artist/label fetch full detail in
         // a single scan — a burst of activity from one prolific source
         // shouldn't crowd out (or quota-starve) everyone else being
