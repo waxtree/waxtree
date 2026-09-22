@@ -2530,6 +2530,25 @@ function getRelatedView(){
 
 // ── YouTube ────────────────────────────────────────────────
 let ytPlayer=null,ytTid=null,ytTitle='',ytArtist='';
+// Set true immediately before the ONLY two legitimate calls to
+// ytPlayer.playVideo() (onReady below, and ytTogglePlayPause's own) —
+// checked and cleared the instant onStateChange sees PLAYING. Reported
+// live repeatedly (2026-09-14, -15, -22) despite two earlier fixes
+// (autoplay:0 instead of 1; force-pausing on visibilitychange-hidden):
+// a track sitting in the mini player — playing OR already paused —
+// resumed on its own with no click, most recently after fully quitting
+// and relaunching Chrome with WaxTree already open. visibilitychange
+// never fires 'hidden' for a Chrome WINDOW that stays the frontmost,
+// uncovered tab the whole time (screen lock, system sleep, another app
+// briefly gaining OS focus) — it's about rendering, not focus — so
+// that fix's own pause never got a chance to run before whatever
+// resumed playback (the YouTube iframe's own internal state, or
+// Chrome's own media-resume heuristics on wake) did. Rather than
+// chase which lifecycle event does or doesn't fire for every possible
+// OS/browser path here, this reacts to the actual SYMPTOM directly:
+// any PLAYING state that starts withOUT this flag set is immediately
+// undone, regardless of what caused it.
+let ytExplicitPlay=false;
 // discoveredTracks holds tracks surfaced by Related Tracks (see below) —
 // they don't belong to any open node, so the tree scan above can't see
 // them. Without this fallback, playing a suggested track would make it
@@ -3252,9 +3271,12 @@ function createYtPlayer(){
     // loaded and paused instead of resuming on its own.
     playerVars:{autoplay:0,modestbranding:1,rel:0,fs:0,controls:0,disablekb:1,iv_load_policy:3},
     events:{
-      onReady(e){e.target.playVideo();},
+      onReady(e){ytExplicitPlay=true;e.target.playVideo();},
       onStateChange(e){
-        if(e.data===YT.PlayerState.PLAYING)tryBadge();
+        if(e.data!==YT.PlayerState.PLAYING)return;
+        if(!ytExplicitPlay){ytPlayer?.pauseVideo?.();return;} // unsolicited resume (see ytExplicitPlay's own comment) — undo it, not a real listening session
+        ytExplicitPlay=false;
+        tryBadge();
       },
       onError(e){
         const np=st.nowPlaying;
@@ -3325,7 +3347,7 @@ function ytSeekFraction(fraction){
 }
 function ytTogglePlayPause(){
   if(!ytPlayer?.getPlayerState)return;
-  if(ytPlayer.getPlayerState()===YT.PlayerState.PLAYING)ytPlayer.pauseVideo();else ytPlayer.playVideo();
+  if(ytPlayer.getPlayerState()===YT.PlayerState.PLAYING)ytPlayer.pauseVideo();else{ytExplicitPlay=true;ytPlayer.playVideo();}
 }
 function doPlay(trackId,videoId,title,artistName){
   killYt();
