@@ -4508,11 +4508,21 @@ function getCachedNodeData(type,discogsId){
 
 // Cross-user companion to the local ct2: cache above — the first person to
 // open a given artist/label pays for the Discogs round-trips, everyone
-// after that (any device, any account, no time limit but the same 30-day
-// staleness window as the local cache) gets it back instantly. See
+// after that (any device, any account) gets it back instantly. See
 // supabase/discogs_node_cache.sql. Failures here are always non-fatal —
 // worst case is exactly what happened before this existed: a normal
 // Discogs fetch.
+//
+// A row older than CT2_TTL_MS is returned flagged stale instead of being
+// thrown away: its tracklist is still perfectly good to show right now, and
+// discarding it forced a full re-fetch of the whole discography — minutes
+// for a big catalog, through the paced shared proxy — before the node could
+// show anything. Confirmed live 2026-11-01: after 5 idle weeks 3659 of 3668
+// shared rows crossed the 30-day line at once, so EVERY already-explored
+// node opened as if brand new. Callers show the stale data immediately and
+// hand it to scheduleNodeRevalidation(), which checks Discogs for new
+// releases in the background.
+const SHARED_NODE_MAX_AGE_MS=365*24*60*60*1000; // beyond this, treat as a plain miss
 async function getSharedNodeCache(type,discogsId){
   try{
     // Same unbounded-wait guard as getSharedSearchCache above, and for the
@@ -4524,11 +4534,98 @@ async function getSharedNodeCache(type,discogsId){
     if(!result)return null;
     const{data,error}=result;
     if(error||!data)return null;
-    if(Date.now()-new Date(data.cached_at).getTime()>=CT2_TTL_MS)return null;
+    const age=Date.now()-new Date(data.cached_at).getTime();
+    if(age>=SHARED_NODE_MAX_AGE_MS)return null;
     if(data.data?._v!==TRACK_DATA_VERSION)return null;
     if(type==='artist'&&!data.data?.tracks?.length)return null;
-    return data.data;
+    return{data:data.data,stale:age>=CT2_TTL_MS};
   }catch{return null;}
+}
+// Re-stamps a row as freshly checked without re-uploading its (often
+// 100KB+) payload — used when a revalidation finds nothing new on Discogs.
+function touchSharedNodeCache(type,discogsId){
+  sb.from('discogs_node_cache').update({cached_at:new Date().toISOString()}).eq('id',type+':'+discogsId)
+    .then(({error})=>{if(error)console.warn('WaxTree: shared node cache touch failed (non-fatal):',error);});
+}
+// Stale-while-revalidate for artist/label nodes. One job at a time, a few
+// seconds after the node is already on screen, and capped — so the data the
+// user is looking at never waits on this, and opening a string of stale
+// nodes can't pile a wall of Discogs traffic onto the shared proxy (the
+// pacing in dReqRaw still applies to everything below).
+const NODE_REVAL_DELAY_MS=4000;
+const NODE_REVAL_MAX_QUEUE=10;
+// How many of the newest listed releases must already be in the cached
+// tracklist for the node to count as "nothing new". Discogs sorts this list
+// by year only, so a brand-new release can sit past this window for a
+// prolific act — that just means it shows up on the next 30-day check
+// instead of this one (and follows surface new releases separately anyway).
+const NODE_REVAL_PROBE_RELEASES=25;
+const nodeRevalQueue=[];
+const nodeRevalPending=new Set();
+let nodeRevalRunning=false;
+function scheduleNodeRevalidation(type,discogsId,stale){
+  const key=type+':'+discogsId;
+  if(nodeRevalPending.has(key)||nodeRevalQueue.length>=NODE_REVAL_MAX_QUEUE)return;
+  nodeRevalPending.add(key);
+  nodeRevalQueue.push({type,discogsId,stale});
+  drainNodeRevalidation();
+}
+async function drainNodeRevalidation(){
+  if(nodeRevalRunning)return;
+  nodeRevalRunning=true;
+  while(nodeRevalQueue.length){
+    const job=nodeRevalQueue.shift();
+    try{await revalidateNode(job);}
+    catch(e){console.warn('WaxTree: background node refresh failed (non-fatal):',e);}
+    nodeRevalPending.delete(job.type+':'+job.discogsId);
+  }
+  nodeRevalRunning=false;
+}
+// Release ids (as "release/123" / "master/123") already represented in a
+// cached tracklist — buildTrackEntries() stamps each track with its release's
+// Discogs URL, which is the same id the releases listing returns.
+function cachedReleaseKeys(tracks){
+  const keys=new Set();
+  for(const t of tracks||[]){
+    const m=/discogs\.com\/(release|master)\/(\d+)/.exec(t.discogsUrl||'');
+    if(m)keys.add(m[1]+'/'+m[2]);
+  }
+  return keys;
+}
+async function revalidateNode({type,discogsId,stale}){
+  await new Promise(r=>setTimeout(r,NODE_REVAL_DELAY_MS));
+  // dReqRaw, not dReq: the shared request cache would just hand back the
+  // same old listing this check exists to compare against.
+  const relData=await dReqRaw((type==='label'?'/labels/':'/artists/')+discogsId+'/releases',{per_page:'100',sort:'year',sort_order:'desc'});
+  const all=relData.releases||[];
+  // Same "Main" preference fetchArtistData() uses for what it actually pulls.
+  const main=type==='artist'?all.filter(r=>r.role==='Main'):all;
+  const listed=(main.length?main:all).slice(0,NODE_REVAL_PROBE_RELEASES);
+  const have=cachedReleaseKeys(stale.tracks);
+  // A listed release missing from the cached tracklist only counts as NEW if
+  // it's at least as recent as the newest cached track — an older one is far
+  // more likely a release dedup() folded into a reissue, or one with an
+  // empty tracklist, and treating those as news would re-fetch the whole
+  // discography on every check for no reason.
+  const newestYear=Math.max(0,...(stale.tracks||[]).map(t=>Number(t.year)||0));
+  const hasNew=listed.some(r=>!have.has((type==='artist'&&r.type==='master'?'master':'release')+'/'+r.id)&&(Number(r.year)||9999)>=newestYear);
+  const unchanged=listed.length>0&&!hasNew;
+  const localKey=(type==='label'?'l8:':'a7:')+discogsId;
+  if(unchanged){
+    // Nothing new — same data, now stamped as freshly checked everywhere.
+    touchSharedNodeCache(type,discogsId);
+    lsSet(localKey,stale);
+    return;
+  }
+  const fresh=type==='label'
+    ?await fetchLabelData(discogsId,()=>false,true)
+    :await fetchArtistData(discogsId,()=>false,false,true);
+  // fetch*Data already wrote the local + shared cache; swap it into any
+  // open node showing this artist/label.
+  st.nodes.forEach(n=>{
+    if(n.type===type&&String(n.discogsId)===String(discogsId)&&n.loaded&&!n.loading)n.data=fresh;
+  });
+  rr();
 }
 // Fire-and-forget on purpose — never worth blocking the UI on a cache
 // write succeeding. Same row gets upserted again as background enrichment
@@ -4539,10 +4636,22 @@ function pushSharedNodeCache(type,discogsId,data){
   sb.from('discogs_node_cache').upsert({id:type+':'+discogsId,type,discogs_id:String(discogsId),data,cached_at:new Date().toISOString()})
     .then(({error})=>{if(error)console.warn('WaxTree: shared node cache push failed (non-fatal):',error);});
 }
-async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=false){
-  const c=getCachedNodeData('artist',discogsId);if(c)return c;
-  const shared=await getSharedNodeCache('artist',discogsId);
-  if(shared&&!isCancelled()){lsSet('a7:'+discogsId,shared);return shared;}
+// forceFresh: skip both caches and re-fetch from Discogs — only
+// revalidateNode() passes it, after it has already seen something new.
+async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=false,forceFresh=false){
+  if(!forceFresh){
+    const c=getCachedNodeData('artist',discogsId);if(c)return c;
+    const shared=await getSharedNodeCache('artist',discogsId);
+    if(shared&&!isCancelled()){
+      // Stale rows are shown as-is and rechecked in the background; the
+      // local copy is only re-stamped once that check has actually run.
+      // skipEnrichment marks the library matcher's bulk calls, which never
+      // display this data and must not each spawn a refresh.
+      if(!shared.stale)lsSet('a7:'+discogsId,shared.data);
+      else if(!skipEnrichment)scheduleNodeRevalidation('artist',discogsId,shared.data);
+      return shared.data;
+    }
+  }
   // Newest-first: fetchReleaseBatches below stops once it hits the 200-track
   // cap, so for a discography bigger than that, whichever end we start from
   // is the only end that ever gets fetched. Oldest-first meant a prolific
@@ -4648,10 +4757,17 @@ async function fetchArtistData(discogsId,isCancelled=()=>false,skipEnrichment=fa
   return nd;
 }
 
-async function fetchLabelData(discogsId,isCancelled=()=>false){
-  const c=getCachedNodeData('label',discogsId);if(c)return c;
-  const shared=await getSharedNodeCache('label',discogsId);
-  if(shared&&!isCancelled()){lsSet('l8:'+discogsId,shared);return shared;}
+async function fetchLabelData(discogsId,isCancelled=()=>false,forceFresh=false){
+  if(!forceFresh){
+    const c=getCachedNodeData('label',discogsId);if(c)return c;
+    const shared=await getSharedNodeCache('label',discogsId);
+    if(shared&&!isCancelled()){
+      // See fetchArtistData() — same stale-while-revalidate handling.
+      if(!shared.stale)lsSet('l8:'+discogsId,shared.data);
+      else scheduleNodeRevalidation('label',discogsId,shared.data);
+      return shared.data;
+    }
+  }
   // Newest-first — see fetchArtistData()'s comment above the same change.
   // A label with a big back catalog was showing releases up to ~2020 and
   // no newer, digital-only ones included, purely because the 200-track cap
