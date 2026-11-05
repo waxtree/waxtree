@@ -2,6 +2,7 @@ import { Menu, Moon, Sun, Tag, User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Search } from '@/components/waxtree/Search';
+import { signOut } from '@/lib/signOut';
 
 export const Header = ({ state, session, actions, onMenuClick }) => {
   const username = session?.user?.user_metadata?.username || session?.user?.email?.split('@')[0] || 'Profile';
@@ -63,7 +64,7 @@ export const Header = ({ state, session, actions, onMenuClick }) => {
             <div className="my-1 h-px bg-border" />
             <button
               type="button"
-              onClick={async () => { await actions.supabase.auth.signOut(); Object.keys(localStorage).filter(key => key.startsWith('sb-')).forEach(key => localStorage.removeItem(key)); window.location.href = '/login'; }}
+              onClick={() => signOut(actions)}
               className="block w-full rounded-lg px-3.5 py-2 text-left text-[13px] text-destructive hover:bg-muted"
             >
               Sign out

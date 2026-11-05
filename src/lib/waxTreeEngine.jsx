@@ -945,8 +945,13 @@ async function linkLibrary(onProgress=()=>{}){
   // Supabase user_metadata only gets the count: the full list bloats the JWT and the update
   // fails silently on big libraries, which is what kept resurrecting stale partial scans.
   const persisted=saveOwnedTracks(owned.map(o=>({titleNorm:o.titleNorm,artistNorm:o.artistNorm,dur:o.dur||null,artistRaw:o.artistRaw,titleRaw:o.titleRaw})));
-  try{await sb.auth.updateUser({data:{owned_tracks:null,library_scanned_at:scannedAt,library_track_count:owned.length}});}
-  catch(e){console.warn('WaxTree: could not update library metadata:',e);}
+  try{
+    const{data}=await sb.auth.updateUser({data:{owned_tracks:null,library_scanned_at:scannedAt,library_track_count:owned.length}});
+    // The UI reads user_metadata off wtSession, a snapshot taken at boot —
+    // refresh it so the 14-day rescan reminder (and the onboarding's
+    // "library linked" check) reflect this scan without a reload.
+    if(data?.user&&wtSession){wtSession={...wtSession,user:data.user};rr();}
+  }catch(e){console.warn('WaxTree: could not update library metadata:',e);}
   return{count:owned.length,scannedAt,filesFound:audioFiles.length,persisted,stats,idStats};
 }
 
@@ -1107,7 +1112,7 @@ function saveSt(){
   // saved — guardAccountSwitch() (near st's own definition) reads it back
   // on the next boot to tell "my own data" apart from "a different
   // account's leftovers on this same browser". See its own comment.
-  const corePayload=JSON.stringify({ownerId:currentSessionUserId(),branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,favoriteArtists:st.favoriteArtists});
+  const corePayload=JSON.stringify({ownerId:currentSessionUserId(),branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,favoriteArtists:st.favoriteArtists,favoriteLabels:st.favoriteLabels,onboarding:st.onboarding});
   try{
     localStorage.setItem(SK,corePayload);
     localStorage.setItem(SK+':ts',String(Date.now()));
@@ -1350,7 +1355,7 @@ async function pushStateToCloud(){
   // params (genreYear nodes' style/year query) has to survive this strip
   // too — see the identical comment on pushLocal's own lightNodes above.
   const lightNodes=st.nodes.map(n=>({id:n.id,branchId:n.branchId,parentId:n.parentId,type:n.type,discogsId:n.discogsId,name:n.name,pinned:n.pinned,tags:n.tags,params:n.params}));
-  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,favoriteArtists:st.favoriteArtists,avatarDataUrl:getAvatarUrl()};
+  const payload={branches:st.branches,nodes:lightNodes,selectedId:st.selectedId,activeBranchId:st.activeBranchId,chips:st.chips,likes:st.likes,likedTracks:st.likedTracks,listens:st.listens,theme:st.theme,sbPinFirst:st.sbPinFirst,dasAscoltare:st.dasAscoltare,playlists:st.playlists,history:st.history,follows:st.follows,followScanKnownIds:st.followScanKnownIds,supaIdMap:st.supaIdMap,discogsUser:st.discogsUser,discogsOAuthToken:st.discogsOAuthToken,discogsOAuthSecret:st.discogsOAuthSecret,discogsCollReleaseIds:st.discogsCollReleaseIds,discogsCollMasterIds:st.discogsCollMasterIds,discogsWantReleaseIds:st.discogsWantReleaseIds,discogsWantMasterIds:st.discogsWantMasterIds,discogsCollSyncedAt:st.discogsCollSyncedAt,discogsHeroesSeen:st.discogsHeroesSeen,alreadyListened:st.alreadyListened,favoriteArtists:st.favoriteArtists,favoriteLabels:st.favoriteLabels,onboarding:st.onboarding,avatarDataUrl:getAvatarUrl()};
   try{
     // Refuse to silently overwrite a real backup with what looks like a
     // wiped local state — confirmed live TWICE now (2026-08-02, 2026-08-03)
@@ -1401,6 +1406,7 @@ async function pushStateToCloud(){
       const mergedTree=threeWayMergeTree(base?.branches,payload.branches,c.branches,base?.nodes,payload.nodes,c.nodes);
       payload.branches=mergedTree.branches;
       payload.nodes=mergedTree.nodes;
+      payload.onboarding=mergeOnboarding(payload.onboarding,c.onboarding);
     }
     if(existing?.data&&looksLikeDataWipe(payload,existing.data)){
       console.warn('WaxTree: refusing to sync — new state looks like an unexplained wipe compared to the existing cloud backup.');
@@ -1665,6 +1671,8 @@ async function hydrateFromCloud(){
     if(c.discogsHeroesSeen)st.discogsHeroesSeen=c.discogsHeroesSeen;
     if(c.alreadyListened)st.alreadyListened=c.alreadyListened;
     if(c.favoriteArtists)st.favoriteArtists=c.favoriteArtists;
+    if(c.favoriteLabels)st.favoriteLabels=c.favoriteLabels;
+    st.onboarding=mergeOnboarding(st.onboarding,c.onboarding);
     if(c.avatarDataUrl){try{localStorage.setItem(AVATAR_KEY,c.avatarDataUrl);}catch{}}
     saveSt();
     ensureNodeLoaded(st.selectedId);
@@ -1791,6 +1799,17 @@ const st={
   // every track happens to be marked played (see releaseCard's own button).
   alreadyListened:saved?.alreadyListened||[],
   favoriteArtists:saved?.favoriteArtists||[],
+  favoriteLabels:saved?.favoriteLabels||[],
+  // Mandatory first-login onboarding (see defaultOnboarding/mergeOnboarding).
+  // Spread over the defaults so an older saved blob without newer fields
+  // still has every key the UI reads.
+  onboarding:{...defaultOnboarding(),...(saved?.onboarding||{})},
+  // false until the first cloud pull has settled (success, nothing to
+  // restore, or a timeout). The onboarding gate waits for it: ready flips
+  // BEFORE hydrateFromCloud() finishes, and a returning user on a fresh
+  // browser would otherwise be shown a first-time onboarding they already
+  // completed on another device. Not persisted.
+  cloudSettled:false,
 };
 document.documentElement.setAttribute('data-theme',st.theme);
 // Tailwind's dark: variant and every shadcn color token key off a `.dark`
@@ -3724,14 +3743,170 @@ async function searchBandcamp(q){
     lsSet(ck,r);return r;
   }catch{return[];}
 }
-// Favorite Artists search — same underlying search bar backs both (real
-// Discogs matches, same 7s ceiling, same shared cache), filtered to
-// artist-only results since that's the only thing a Favorite Artists pick
-// can be.
-async function searchArtistsForFavorites(q){
-  if(!q.trim())return[];
-  const results=await searchDiscogs(q.trim());
-  return results.filter(r=>r.type==='artist');
+// ── Onboarding (mandatory first-login profile) ─────────────
+// The answers feed a per-user taste profile (the future personalised Home /
+// recommendations). Stored in the same cloud-synced app state as everything
+// else — NOT in Supabase auth user_metadata, which is stamped into every
+// request's JWT (see the 414KB-JWT incident).
+function defaultOnboarding(){
+  return{step:0,role:null,frequency:null,genres:[],noLocalLibrary:false,signals:{},redo:false,updatedAt:0,completedAt:null};
+}
+// Completed always beats in-progress, so a fresh device (or a stale tab) can
+// never push an empty/older copy over a finished onboarding and bring the
+// gate back. Between two of the same kind the newer edit wins — which is also
+// what lets a deliberate "redo" (completedAt kept, redo:true, newer
+// updatedAt) survive a sync instead of being rewound.
+function mergeOnboarding(local,remote){
+  if(!remote)return local;
+  if(!local)return remote;
+  const localDone=!!local.completedAt,remoteDone=!!remote.completedAt;
+  if(localDone!==remoteDone)return localDone?local:remote;
+  return(remote.updatedAt||0)>(local.updatedAt||0)?remote:local;
+}
+function updateOnboarding(patch){
+  st.onboarding={...st.onboarding,...patch,updatedAt:Date.now()};
+  rr();
+}
+function completeOnboarding(){
+  st.onboarding={...st.onboarding,redo:false,completedAt:new Date().toISOString(),updatedAt:Date.now()};
+  rr();
+}
+// completedAt is deliberately kept: a redo is an edit of an existing
+// profile, not a reset, so a half-finished redo on one device can't be
+// mistaken for "never onboarded" by another one (see mergeOnboarding).
+function restartOnboarding(){
+  st.onboarding={...st.onboarding,step:0,redo:true,updatedAt:Date.now()};
+  st.settingsModal=false;rr();
+}
+// One search box, two catalogs: Discogs first (primary, as everywhere else),
+// plus whatever Bandcamp has under that name — the supplement for acts and
+// labels Discogs doesn't list (see searchBandcamp). Each side fails
+// independently so a Bandcamp hiccup never empties the Discogs results.
+async function searchFavoriteCandidates(q,kind){
+  const query=q.trim();
+  if(!query)return{discogs:[],bandcamp:[]};
+  const discogsType=kind==='label'?'label':'artist';
+  const bcType=kind==='label'?'bcLabel':'bcArtist';
+  const[discogs,bandcamp]=await Promise.all([
+    searchDiscogs(query).then(r=>r.filter(x=>x.type===discogsType)).catch(()=>[]),
+    searchBandcamp(query).then(r=>r.filter(x=>x.type===bcType)).catch(()=>[]),
+  ]);
+  return{discogs,bandcamp};
+}
+// What one favourite looks like in Discogs, from ONE search request instead
+// of a full discography fetch (minutes for a big catalog through the paced
+// shared proxy): the release search already carries style/year/label for up
+// to 100 releases. Powers the genre suggestions, the related picks and the
+// per-favourite signals saved with the profile — including the release-year
+// histogram the year-based recommendations will read later. Bandcamp-only
+// picks have no Discogs catalog, so they just contribute nothing here.
+const tasteProbeInFlight=new Map();
+function probeFavoriteTaste(fav,kind){
+  if(!fav?.discogsId)return Promise.resolve(null);
+  const key=kind+':'+fav.discogsId;
+  const cached=lsGet('tp:'+key);
+  if(cached)return Promise.resolve(cached);
+  if(tasteProbeInFlight.has(key))return tasteProbeInFlight.get(key);
+  const request=(async()=>{
+    try{
+      const want=normalizeStr(fav.name);
+      const data=await dReq('/database/search',{type:'release',per_page:'100',[kind==='label'?'label':'artist']:fav.name});
+      const probe={n:0,styles:{},years:{},labels:{},artists:{}};
+      for(const r of data.results||[]){
+        const[who]=(r.title||'').split(' - ');
+        // These searches match loosely (aliases, similarly named acts, a
+        // name appearing in a title) — keep only releases the pick is
+        // actually billed on / released through.
+        if(kind==='artist'&&!normalizeStr(who||'').includes(want))continue;
+        if(kind==='label'&&!(r.label||[]).some(l=>{const ln=normalizeStr(l);return ln.includes(want)||want.includes(ln);}))continue;
+        probe.n++;
+        (r.style||[]).forEach(s=>{probe.styles[s]=(probe.styles[s]||0)+1;});
+        const year=parseInt(r.year,10);
+        if(year)probe.years[year]=(probe.years[year]||0)+1;
+        (r.label||[]).forEach(l=>{probe.labels[l]=(probe.labels[l]||0)+1;});
+        if(kind==='label'&&who)probe.artists[who]=(probe.artists[who]||0)+1;
+      }
+      if(probe.n)lsSet('tp:'+key,probe);
+      return probe;
+    }catch{return null;}
+    finally{tasteProbeInFlight.delete(key);}
+  })();
+  tasteProbeInFlight.set(key,request);
+  return request;
+}
+const RELATED_SKIP_RE=/^(various|unknown artist|not on label|self-released|white label|no label)/i;
+// "More like your picks": for artists, other acts on the label each recent
+// pick released most on (the same who-else-is-on-that-label idea a node's
+// correlated artists use); for labels, the labels those artists released on.
+// Names only — resolveFavoriteByName() turns one into a real pick on click.
+async function getRelatedFavorites(kind,artistFavs,labelFavs){
+  const picked=new Set((kind==='label'?labelFavs:artistFavs).map(f=>normalizeStr(f.name)));
+  const tally={};
+  const add=(name,weight=1)=>{
+    const clean=(name||'').trim();
+    if(!clean||RELATED_SKIP_RE.test(clean))return;
+    const key=normalizeStr(clean);
+    if(!key||picked.has(key))return;
+    tally[clean]=(tally[clean]||0)+weight;
+  };
+  const probes=await Promise.all(artistFavs.slice(-4).map(f=>probeFavoriteTaste(f,'artist')));
+  if(kind==='label'){
+    probes.forEach(p=>p&&Object.entries(p.labels).forEach(([label,count])=>add(label,count)));
+  }else{
+    for(const p of probes){
+      const topLabel=p&&Object.entries(p.labels).filter(([label])=>!RELATED_SKIP_RE.test(label)).sort((a,b)=>b[1]-a[1])[0]?.[0];
+      if(!topLabel)continue;
+      const cacheKey='rl:'+normalizeStr(topLabel);
+      let names=lsGet(cacheKey);
+      if(!names){
+        try{
+          const data=await dReq('/database/search',{type:'release',label:topLabel,per_page:'50'});
+          names=(data.results||[]).map(r=>(r.title||'').split(' - ')[0]).filter(Boolean);
+          lsSet(cacheKey,names);
+        }catch{names=[];}
+      }
+      names.forEach(name=>add(name));
+    }
+  }
+  return Object.entries(tally).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([name])=>name);
+}
+async function resolveFavoriteByName(name,kind){
+  try{
+    const wanted=kind==='label'?'label':'artist';
+    const results=(await searchDiscogs(name)).filter(r=>r.type===wanted);
+    return results.find(r=>normalizeStr(r.title)===normalizeStr(name))||results[0]||null;
+  }catch{return null;}
+}
+// Genre pills for the onboarding: every Electronic style stays selectable,
+// the ones the picks lean towards come back ranked so the UI can light them
+// up. Each pick counts equally (its style counts are normalised by how many
+// of ITS releases were read) so one prolific artist can't drown the rest.
+// signals is the compact per-pick snapshot saved with the profile.
+async function getGenreSuggestions(artistFavs,labelFavs){
+  const picks=[...artistFavs.map(f=>['artist',f]),...labelFavs.map(f=>['label',f])];
+  // Three at a time, not all at once: /database/search isn't paced on the
+  // shared proxy (it's built for one human search at a time), so a long list
+  // of picks fired in parallel would burst it.
+  const probes=new Array(picks.length).fill(null);
+  let next=0;
+  await Promise.all(Array.from({length:Math.min(3,picks.length)},async()=>{
+    while(next<picks.length){
+      const i=next++;
+      probes[i]=await probeFavoriteTaste(picks[i][1],picks[i][0]);
+    }
+  }));
+  const score={},signals={};
+  probes.forEach((p,i)=>{
+    if(!p||!p.n)return;
+    Object.entries(p.styles).forEach(([style,count])=>{score[style]=(score[style]||0)+count/p.n;});
+    const[kind,f]=picks[i];
+    signals[kind+':'+f.discogsId]={
+      name:f.name,kind,n:p.n,years:p.years,
+      styles:Object.fromEntries(Object.entries(p.styles).sort((a,b)=>b[1]-a[1]).slice(0,12)),
+    };
+  });
+  const suggestions=Object.entries(score).filter(([style])=>EXPLORE_STYLES.includes(style)).sort((a,b)=>b[1]-a[1]).map(([style,value])=>({style,score:value}));
+  return{suggestions,signals};
 }
 
 // ── Explore by genre/year ──────────────────────────────────
@@ -6539,14 +6714,9 @@ purgeExpiredCache();
   st.searchCount=wtSession.user.user_metadata?.search_count||0;
   st.ownedTracks=loadOwnedTracks()||wtSession.user.user_metadata?.owned_tracks||[];
   st.isPremium=wtSession.user.user_metadata?.premium===true;
-  // Nudge anyone who's never linked a music source yet, every login, until
-  // they do — checks both the local scan and the Discogs sync (either one
-  // counts), and also the cloud-persisted track count so a user who synced
-  // on another device doesn't get re-nagged on a fresh browser with empty
-  // localStorage (see buildLocalLibrarySection's own libCount for the same
-  // fallback pattern).
-  const hasSyncedAnything=!!st.discogsCollSyncedAt||st.ownedTracks.length>0||!!wtSession.user.user_metadata?.library_track_count;
-  if(!hasSyncedAnything){st.librariesModal=true;st.librariesTab='sync';st.welcomeSyncIntro=true;}
+  // The old dismissible "link a music source" popup that used to open here
+  // is gone — linking a library is now a step of the mandatory onboarding
+  // (see components/onboarding/), which gates the whole app until finished.
   engineReady=true;
   paint();
   loadFollows();
@@ -6559,7 +6729,12 @@ purgeExpiredCache();
   // interval is a light re-check while the tab stays open — no server-
   // side/background component when the app itself isn't open, by design
   // (the "light version" — see project_waxtree memory).
+  // Backstop so a slow/failed cloud read can never leave the onboarding
+  // gate on its loading screen forever; if the pull lands later with a
+  // finished onboarding, mergeOnboarding() lifts the gate by itself.
+  setTimeout(()=>{if(!st.cloudSettled){st.cloudSettled=true;rr();}},8000);
   hydrateFromCloud().then(()=>{
+    st.cloudSettled=true;rr();
     scanFollowsForNewReleases();
     setInterval(scanFollowsForNewReleases,20*60*1000);
   });
@@ -6795,7 +6970,7 @@ function getExploreTargets(trackId,artistName){
 export const waxTreeActions={
   addBranch,addNode,addTag,ancestry,addExploreYear,addGenreYearNode,applyFilters,computeDiggingHeroes,connectDiscogs,disconnectDiscogs,doPlay,doSearch,fetchBandcamp,
   fetchBandcampOnly,getBandcampOnly,fetchBcOnlyReleaseDetails,getBcOnlyReleaseDetail,
-  exploreCorrelatedArtist,findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampArtistUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getGenreFocus,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,searchArtistsForFavorites,
+  exploreCorrelatedArtist,findBcMatch,findTrack,findTrackContext:findTrackAndNode,genreColor,getAvatarUrl,getBandcampArtistUrl,getBandcampDirect,getBeatportDirect,getBranch,getExploreTargets,getGenreFocus,getLevelFromCount,getNode,getProgressToNext,getRelatedView,getTrackVideo,isNoEmbedVideo,
   getDigitalLibraryEntries,groupTracksByRelease,handleDiscogsCallback,inDiscogsCollection,inDiscogsWantlist,isOwned,linkLibrary,logQueue,
   liveSearchTick,matchLibraryWithDiscogs,moveNodeToBranch,mutateState,nodeFullyExplored,parseGenreYearChipName,parseYoutubeUrlInput,pickResult,removeChip,removeExploreYear,
   fetchGenreYearReleaseDetails,getGenreYearReleaseDetail,
@@ -6805,5 +6980,6 @@ export const waxTreeActions={
   badgeListened,baseTitleKey,extractRemixCandidate,getCloneRelease,getDeejayRelease,getDeezerRelease,getDeezerPreviewUrl,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchCloneTrack,matchDeejayTrack,matchDeezerTrack,matchYoyakuTrack,normalizeStr,playDeezerPreview,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
+  updateOnboarding,completeOnboarding,restartOnboarding,searchFavoriteCandidates,getRelatedFavorites,resolveFavoriteByName,getGenreSuggestions,
   supabase:sb,
 };

@@ -1,7 +1,9 @@
 import { ArrowUpRight, ChevronDown, Heart, Tag } from 'lucide-react';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { CookieBanner, ThemeFrame } from '@/components/AppChrome';
-import { ArtistIcon } from '@/components/waxtree/icons/ArtistIcon';
+import { FavoritePicker } from '@/components/onboarding/FavoritePicker';
+import { OnboardingGate } from '@/components/onboarding/OnboardingGate';
+import { OnboardingLoading } from '@/components/onboarding/OnboardingLoading';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
 import { Content } from '@/components/waxtree/Content';
 import { Header } from '@/components/waxtree/Header';
@@ -9,10 +11,12 @@ import { Modal } from '@/components/waxtree/Modal';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
 import { PlaylistsModal } from '@/components/waxtree/PlaylistsModal';
 import { QueueRow } from '@/components/waxtree/QueueRow';
+import { RescanReminder } from '@/components/waxtree/RescanReminder';
 import { RightPanel } from '@/components/waxtree/RightPanel';
 import { SectionHeader } from '@/components/waxtree/SectionHeader';
 import { Sidebar } from '@/components/waxtree/Sidebar';
 import { SidebarResize } from '@/components/waxtree/SidebarResize';
+import { favoriteKey, hasFavorite } from '@/lib/favorites';
 import { buttonPrimary, buttonSecondary, modalInput } from '@/lib/waxtreeUi';
 
 export const WaxTreeApp = ({ engine }) => {
@@ -45,10 +49,24 @@ export const WaxTreeApp = ({ engine }) => {
 
   if (!ready) return <div className="flex min-h-dvh items-center justify-center bg-background text-sm text-muted-foreground">Checking session…</div>;
 
+  // Mandatory first-login onboarding: rendered INSTEAD of the workspace, so
+  // none of it is visible or reachable until the last card. Held back until
+  // the cloud copy has been merged in (cloudSettled) so an existing account
+  // sees its own answers pre-filled instead of a blank form.
+  if (!state.onboarding.completedAt || state.onboarding.redo) {
+    return (
+      <ThemeFrame theme="light">
+        {state.cloudSettled ? <OnboardingGate state={state} session={session} actions={actions} /> : <OnboardingLoading />}
+        <CookieBanner includeSentry app user={session?.user} />
+      </ThemeFrame>
+    );
+  }
+
   return (
     <ThemeFrame theme={state.theme} className="h-dvh overflow-hidden text-sm">
       <div className="flex h-dvh flex-col overflow-hidden" translate="no">
         <Header state={state} session={session} actions={actions} onMenuClick={() => setMobileSidebarOpen(value => !value)} />
+        <RescanReminder session={session} actions={actions} />
         <div style={{ '--wt-app-columns': `${sidebarWidth}px 4px minmax(0,1fr) 260px` }} className="grid min-h-0 flex-1 grid-cols-[var(--wt-app-columns)] overflow-hidden max-[900px]:grid-cols-[210px_3px_minmax(0,1fr)] max-sm:grid-cols-1">
           <Sidebar state={state} actions={actions} mobileOpen={mobileSidebarOpen} onCloseMobile={() => setMobileSidebarOpen(false)} />
           <SidebarResize width={sidebarWidth} onResize={setSidebarWidth} />
@@ -134,9 +152,6 @@ const ProfileModal = ({ state, session, actions }) => {
   const close = () => actions.mutateState(value => { value.profileModal = false; });
   const username = session?.user?.user_metadata?.username || session?.user?.email?.split('@')[0] || 'Profile';
   const avatar = actions.getAvatarUrl();
-  const [artistQuery, setArtistQuery] = useState('');
-  const [artistResults, setArtistResults] = useState([]);
-  const artistSearchTimer = useRef(null);
   // Vinyl specifically, not vinyl+digital combined — matches what the user
   // actually means by "my collection" (My Libraries' own Vinyl count) and
   // what they're counting by hand ("805 records, 200+ are Dub Techno") when
@@ -146,23 +161,14 @@ const ProfileModal = ({ state, session, actions }) => {
     return result;
   }, {});
   const topGenres = Object.entries(genreCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  const updateArtistQuery = event => {
-    const q = event.target.value;
-    setArtistQuery(q);
-    clearTimeout(artistSearchTimer.current);
-    if (!q.trim()) { setArtistResults([]); return; }
-    // Same debounced-live-search shape as the main search bar (Search.jsx's
-    // own liveSearchTick) — separate local state here rather than reusing
-    // state.q/state.results, which back the actual search bar and would
-    // otherwise collide with it.
-    artistSearchTimer.current = setTimeout(() => { actions.searchArtistsForFavorites(q).then(setArtistResults); }, 300);
-  };
-  const pickFavoriteArtist = result => {
-    setArtistQuery('');
-    setArtistResults([]);
-    if (state.favoriteArtists.some(artist => artist.discogsId === result.id)) return;
-    actions.mutateState(value => { value.favoriteArtists = [...value.favoriteArtists, { name: result.title, discogsId: result.id }]; });
-  };
+  // The same Discogs + Bandcamp picker the onboarding uses, for both kinds —
+  // list computed inside mutateState so quick picks can't overwrite each other.
+  const addFavorite = field => favorite => actions.mutateState(value => {
+    if (!hasFavorite(value[field], favorite)) value[field] = [...value[field], favorite];
+  });
+  const removeFavorite = field => favorite => actions.mutateState(value => {
+    value[field] = value[field].filter(item => favoriteKey(item) !== favoriteKey(favorite));
+  });
   return (
     <Modal title="🌲 My Profile" close={close}>
       <div className="flex flex-col items-center gap-2 border-b border-border py-4">
@@ -171,29 +177,11 @@ const ProfileModal = ({ state, session, actions }) => {
       </div>
       <div className="border-b border-border pb-4">
         <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Favorite Artists</span>
-        {state.favoriteArtists.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {state.favoriteArtists.map(artist => (
-              <span key={artist.discogsId} className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground">
-                {artist.name}
-                <button type="button" onClick={() => actions.mutateState(value => { value.favoriteArtists = value.favoriteArtists.filter(item => item.discogsId !== artist.discogsId); })} className="text-muted-foreground/70 hover:text-destructive">×</button>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="relative">
-          <input value={artistQuery} onChange={updateArtistQuery} placeholder="Add an artist..." className={modalInput} />
-          {artistResults.length > 0 && (
-            <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-[310] max-h-[220px] overflow-y-auto rounded-lg border border-border bg-card shadow-[var(--wt-shadow)]">
-              {artistResults.slice(0, 10).map(result => (
-                <button key={result.id} type="button" onClick={() => pickFavoriteArtist(result)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-muted">
-                  {result.thumb ? <img className="size-7 shrink-0 rounded object-cover" src={result.thumb} alt="" /> : <div className="flex size-7 shrink-0 items-center justify-center rounded bg-secondary text-muted-foreground"><ArtistIcon className="size-3.5" /></div>}
-                  <span className="truncate text-[12.5px]">{result.title}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <FavoritePicker kind="artist" items={state.favoriteArtists} artistFavs={state.favoriteArtists} labelFavs={state.favoriteLabels} actions={actions} onAdd={addFavorite('favoriteArtists')} onRemove={removeFavorite('favoriteArtists')} />
+      </div>
+      <div className="border-b border-border py-4">
+        <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Favorite Labels</span>
+        <FavoritePicker kind="label" items={state.favoriteLabels} artistFavs={state.favoriteArtists} labelFavs={state.favoriteLabels} actions={actions} onAdd={addFavorite('favoriteLabels')} onRemove={removeFavorite('favoriteLabels')} />
       </div>
       <div className="mt-4">
         <span className="mb-2 block text-[10px] font-bold uppercase text-muted-foreground/70">Top Genres</span>
@@ -484,6 +472,11 @@ const SettingsModal = ({ state, session, actions }) => {
             <div className="text-right"><button type="button" className={buttonPrimary} onClick={changePassword}>Save password</button></div>
           </div>
         )}
+      </div>
+      <SectionHeader title="Taste profile" />
+      <div className="flex items-center justify-between py-3">
+        <div><strong className="block text-[13px]">Your taste profile</strong><span className="text-[11px] text-muted-foreground">Change your artists, labels, genres, how often you dig, and your library sync</span></div>
+        <button type="button" className={buttonSecondary} onClick={actions.restartOnboarding}>Edit</button>
       </div>
       <SectionHeader title="Data" />
       <div className="flex items-center justify-between py-3">
