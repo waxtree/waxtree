@@ -3778,20 +3778,39 @@ function restartOnboarding(){
   st.onboarding={...st.onboarding,step:0,redo:true,updatedAt:Date.now()};
   st.settingsModal=false;rr();
 }
+// Discogs search for ONE entity type (artist or label), for the favourites
+// pickers. The general search above returns everything mixed (releases
+// included) and only keeps 25 hits, so for a name like "Basic Channel" the
+// artist could fall outside them and filtering by type left nothing; asking
+// Discogs for the type directly can't. Same 7s ceiling as the search bar.
+async function searchDiscogsEntities(q,type){
+  const ck='sf:'+type+':'+q.toLowerCase();
+  const cached=lsGet(ck);if(cached)return cached;
+  const data=await Promise.race([
+    dReq('/database/search',{q,type,per_page:'15'}),
+    new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('Search timed out — try again')),7000)),
+  ]);
+  const r=(data.results||[]).map(x=>({id:x.id,type,title:x.title,thumb:x.thumb,uri:x.uri}));
+  if(r.length)lsSet(ck,r);
+  return r;
+}
 // One search box, two catalogs: Discogs first (primary, as everywhere else),
 // plus whatever Bandcamp has under that name — the supplement for acts and
 // labels Discogs doesn't list (see searchBandcamp). Each side fails
-// independently so a Bandcamp hiccup never empties the Discogs results.
+// independently so a Bandcamp hiccup never empties the Discogs results;
+// discogsFailed lets the UI say "Discogs didn't answer" instead of a
+// misleading "nothing found".
 async function searchFavoriteCandidates(q,kind){
   const query=q.trim();
-  if(!query)return{discogs:[],bandcamp:[]};
+  if(!query)return{discogs:[],bandcamp:[],discogsFailed:false};
   const discogsType=kind==='label'?'label':'artist';
   const bcType=kind==='label'?'bcLabel':'bcArtist';
+  let discogsFailed=false;
   const[discogs,bandcamp]=await Promise.all([
-    searchDiscogs(query).then(r=>r.filter(x=>x.type===discogsType)).catch(()=>[]),
+    searchDiscogsEntities(query,discogsType).catch(()=>{discogsFailed=true;return[];}),
     searchBandcamp(query).then(r=>r.filter(x=>x.type===bcType)).catch(()=>[]),
   ]);
-  return{discogs,bandcamp};
+  return{discogs,bandcamp,discogsFailed};
 }
 // What one favourite looks like in Discogs, from ONE search request instead
 // of a full discography fetch (minutes for a big catalog through the paced
@@ -3873,7 +3892,7 @@ async function getRelatedFavorites(kind,artistFavs,labelFavs){
 async function resolveFavoriteByName(name,kind){
   try{
     const wanted=kind==='label'?'label':'artist';
-    const results=(await searchDiscogs(name)).filter(r=>r.type===wanted);
+    const results=await searchDiscogsEntities(name,wanted);
     return results.find(r=>normalizeStr(r.title)===normalizeStr(name))||results[0]||null;
   }catch{return null;}
 }

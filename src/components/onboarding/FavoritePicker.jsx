@@ -5,7 +5,7 @@ import { bandcampFavorite, discogsFavorite, favoriteKey, hasFavorite } from '@/l
 
 const SEARCH_DEBOUNCE_MS = 300;
 const RELATED_DEBOUNCE_MS = 500;
-const EMPTY_RESULTS = { discogs: [], bandcamp: [] };
+const EMPTY_RESULTS = { discogs: [], bandcamp: [], discogsFailed: false };
 
 // One search box over Discogs AND Bandcamp (for acts/labels Discogs doesn't
 // list), the picks as removable chips, and "more like your picks" below.
@@ -95,6 +95,7 @@ export const FavoritePicker = ({ kind, items, artistFavs, labelFavs, actions, on
                 onAdd={() => add(discogsFavorite(result))}
               />
             ))}
+            {results.discogsFailed && <p className="px-3 py-2 text-[11px] text-destructive">Discogs didn't respond — try again in a moment.</p>}
             {results.bandcamp.length > 0 && <span className="block px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">On Bandcamp</span>}
             {results.bandcamp.slice(0, 5).map(result => (
               <FavoriteResultRow
@@ -107,7 +108,7 @@ export const FavoritePicker = ({ kind, items, artistFavs, labelFavs, actions, on
                 onAdd={() => add(bandcampFavorite(result))}
               />
             ))}
-            {!hasResults && <p className="px-3 py-3 text-xs text-muted-foreground">{searching ? 'Searching…' : `No ${noun} found for "${query.trim()}".`}</p>}
+            {!hasResults && !results.discogsFailed && <p className="px-3 py-3 text-xs text-muted-foreground">{searching ? 'Searching…' : `No ${noun} found for "${query.trim()}".`}</p>}
             {hasResults && searching && <p className="px-3 py-2 text-[11px] text-muted-foreground">Still searching…</p>}
           </div>
         )}
