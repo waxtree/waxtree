@@ -5,6 +5,7 @@ import { bandcampFavorite, discogsFavorite, favoriteKey, hasFavorite } from '@/l
 
 const SEARCH_DEBOUNCE_MS = 300;
 const RELATED_DEBOUNCE_MS = 500;
+const MAX_BANDCAMP_ROWS = 3;
 const EMPTY_RESULTS = { discogs: [], bandcamp: [], discogsFailed: false };
 
 // One search box over Discogs AND Bandcamp (for acts/labels Discogs doesn't
@@ -68,6 +69,8 @@ export const FavoritePicker = ({ kind, items, artistFavs, labelFavs, actions, on
   };
 
   const hasResults = results.discogs.length > 0 || results.bandcamp.length > 0;
+  // Discogs answered but had nothing, while Bandcamp did — say so, so the Bandcamp rows read as the fallback.
+  const discogsHasNothing = results.discogs.length === 0 && !results.discogsFailed && results.bandcamp.length > 0;
   const showPanel = query.trim() !== '';
 
   return (
@@ -83,9 +86,9 @@ export const FavoritePicker = ({ kind, items, artistFavs, labelFavs, actions, on
           className="w-full rounded-xl border-[1.5px] border-border bg-input py-2.5 pl-10 pr-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/70 focus:border-primary"
         />
         {showPanel && (
-          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-72 overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-lg">
+          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-80 overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-lg">
             {results.discogs.length > 0 && <span className="block px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">On Discogs</span>}
-            {results.discogs.slice(0, 6).map(result => (
+            {results.discogs.slice(0, 5).map(result => (
               <FavoriteResultRow
                 key={`d${result.id}`}
                 thumb={result.thumb}
@@ -96,8 +99,10 @@ export const FavoritePicker = ({ kind, items, artistFavs, labelFavs, actions, on
               />
             ))}
             {results.discogsFailed && <p className="px-3 py-2 text-[11px] text-destructive">Discogs didn't respond — try again in a moment.</p>}
-            {results.bandcamp.length > 0 && <span className="block px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">On Bandcamp</span>}
-            {results.bandcamp.slice(0, 5).map(result => (
+            {/* Bandcamp is the supplement for acts Discogs doesn't list — always below Discogs, and kept short. */}
+            {discogsHasNothing && <p className="px-3 py-2 text-[11px] text-muted-foreground">Nothing on Discogs for this search.</p>}
+            {results.bandcamp.length > 0 && <span className="block px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Also on Bandcamp</span>}
+            {results.bandcamp.slice(0, MAX_BANDCAMP_ROWS).map(result => (
               <FavoriteResultRow
                 key={result.id}
                 thumb={result.thumb}

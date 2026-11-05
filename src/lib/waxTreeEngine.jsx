@@ -3784,13 +3784,19 @@ function restartOnboarding(){
 // artist could fall outside them and filtering by type left nothing; asking
 // Discogs for the type directly can't. Same 7s ceiling as the search bar.
 async function searchDiscogsEntities(q,type){
-  const ck='sf:'+type+':'+q.toLowerCase();
+  const ck='sf2:'+type+':'+q.toLowerCase();
   const cached=lsGet(ck);if(cached)return cached;
   const data=await Promise.race([
     dReq('/database/search',{q,type,per_page:'15'}),
     new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('Search timed out — try again')),7000)),
   ]);
-  const r=(data.results||[]).map(x=>({id:x.id,type,title:x.title,thumb:x.thumb,uri:x.uri}));
+  const want=normalizeStr(q);
+  const bare=title=>(title||'').replace(/\s*\(\d+\)$/,'');
+  // Discogs' own order can put "Adrian Mills (2)" above the plain "Adrian
+  // Mills". Typed name exactly, unnumbered first; then the numbered
+  // namesakes; then everything else — each group keeps Discogs' order.
+  const rank=title=>normalizeStr(bare(title))!==want?2:(bare(title)===title?0:1);
+  const r=(data.results||[]).map(x=>({id:x.id,type,title:x.title,thumb:x.thumb,uri:x.uri})).sort((a,b)=>rank(a.title)-rank(b.title));
   if(r.length)lsSet(ck,r);
   return r;
 }
@@ -3854,6 +3860,8 @@ function probeFavoriteTaste(fav,kind){
   return request;
 }
 const RELATED_SKIP_RE=/^(various|unknown artist|not on label|self-released|white label|no label)/i;
+// A credit like "Ed Davenport, Ozka" or "A + B" is a collaboration, not one act you can pick.
+const COLLAB_CREDIT_RE=/,|\s\+\s|\s\/\s|\sfeat\.?\s|\svs\.?\s/i;
 // "More like your picks": for artists, other acts on the label each recent
 // pick released most on (the same who-else-is-on-that-label idea a node's
 // correlated artists use); for labels, the labels those artists released on.
@@ -3864,6 +3872,7 @@ async function getRelatedFavorites(kind,artistFavs,labelFavs){
   const add=(name,weight=1)=>{
     const clean=(name||'').trim();
     if(!clean||RELATED_SKIP_RE.test(clean))return;
+    if(kind!=='label'&&COLLAB_CREDIT_RE.test(clean))return;
     const key=normalizeStr(clean);
     if(!key||picked.has(key))return;
     tally[clean]=(tally[clean]||0)+weight;
