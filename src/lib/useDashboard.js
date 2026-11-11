@@ -3,13 +3,16 @@ import { digProfile } from '@/lib/dashboardProfile';
 import { hashSeed, seededRandom } from '@/lib/dashboardRandom';
 import { buildNeighbourhood, createUsedSet, homeLabel, pickForRow } from '@/lib/dashboardRanking';
 import { buildRecipes } from '@/lib/dashboardRecipes';
+import { mergeYearWeights, tasteFromLikes } from '@/lib/dashboardTaste';
 import { favoriteKey } from '@/lib/favorites';
+import { STYLE_FAMILIES } from '@/lib/styleFamilies';
 import { mapLimit } from '@/lib/mapLimit';
 
 // One key, holding only the finished strings (a few dozen compact records),
 // never the raw 100-release search pages — localStorage quota has bitten this
 // app before. Valid for the rest of the local day and for the same taste.
-const CACHE_KEY = 'wt-dash-v1';
+const CACHE_KEY = 'wt-dash-v2';
+const LEGACY_CACHE_KEY = 'wt-dash-v1';
 const FETCH_LANES = 2;
 const PROBE_LIMIT = 6;
 // A string with fewer records than this isn't worth a row (a thin sample, or
@@ -36,6 +39,7 @@ const readCache = () => {
 
 const writeCache = value => {
   try {
+    localStorage.removeItem(LEGACY_CACHE_KEY);
     localStorage.setItem(CACHE_KEY, JSON.stringify(value));
   } catch {
     // No room or no storage: the dashboard just rebuilds next time.
@@ -108,6 +112,17 @@ const namesWithin = async lookups => {
   return (await Promise.race([Promise.all(lookups), giveUp])).flat();
 };
 
+// The styles that count as "theirs" when ranking: picked genres and their
+// shades, the favourites' main styles and every style their likes touch.
+const tasteFor = (onboarding, likeTaste) => {
+  const styles = new Set([...onboarding.genres, ...onboarding.genres.flatMap(genre => STYLE_FAMILIES[genre] || [])]);
+  Object.values(onboarding.signals || {}).forEach(signal => Object.keys(signal.styles || {}).slice(0, 3).forEach(style => styles.add(style)));
+  Object.keys(likeTaste.styleWeight).forEach(style => styles.add(style));
+  const strongest = Math.max(0, ...Object.values(likeTaste.styleWeight));
+  const affinity = strongest ? Object.fromEntries(Object.entries(likeTaste.styleWeight).map(([style, weight]) => [style, weight / strongest])) : {};
+  return { styles, affinity };
+};
+
 const probesFor = async (actions, favoriteArtists, favoriteLabels) => {
   const picks = [
     ...favoriteArtists.slice(-PROBE_LIMIT).map(fav => ['artist', fav]),
@@ -163,10 +178,13 @@ export const useDashboard = (state, actions) => {
       if (cancelled) return;
       const seed = hashSeed(`${signature}|${today}|${salt}`);
       const rand = seededRandom(seed);
+      const likeTaste = tasteFromLikes(state.likedTracks);
       const recipes = buildRecipes({
         profile,
         genres: onboarding.genres,
         signals: onboarding.signals,
+        likeTaste,
+        yearWeights: mergeYearWeights(likeTaste.yearWeight, onboarding.signals),
         favoriteArtists,
         favoriteLabels,
         probes,
@@ -178,6 +196,7 @@ export const useDashboard = (state, actions) => {
       setRows(recipes.map(skeleton));
 
       const neighbourhood = buildNeighbourhood({ favoriteArtists, favoriteLabels, probes, nearbyArtists });
+      const taste = tasteFor(onboarding, likeTaste);
       const owned = { ids: new Set(state.discogsCollReleaseIds), masters: new Set(state.discogsCollMasterIds) };
       const listened = new Set(state.alreadyListened);
       const used = createUsedSet();
@@ -195,6 +214,7 @@ export const useDashboard = (state, actions) => {
           const items = failed ? [] : pickForRow(pool, {
             mode: recipe.mode,
             depth: profile.depth,
+            taste,
             excludeNeighbours: profile.excludeNeighbours,
             neighbourhood,
             owned,

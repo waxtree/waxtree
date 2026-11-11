@@ -50,7 +50,8 @@ const topStyleFor = (signal, allowed, known) => Object.entries(signal.styles || 
 const rangeLabel = window => (window.from === window.to ? String(window.from) : `${window.from}–${String(window.to).slice(2)}`);
 
 // "Basic Channel made lots of dub techno in 2007–08" → a Dub Techno string
-// for those years. Several picks pointing at the same style+years merge.
+// for those years. Several picks pointing at the same style+years merge (and a
+// likes string for the same style+years wins over it — same id).
 const eraRecipes = ({ signals, genres, known }) => {
   const allowed = new Set([...genres, ...genres.flatMap(genre => STYLE_FAMILIES[genre] || [])]);
   const merged = new Map();
@@ -79,32 +80,68 @@ const eraRecipes = ({ signals, genres, known }) => {
     }));
 };
 
-const genreRecipe = style => ({
-  id: `genre:${style}`,
-  kind: 'genre',
-  mode: 'depth',
-  title: style,
-  subtitle: 'Across the years',
-  queries: [{ style }],
-});
-
-const familyRecipe = (style, parent) => ({
-  id: `family:${style}`,
+// A nearby style, in one year the person's taste leans on (a style over all
+// its years is too broad a sample to be worth a string).
+const familyRecipe = (style, parent, year) => ({
+  id: `family:${style}:${year}`,
   kind: 'family',
   mode: 'depth',
-  title: style,
+  title: `${style} · ${year}`,
   subtitle: `A shade of ${parent}`,
-  queries: [{ style }],
+  queries: [{ style, year }],
 });
 
-const decadeRecipe = (style, decade, rand) => ({
-  id: `decade:${style}:${decade}`,
-  kind: 'decade',
-  mode: 'depth',
-  title: `${style} · ${decade}s`,
-  subtitle: 'One decade at a time',
-  queries: [{ style, year: decade + Math.floor(rand() * 10) }],
-});
+// "Lots of 2024 techno liked lately" → a Techno 2023–24 string. Any style the
+// likes point at counts: the likes are the person's taste, picked or not.
+const likeRecipes = (likeTaste, known) => likeTaste.clusters
+  .filter(cluster => known.includes(cluster.style))
+  .map(({ style, window, recent }) => ({
+    id: `era:${style}:${window.from}`,
+    kind: 'likes',
+    mode: 'depth',
+    title: `${style} · ${rangeLabel(window)}`,
+    subtitle: recent ? 'Close to what you have been liking lately' : 'Close to what you like',
+    queries: Array.from({ length: window.to - window.from + 1 }, (_, index) => ({ style, year: window.from + index })),
+  }));
+
+// Weighted pick without replacement: higher weight, earlier in the result.
+const weightedOrder = (entries, rand) => {
+  const left = [...entries];
+  const out = [];
+  while (left.length) {
+    const total = left.reduce((sum, [, weight]) => sum + weight, 0);
+    let roll = rand() * total;
+    const index = Math.max(0, left.findIndex(([, weight]) => (roll -= weight) <= 0));
+    out.push(left.splice(index, 1)[0][0]);
+  }
+  return out;
+};
+
+// A broad genre (Discogs' "Techno" is huge and mixes everything) never gets one
+// random everything-string: it gets one string per decade, each a single year
+// chosen by the years the person likes (likes + favourites' catalogues), and
+// never a year another string of the same style already covers.
+const decadeRecipes = ({ style, yearWeights, covered, rand, year: currentYear, count }) => {
+  const decadeWeight = decade => 1 + Object.entries(yearWeights)
+    .filter(([year]) => Number(year) >= decade && Number(year) < decade + 10)
+    .reduce((sum, [, weight]) => sum + weight, 0);
+  const tuned = Object.keys(yearWeights).length > 0;
+  return weightedOrder(DECADES.map(decade => [decade, decadeWeight(decade)]), rand).slice(0, count).map(decade => {
+    const years = Array.from({ length: Math.min(10, currentYear - decade + 1) }, (_, index) => decade + index)
+      .filter(year => !covered.has(`${style}|${year}`));
+    const pool = years.length ? years : [decade];
+    const [year] = weightedOrder(pool.map(candidate => [candidate, 0.5 + (yearWeights[candidate] || 0)]), rand);
+    covered.add(`${style}|${year}`);
+    return {
+      id: `decade:${style}:${year}`,
+      kind: 'decade',
+      mode: 'depth',
+      title: `${style} · ${year}`,
+      subtitle: tuned ? `Your ${decade}s, picked by the years you like` : `A year from the ${decade}s`,
+      queries: [{ style, year }],
+    };
+  });
+};
 
 // Closest-to-the-picks strings: more from the label each pick lives on. Only
 // built for profiles that still want the near neighbours.
@@ -145,19 +182,31 @@ const interleave = lists => {
   return out;
 };
 
-// One genre picked → the same genre in several decades and in its nearby
-// styles. Several picked → one string each (plus era strings from the favourites).
-const baseGenreRecipes = ({ genres, rand }) => {
-  if (genres.length !== 1) return genres.map(genreRecipe);
+// One genre picked → that genre in every decade plus its nearby styles.
+// Several picked → two decade strings each, alternating between genres.
+const baseGenreRecipes = ({ genres, yearWeights, covered, rand, year }) => {
+  const decadesOf = (style, count) => decadeRecipes({ style, yearWeights, covered, rand, year, count });
+  if (genres.length !== 1) return interleave(genres.map(style => decadesOf(style, 2)));
   const [only] = genres;
-  const family = shuffled(STYLE_FAMILIES[only] || [], rand).map(style => familyRecipe(style, only));
-  const decades = shuffled(DECADES, rand).map(decade => decadeRecipe(only, decade, rand));
-  return [genreRecipe(only), ...interleave([family, decades])];
+  const family = shuffled(STYLE_FAMILIES[only] || [], rand).map(style => familyRecipe(style, only, tasteYear(yearWeights, rand, year)));
+  return interleave([decadesOf(only, DECADES.length), family]);
 };
 
-export const buildRecipes = ({ profile, genres, signals, favoriteArtists, favoriteLabels, probes, knownStyles, rand, year }) => {
-  const era = eraRecipes({ signals, genres, known: knownStyles });
-  const base = baseGenreRecipes({ genres, rand });
+// One year drawn by the taste's year weights; any year since 1990 when there
+// are none yet.
+const tasteYear = (yearWeights, rand, currentYear) => {
+  const weighted = Object.entries(yearWeights).map(([year, weight]) => [Number(year), weight]).filter(([year]) => year >= 1975 && year <= currentYear);
+  if (!weighted.length) return 1990 + Math.floor(rand() * (currentYear - 1989));
+  return weightedOrder(weighted, rand)[0];
+};
+
+// Years already covered by a likes/era string, per style ("Techno|2024").
+const coveredYears = recipes => new Set(recipes.flatMap(recipe => recipe.queries.map(query => `${query.style}|${query.year}`)));
+
+export const buildRecipes = ({ profile, genres, signals, likeTaste, yearWeights, favoriteArtists, favoriteLabels, probes, knownStyles, rand, year }) => {
+  // Likes first: they're the freshest, most direct signal of taste.
+  const personal = [...likeRecipes(likeTaste, knownStyles), ...eraRecipes({ signals, genres, known: knownStyles })];
+  const base = baseGenreRecipes({ genres, yearWeights, covered: coveredYears(personal), rand, year });
   // One genre means the page is about range — its decades and shades — so the
   // page is a little longer and the close-neighbour strings are kept to one.
   const single = genres.length === 1;
@@ -168,11 +217,11 @@ export const buildRecipes = ({ profile, genres, signals, favoriteArtists, favori
   // Several genres but few strings (no favourites to read eras from): top up
   // with the nearby shades of each, so a daily digger still gets a full page.
   const shades = genres.length > 1
-    ? interleave(genres.map(genre => shuffled(STYLE_FAMILIES[genre] || [], rand).filter(style => !genres.includes(style)).map(style => familyRecipe(style, genre))))
+    ? interleave(genres.map(genre => shuffled(STYLE_FAMILIES[genre] || [], rand).filter(style => !genres.includes(style)).map(style => familyRecipe(style, genre, tasteYear(yearWeights, rand, year)))))
     : [];
   // The personal (era) strings lead, with the plain genre strings between
   // them; the close-neighbour strings sit third so a short page keeps them.
-  const lead = [...fresh, ...interleave([era, base]), ...shades];
+  const lead = [...fresh, ...interleave([personal, base]), ...shades];
   const ordered = [...lead.slice(0, 2), ...orbit, ...lead.slice(2)];
   const seen = new Set();
   return ordered.filter(recipe => !seen.has(recipe.id) && seen.add(recipe.id)).slice(0, limit);

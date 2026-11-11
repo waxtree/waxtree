@@ -9,7 +9,7 @@ const ROLE_DEPTH = { dj: 0.15, digger: 0.05, listener: -0.2 };
 // How many strings, and how many records in each. Daily = always plenty;
 // monthly = a short, curated page.
 const SHAPE = {
-  daily: { rows: 8, perRow: 14 },
+  daily: { rows: 10, perRow: 14 },
   weekly: { rows: 6, perRow: 12 },
   biweekly: { rows: 6, perRow: 10 },
   monthly: { rows: 5, perRow: 8 },

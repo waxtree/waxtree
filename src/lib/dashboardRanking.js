@@ -67,7 +67,19 @@ const percentiles = (items, valueOf) => {
   return out;
 };
 
-const scoreItems = (items, mode, depth, rand) => {
+// How well a release's Discogs styles sit inside the person's taste: the
+// share of its styles that are theirs (Discogs tags lots of UK bass, trance and
+// rave as "Techno" too), plus a nudge for the styles their likes lean on.
+// taste: { styles: Set, affinity: { style: 0…1 } }
+const tasteFit = (item, taste) => {
+  const styles = item.styles || [];
+  if (!styles.length) return 0.5;
+  const inside = styles.filter(style => taste.styles.has(style)).length / styles.length;
+  const loved = Math.min(1, styles.reduce((sum, style) => sum + (taste.affinity[style] || 0), 0));
+  return 0.7 * inside + 0.3 * loved;
+};
+
+const scoreItems = (items, mode, depth, taste, rand) => {
   const have = percentiles(items, item => item.have);
   const footprint = percentiles(items, item => item.have + item.want);
   // Wanted far more than owned = scarce and in demand: the hidden-gem signal.
@@ -83,7 +95,7 @@ const scoreItems = (items, mode, depth, rand) => {
     if (mode !== 'fresh' && item.have < LOW_HAVE) score *= 0.5;
     if (item.thumb) score += 0.08;
     if (item.format === 'Vinyl' || item.format === 'File') score += 0.04;
-    return score + rand() * 0.25;
+    return score + 0.8 * tasteFit(item, taste) + rand() * 0.25;
   });
 };
 
@@ -119,11 +131,11 @@ const pickDiverse = (entries, count, spreadYears) => {
 
 export const createUsedSet = () => ({ ids: new Set(), masters: new Set() });
 
-// context: { mode, depth, excludeNeighbours, neighbourhood, owned:{ids,masters},
-// listened:Set, used, rand, count, spreadYears }. `used` is shared by every
-// string so one record never shows twice on the page.
+// context: { mode, depth, taste, excludeNeighbours, neighbourhood,
+// owned:{ids,masters}, listened:Set, used, rand, count, spreadYears }. `used` is
+// shared by every string so one record never shows twice on the page.
 export const pickForRow = (pool, context) => {
-  const { mode, depth, excludeNeighbours, neighbourhood, owned, listened, used, rand, count, spreadYears } = context;
+  const { mode, depth, taste, excludeNeighbours, neighbourhood, owned, listened, used, rand, count, spreadYears } = context;
   const seenInPool = new Set();
   const candidates = pool.filter(item => {
     if (!item?.id || !item.title || seenInPool.has(item.id)) return false;
@@ -135,7 +147,7 @@ export const pickForRow = (pool, context) => {
     if (excludeNeighbours && mode === 'depth' && isNeighbour(item, neighbourhood)) return false;
     return true;
   });
-  const scores = scoreItems(candidates, mode, depth, rand);
+  const scores = scoreItems(candidates, mode, depth, taste, rand);
   const entries = candidates.map((item, index) => ({
     item,
     score: scores[index],

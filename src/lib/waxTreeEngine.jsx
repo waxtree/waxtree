@@ -6267,7 +6267,8 @@ function toggleLike(id){
       // fix as trackRows' displayArtist above, so a liked/history snapshot
       // doesn't freeze in the same wrong attribution.
       const artistName=tr.artistName||tr.trackArtistName||tr.releaseArtistName||(found?.node?.type==='label'?(tr.exploreName||found.node.name):found?.node?.name)||tr.label||'';
-      st.likedTracks[id]={id,title:tr.title,artistName,year:tr.year,label:tr.label,labelId:tr.labelId,trackArtistId:tr.trackArtistId,genre:tr.genre,thumbUrl:tr.thumbUrl,videoId:tr.videoId};
+      // likedAt: the dashboard weighs recent likes more ("lots of 2024 techno liked lately").
+      st.likedTracks[id]={id,title:tr.title,artistName,year:tr.year,label:tr.label,labelId:tr.labelId,trackArtistId:tr.trackArtistId,genre:tr.genre,thumbUrl:tr.thumbUrl,videoId:tr.videoId,likedAt:Date.now()};
     }
   }else{
     delete st.likedTracks[id];
