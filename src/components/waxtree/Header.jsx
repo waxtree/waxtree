@@ -72,6 +72,7 @@ export const Header = ({ state, session, actions, onMenuClick }) => {
             {[['Libraries', 'librariesModal'], ['Settings', 'settingsModal'], ['Likes', 'likesModal'], ['Follows', 'followsModal'], ['History', 'historyModal']].map(([label, key]) => (
               <button key={key} type="button" onClick={() => actions.mutateState(value => { value.profileOpen = false; value[key] = true; })} className="block w-full rounded-lg px-3.5 py-2 text-left text-[13px] hover:bg-muted">{label}</button>
             ))}
+            <button type="button" onClick={() => actions.mutateState(value => { value.profileOpen = false; value.contactModal = true; })} className="block w-full rounded-lg px-3.5 py-2 text-left text-[13px] hover:bg-muted">Contact us</button>
             <div className="my-1 h-px bg-border" />
             <button
               type="button"

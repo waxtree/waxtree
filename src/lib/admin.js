@@ -1,3 +1,4 @@
+import { FREQUENCY_OPTIONS, ROLE_OPTIONS } from '@/lib/onboardingContent';
 import { supabase } from '@/lib/supabase';
 
 export const fmtDate = value =>
@@ -15,6 +16,10 @@ export const fmtDuration = seconds => {
   const s = Math.round(seconds % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
 };
+
+// Onboarding answers as the app itself words them ("DJ / Producer", "Weekly").
+export const roleLabel = value => ROLE_OPTIONS.find(option => option.value === value)?.title || value || null;
+export const frequencyLabel = value => FREQUENCY_OPTIONS.find(option => option.value === value)?.title || value || null;
 
 export const authedFetch = async (path, options = {}) => {
   const { data: { session } } = await supabase.auth.getSession();

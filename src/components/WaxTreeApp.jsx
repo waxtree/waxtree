@@ -7,6 +7,7 @@ import { OnboardingLoading } from '@/components/onboarding/OnboardingLoading';
 import { Tour } from '@/components/tour/Tour';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
 import { CenterPanel } from '@/components/waxtree/CenterPanel';
+import { ContactModal } from '@/components/waxtree/ContactModal';
 import { Header } from '@/components/waxtree/Header';
 import { Modal } from '@/components/waxtree/Modal';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
@@ -111,6 +112,7 @@ const ModalLayer = ({ state, session, actions }) => {
   if (state.profileModal) return <ProfileModal state={state} session={session} actions={actions} />;
   if (state.levelsModal) return <LevelsModal state={state} actions={actions} />;
   if (state.settingsModal) return <SettingsModal state={state} session={session} actions={actions} />;
+  if (state.contactModal) return <ContactModal actions={actions} />;
   if (state.heroesModal) return <HeroesModal state={state} actions={actions} />;
   if (state.newReleasesModal) return <NewReleasesModal state={state} actions={actions} />;
   if (state.premiumModal) return <Modal title="Feature coming soon" close={() => actions.mutateState(value => { value.premiumModal = false; })} maxWidth="400px"><div className="text-center"><div className="mb-2 text-4xl">🔒</div><p className="mb-5 text-[13px] leading-5 text-muted-foreground">We're still working on this — it'll be available soon. Thanks for testing WaxTree!</p><button type="button" className={`${buttonPrimary} w-full py-2.5`} onClick={() => actions.mutateState(value => { value.premiumModal = false; })}>Got it</button></div></Modal>;

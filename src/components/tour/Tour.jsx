@@ -6,7 +6,7 @@ import { useTargetRect } from '@/lib/useTargetRect';
 
 // Any of these open means a modal is up — the tour steps aside until it closes
 // (unless it's the modal the current step opened to show it).
-const MODAL_FLAGS = ['playlistsModal', 'likesModal', 'historyModal', 'librariesModal', 'followsModal', 'profileModal', 'levelsModal', 'settingsModal', 'heroesModal', 'newReleasesModal', 'premiumModal'];
+const MODAL_FLAGS = ['playlistsModal', 'likesModal', 'historyModal', 'librariesModal', 'followsModal', 'profileModal', 'levelsModal', 'settingsModal', 'heroesModal', 'newReleasesModal', 'premiumModal', 'contactModal'];
 
 const nodeIds = state => new Set(state.nodes.map(node => node.id));
 

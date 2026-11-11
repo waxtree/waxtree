@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ThemeFrame, useTheme } from '@/components/AppChrome';
+import { MessagesSection } from '@/components/admin/MessagesSection';
 import { ReplaysSection } from '@/components/admin/ReplaysSection';
 import { StatsSection } from '@/components/admin/StatsSection';
 import { UsersTable } from '@/components/admin/UsersTable';
@@ -17,6 +18,9 @@ export const AdminPage = () => {
   // Kept separate from `status` on purpose — Sentry being slow/misconfigured
   // shouldn't block the rest of the dashboard (stats/users) from loading.
   const [replays, setReplays] = useState({ loading: true });
+  // Same idea: the inbox loads on its own and can't block the rest.
+  const [messages, setMessages] = useState({ loading: true });
+  const [busyMessage, setBusyMessage] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -28,6 +32,13 @@ export const AdminPage = () => {
       setStats(await statsResponse.json());
       setUsers((await usersResponse.json()).users);
       setStatus('ready');
+      authedFetch('/api/admin-messages')
+        .then(async response => {
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+          setMessages({ items: payload.messages, missingTable: !!payload.missingTable });
+        })
+        .catch(error => setMessages({ error: error.message }));
       try {
         const replaysResponse = await authedFetch('/api/admin-replays');
         if (!replaysResponse.ok) throw new Error((await replaysResponse.json().catch(() => ({}))).error || `HTTP ${replaysResponse.status}`);
@@ -53,6 +64,20 @@ export const AdminPage = () => {
       alert(`Failed to update tier: ${error.message}`);
     } finally {
       setBusyUser(null);
+    }
+  };
+
+  const toggleRead = async message => {
+    const read = !message.read_at;
+    setBusyMessage(message.id);
+    try {
+      const response = await authedFetch('/api/admin-messages', { method: 'POST', body: JSON.stringify({ id: message.id, read }) });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `HTTP ${response.status}`);
+      setMessages(current => ({ ...current, items: current.items.map(item => (item.id === message.id ? { ...item, read_at: read ? new Date().toISOString() : null } : item)) }));
+    } catch (error) {
+      alert(`Failed to update the message: ${error.message}`);
+    } finally {
+      setBusyMessage(null);
     }
   };
 
@@ -86,6 +111,7 @@ export const AdminPage = () => {
           </div>
         ) : (
           <>
+            <MessagesSection state={messages} busyMessage={busyMessage} onToggleRead={toggleRead} />
             <StatsSection stats={stats} />
             <UsersTable users={users} expanded={expanded} events={events} busyUser={busyUser} onExpand={toggleEvents} onToggle={toggleUser} />
             <ReplaysSection state={replays} />

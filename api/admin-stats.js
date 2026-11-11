@@ -72,7 +72,9 @@ export default async function handler(req, res) {
     // (max of last real sign-in, last state sync, last tracked event) — a
     // user who's stayed signed in for weeks without a fresh login shouldn't
     // read as inactive just because GoTrue's own last_sign_in_at is stale.
-    const stateRes = await sbAdmin('/rest/v1/user_state?select=user_id,updated_at')
+    // onboarding pulled out of the saved app state by PostgREST itself
+    // (data->onboarding), so the full trees never leave the database here.
+    const stateRes = await sbAdmin('/rest/v1/user_state?select=user_id,updated_at,onboarding:data->onboarding')
     const states = stateRes.ok ? await stateRes.json() : []
     const stateUpdatedById = Object.fromEntries(states.map(s => [s.user_id, s.updated_at]))
     let active7d = 0, active30d = 0
@@ -83,6 +85,20 @@ export default async function handler(req, res) {
       if (lastActiveMs >= cutoff7d) active7d++
       if (lastActiveMs >= cutoff30d) active30d++
     }
+
+    // Taste mix from the onboarding answers: who's using WaxTree (DJ / digger /
+    // listener), how often they dig, and which genres they picked.
+    const roles = {}, frequencies = {}, chosenGenres = {}
+    let onboarded = 0
+    for (const s of states) {
+      const o = s.onboarding
+      if (!o?.completedAt) continue
+      onboarded++
+      if (o.role) roles[o.role] = (roles[o.role] || 0) + 1
+      if (o.frequency) frequencies[o.frequency] = (frequencies[o.frequency] || 0) + 1
+      ;(Array.isArray(o.genres) ? o.genres : []).forEach(g => { chosenGenres[g] = (chosenGenres[g] || 0) + 1 })
+    }
+    const ranked = counts => Object.entries(counts).sort((a, b) => b[1] - a[1])
 
     const [discogsCache, ytMatched, ytNoMatch, ytChannels, sessions, trees, nodes] = await Promise.all([
       countRows('discogs_node_cache'),
@@ -106,6 +122,7 @@ export default async function handler(req, res) {
         yt_channel_matches: ytChannels,
       },
       new_schema: { sessions, trees, nodes },
+      taste: { onboarded, roles: ranked(roles), frequencies: ranked(frequencies), genres: ranked(chosenGenres).slice(0, 15) },
     })
   } catch (e) {
     return res.status(500).json({ error: e.message })

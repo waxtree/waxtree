@@ -1,14 +1,16 @@
 import { EventsList } from '@/components/admin/EventsList';
+import { UserTaste } from '@/components/admin/UserTaste';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TableCell, TableRow } from '@/components/ui/table';
-import { fmtDate, fmtDateTime } from '@/lib/admin';
+import { fmtDate, fmtDateTime, frequencyLabel, roleLabel } from '@/lib/admin';
 
 export const UserRow = ({ user, mismatch, open, eventState, busy, onExpand, onToggle }) => (
   <>
     <TableRow>
       <TableCell><button type="button" onClick={onExpand}>{open ? '▾' : '▸'}</button></TableCell>
       <TableCell className="font-medium">{user.email}</TableCell>
+      <TableCell className="text-xs">{user.taste?.onboarded ? [roleLabel(user.taste.role), frequencyLabel(user.taste.frequency)].filter(Boolean).join(' · ') : '—'}</TableCell>
       <TableCell>{fmtDate(user.created_at)}</TableCell>
       <TableCell>{fmtDateTime(user.last_active)}</TableCell>
       <TableCell>{user.library_track_count ?? '—'}</TableCell>
@@ -26,7 +28,10 @@ export const UserRow = ({ user, mismatch, open, eventState, busy, onExpand, onTo
     </TableRow>
     {open && (
       <TableRow>
-        <TableCell colSpan={9}><EventsList state={eventState} /></TableCell>
+        <TableCell colSpan={10}>
+          <UserTaste taste={user.taste} />
+          <EventsList state={eventState} />
+        </TableCell>
       </TableRow>
     )}
   </>

@@ -2,7 +2,7 @@ import { UserRow } from '@/components/admin/UserRow';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
-const columns = ['', 'Email', 'Joined', 'Last active', 'Library tracks', 'Searches', 'Nodes opened', 'Tier', ''];
+const columns = ['', 'Email', 'Taste', 'Joined', 'Last active', 'Library tracks', 'Searches', 'Nodes opened', 'Tier', ''];
 
 export const UsersTable = ({ users, expanded, events, busyUser, onExpand, onToggle }) => (
   <Card size="sm" className="mt-8 overflow-x-auto">

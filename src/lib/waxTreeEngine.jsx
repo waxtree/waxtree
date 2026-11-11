@@ -1758,7 +1758,7 @@ const st={
   // playlistDropId/exploreDropKey above.
   trackHelpDropId:null,
   profileOpen:false,
-  likesModal:false,historyModal:false,settingsModal:false,profileModal:false,levelsModal:false,followsModal:false,discogsSyncing:false,
+  likesModal:false,historyModal:false,settingsModal:false,contactModal:false,profileModal:false,levelsModal:false,followsModal:false,discogsSyncing:false,
   likesGenreOpen:new Set(), // which genre sections are expanded in My Likes — transient, not persisted
   follows:saved?.follows||[],
   // type+':'+discogs_id -> array of release ids already seen for that
@@ -3785,6 +3785,22 @@ function completeOnboarding(){
 function restartOnboarding(){
   st.onboarding={...st.onboarding,step:0,redo:true,updatedAt:Date.now()};
   st.settingsModal=false;rr();
+}
+// "Contact us" (profile menu): one row in contact_messages, read in /admin.
+// RLS only lets a signed-in user insert rows with their own user_id.
+const CONTACT_KINDS=['bug','idea','question','other'];
+async function sendContactMessage(kind,message){
+  const text=(message||'').trim().slice(0,4000);
+  if(!wtSession)return{ok:false,error:'Please sign in again to send a message.'};
+  if(!text||!CONTACT_KINDS.includes(kind))return{ok:false,error:'Write a message first.'};
+  try{
+    const{error}=await sb.from('contact_messages').insert({user_id:wtSession.user.id,kind,message:text,page:st.view==='digging'?(getNode(st.selectedId)?.name||'digging'):'home'});
+    if(error)throw error;
+    return{ok:true};
+  }catch(e){
+    console.warn('WaxTree: contact message not sent:',e?.message||e);
+    return{ok:false,error:'It didn’t go through — please try again in a moment.'};
+  }
 }
 // The walkthrough: done (or skipped) once per account; Settings can replay it
 // (its first step brings the person back to Home).
@@ -7098,7 +7114,7 @@ export const waxTreeActions={
   badgeListened,baseTitleKey,extractRemixCandidate,getCloneRelease,getDeejayRelease,getDeezerRelease,getDeezerPreviewUrl,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchCloneTrack,matchDeejayTrack,matchDeezerTrack,matchYoyakuTrack,normalizeStr,playDeezerPreview,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
-  updateOnboarding,completeOnboarding,restartOnboarding,finishTour,restartTour,searchFavoriteCandidates,getRelatedFavorites,resolveFavoriteByName,getGenreSuggestions,
+  updateOnboarding,completeOnboarding,restartOnboarding,finishTour,restartTour,sendContactMessage,searchFavoriteCandidates,getRelatedFavorites,resolveFavoriteByName,getGenreSuggestions,
   showDashboard,toggleSidebar,searchDashboardReleases,probeFavoriteTaste,getArtistCircle,getLabelRoster,
   supabase:sb,
 };

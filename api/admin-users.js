@@ -35,6 +35,20 @@ export default async function handler(req, res) {
     const states = stateRes.ok ? await stateRes.json() : []
     const nodesCountById = Object.fromEntries(states.map(s => [s.user_id, (s.data?.nodes || []).length]))
     const stateUpdatedById = Object.fromEntries(states.map(s => [s.user_id, s.updated_at]))
+    // The onboarding taste profile (role, how often they dig, genres, the
+    // favourite artists/labels they picked) — same saved app state.
+    const tasteById = Object.fromEntries(states.map(s => {
+      const onboarding = s.data?.onboarding || {}
+      const names = list => (Array.isArray(list) ? list : []).map(f => f?.name).filter(Boolean)
+      return [s.user_id, {
+        onboarded: !!onboarding.completedAt,
+        role: onboarding.role || null,
+        frequency: onboarding.frequency || null,
+        genres: Array.isArray(onboarding.genres) ? onboarding.genres : [],
+        favorite_artists: names(s.data?.favoriteArtists),
+        favorite_labels: names(s.data?.favoriteLabels),
+      }]
+    }))
 
     // GoTrue's last_sign_in_at only moves on an actual (re)login — a user
     // who's stayed signed in for weeks, just reloading and searching, still
@@ -64,6 +78,7 @@ export default async function handler(req, res) {
         library_track_count: u.user_metadata?.library_track_count ?? null,
         search_count: u.user_metadata?.search_count ?? null,
         nodes_count: nodesCountById[u.id] ?? 0,
+        taste: tasteById[u.id] || null,
       }
     }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
