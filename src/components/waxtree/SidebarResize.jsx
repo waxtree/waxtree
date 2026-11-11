@@ -1,6 +1,7 @@
-export const SidebarResize = ({ width, onResize }) => {
+export const SidebarResize = ({ width, onResize, onResizeStart, onResizeEnd }) => {
   const begin = event => {
     event.preventDefault();
+    onResizeStart();
     const startX = event.clientX;
     const startWidth = width;
     const move = nextEvent => onResize(Math.max(160, Math.min(520, startWidth + nextEvent.clientX - startX)));
@@ -9,6 +10,7 @@ export const SidebarResize = ({ width, onResize }) => {
       localStorage.setItem('wt-sb-w', String(nextWidth));
       document.removeEventListener('mousemove', move);
       document.removeEventListener('mouseup', finish);
+      onResizeEnd();
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', finish);

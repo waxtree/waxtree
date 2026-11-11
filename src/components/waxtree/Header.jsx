@@ -17,11 +17,20 @@ export const Header = ({ state, session, actions, onMenuClick }) => {
       <Button variant="outline" size="icon" title="Branches" className="hidden h-auto shrink-0 rounded-full p-1.5 text-muted-foreground max-sm:flex" onClick={onMenuClick}>
         <Menu className="size-4" />
       </Button>
-      <div className="flex shrink-0 items-center gap-3 max-sm:gap-1.5">
+      {/* The logo is the Home button: it brings back the dashboard, which
+          stays underneath the digging workspace the whole time. */}
+      <button
+        type="button"
+        onClick={actions.showDashboard}
+        title="Home"
+        aria-label="WaxTree home"
+        aria-current={state.view === 'dashboard' ? 'page' : undefined}
+        className="flex shrink-0 items-center gap-3 rounded-lg outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-primary/50 max-sm:gap-1.5"
+      >
         <img className="h-10 w-10 object-contain max-sm:h-8 max-sm:w-8" src="/logo.svg" alt="" />
         <span className="text-2xl font-bold text-primary max-sm:hidden">WaxTree</span>
         <span className="self-end pb-1 text-[13px] font-medium text-muted-foreground/70 max-sm:hidden">Beta v.1</span>
-      </div>
+      </button>
       {/* Search needs real room to actually be usable — on mobile that
           means dropping everything else that isn't essential: the
           wordmark above, and Playlists/Level here (Playlists moves into

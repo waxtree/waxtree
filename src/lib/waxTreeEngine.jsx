@@ -1739,6 +1739,12 @@ const st={
   // the plain text search's own q/results/loading/err above.
   exploreMode:'search', // 'search' | 'genreYear' — which input the search bar itself shows
   exploreStyles:[],exploreYears:[],
+  // Which centre panel is showing: the Home dashboard (always the landing view
+  // — never persisted, so every session starts there) or the artist→label
+  // digging workflow. sidebarOpen is the left branches column, closed by default
+  // and slid open automatically when digging starts.
+  view:'dashboard', // 'dashboard' | 'digging'
+  sidebarOpen:false,
   bioOpen:{},bandcampOnlyView:{},renameId:null,renameVal:'',tagNodeId:null,tagVal:'',
   filterOpen:false,filterTitle:'',filterFormat:'all',filterSort:'default',filterGenres:[],
   sbPinFirst:saved?.sbPinFirst||false,sbFilterTag:'',
@@ -3859,6 +3865,37 @@ function probeFavoriteTaste(fav,kind){
   tasteProbeInFlight.set(key,request);
   return request;
 }
+// The people right around a favourite artist on Discogs: its aliases, its
+// members (for a group) and the groups it plays in, plus one more hop for a
+// group's members' own aliases — Basic Channel → Moritz Von Oswald → Maurizio.
+// The dashboard leaves these out for deep diggers ("they already know them").
+// Names only, cached 30 days; /artists/ calls go through the normal shared
+// pacing, so a first build may finish before this does and use it next time.
+const artistCircleInFlight=new Map();
+function getArtistCircle(discogsId){
+  if(!discogsId)return Promise.resolve([]);
+  const key='ac:'+discogsId;
+  const cached=lsGet(key);
+  if(cached)return Promise.resolve(cached);
+  if(artistCircleInFlight.has(key))return artistCircleInFlight.get(key);
+  const request=(async()=>{
+    try{
+      const artist=await dReq('/artists/'+discogsId);
+      const names=new Set();
+      const add=list=>(list||[]).forEach(entry=>{if(entry?.name)names.add(stripDiscogsSuffix(entry.name));});
+      add(artist.aliases);add(artist.members);add(artist.groups);
+      for(const member of (artist.members||[]).slice(0,3)){
+        try{add((await dReq('/artists/'+member.id)).aliases);}catch{/* one member's aliases missing is fine */}
+      }
+      const list=[...names];
+      lsSet(key,list);
+      return list;
+    }catch{return[];}
+    finally{artistCircleInFlight.delete(key);}
+  })();
+  artistCircleInFlight.set(key,request);
+  return request;
+}
 const RELATED_SKIP_RE=/^(various|unknown artist|not on label|self-released|white label|no label)/i;
 // A credit like "Ed Davenport, Ozka" or "A + B" is a collaboration, not one act you can pick.
 const COLLAB_CREDIT_RE=/,|\s\+\s|\s\/\s|\sfeat\.?\s|\svs\.?\s/i;
@@ -3884,19 +3921,32 @@ async function getRelatedFavorites(kind,artistFavs,labelFavs){
     for(const p of probes){
       const topLabel=p&&Object.entries(p.labels).filter(([label])=>!RELATED_SKIP_RE.test(label)).sort((a,b)=>b[1]-a[1])[0]?.[0];
       if(!topLabel)continue;
-      const cacheKey='rl:'+normalizeStr(topLabel);
-      let names=lsGet(cacheKey);
-      if(!names){
-        try{
-          const data=await dReq('/database/search',{type:'release',label:topLabel,per_page:'50'});
-          names=(data.results||[]).map(r=>(r.title||'').split(' - ')[0]).filter(Boolean);
-          lsSet(cacheKey,names);
-        }catch{names=[];}
-      }
-      names.forEach(name=>add(name));
+      (await getLabelRoster(topLabel)).forEach(name=>add(name));
     }
   }
   return Object.entries(tally).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([name])=>name);
+}
+// The acts on a label's 50 latest releases — its roster, roughly. Shared by
+// the onboarding's "more like your picks" and the dashboard's "too obvious"
+// filter. One /database/search, cached 30 days; callers asking at the same
+// time share the one request.
+const labelRosterInFlight=new Map();
+function getLabelRoster(label){
+  const cacheKey='rl:'+normalizeStr(label);
+  const cached=lsGet(cacheKey);
+  if(cached)return Promise.resolve(cached);
+  if(labelRosterInFlight.has(cacheKey))return labelRosterInFlight.get(cacheKey);
+  const request=(async()=>{
+    try{
+      const data=await dReq('/database/search',{type:'release',label,per_page:'50'});
+      const names=(data.results||[]).map(r=>(r.title||'').split(' - ')[0]).filter(Boolean);
+      lsSet(cacheKey,names);
+      return names;
+    }catch{return[];}
+    finally{labelRosterInFlight.delete(cacheKey);}
+  })();
+  labelRosterInFlight.set(cacheKey,request);
+  return request;
 }
 async function resolveFavoriteByName(name,kind){
   try{
@@ -3980,6 +4030,33 @@ function removeExploreYear(year){st.exploreYears=st.exploreYears.filter(y=>y!==y
 // this change, so every read site goes through this instead of assuming
 // the object shape.
 const chipName=c=>typeof c==='string'?c:c.name;
+// ── Home dashboard ─────────────────────────────────────────
+// Entering the digging workflow (a node was opened or created in the
+// foreground) leaves the dashboard and slides the branches column open — but
+// only on that switch, so someone who closed the column while digging isn't
+// reopened on every node they then explore. The callers always follow with
+// rr(), so this only flips state.
+function enterDigging(){if(st.view==='digging')return;st.view='digging';st.sidebarOpen=true;}
+function showDashboard(){st.view='dashboard';rr();}
+function toggleSidebar(){st.sidebarOpen=!st.sidebarOpen;rr();}
+// One dashboard string's worth of Discogs search: a 100-release page reduced to
+// the few fields the ranking and the tiles need. /database/search isn't paced
+// on the shared proxy (it is built for a human's single search), so callers
+// keep this to a couple of requests at a time and cache the finished page.
+async function searchDashboardReleases(params){
+  const data=await Promise.race([
+    dReq('/database/search',{type:'release',per_page:'100',...params}),
+    new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('timeout')),9000)),
+  ]);
+  return{
+    pages:data.pagination?.pages||1,
+    results:(data.results||[]).map(r=>({
+      id:r.id,title:r.title,thumb:r.thumb||null,year:parseInt(r.year,10)||null,
+      label:(r.label||[])[0]||null,labels:(r.label||[]).slice(0,3),styles:(r.style||[]).slice(0,4),
+      format:(r.formats||[])[0]?.name||null,have:r.community?.have||0,want:r.community?.want||0,master:r.master_id||0,
+    })),
+  };
+}
 // A genre/year search becomes a node, same as any other exploration —
 // persists in the tree (pin/tag/drag/reorder/move-to-branch all already
 // work generically on any node, no special-casing needed), and can be
@@ -3994,7 +4071,7 @@ function addGenreYearNode(styles,years){
   // fetch can still be retried — .data only gets populated on success.
   const node={id,branchId:bid,type:'genreYear',discogsId:null,name,parentId:null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null,params:{styles,years}};
   st.nodes=[node,...st.nodes]; // newest at the top — see addNode's own comment on the same change
-  st.selectedId=id;st.activeBranchId=bid;
+  st.selectedId=id;st.activeBranchId=bid;enterDigging();
   if(!st.chips.some(c=>chipName(c)===name))st.chips=[{name,type:'genreYear',styles,years},...st.chips.slice(0,11)];
   rr();
   fetchGenreYearResults(id,styles,years);
@@ -4025,7 +4102,7 @@ function addBandcampNode(bcUrl,name,isLabel,thumb,parentId,branchId){
   const prevLvl=getLevelFromCount(st.nodes.length);
   const node={id,branchId:bid,type:isLabel?'bcLabel':'bcArtist',discogsId:null,name,parentId:parentId||null,pinned:false,tags:[],loaded:false,loading:true,error:null,data:null,params:{bcUrl:norm},thumbUrl:thumb||null};
   st.nodes=[node,...st.nodes];
-  st.selectedId=id;st.activeBranchId=bid;
+  st.selectedId=id;st.activeBranchId=bid;enterDigging();
   st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
   const newLvl=getLevelFromCount(st.nodes.length);
   if(newLvl.level>prevLvl.level)showLevelUpToast(newLvl);
@@ -6033,7 +6110,7 @@ function addNode(type,discogsId,name,parentId,branchId,opts={}){
   if(background){
     setTimeout(()=>{const n=getNode(id);if(n){n.justAdded=false;rr();}},1400);
   }else{
-    st.selectedId=id;st.activeBranchId=bid;
+    st.selectedId=id;st.activeBranchId=bid;enterDigging();
     st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
   }
   const newLvl=getLevelFromCount(st.nodes.length);
@@ -6159,7 +6236,7 @@ function reorderBranch(draggedId,targetId,position){
   rr();
 }
 function selectNode(id){
-  st.selectedId=id;const n=getNode(id);if(n)st.activeBranchId=n.branchId;
+  st.selectedId=id;const n=getNode(id);if(n)st.activeBranchId=n.branchId;enterDigging();
   st.filterOpen=false;st.filterTitle='';st.filterFormat='all';st.filterSort='default';st.filterGenres=[];
   // A node restored from the cloud backup (or never fully loaded) has no
   // cached Discogs data — fetch it now instead of rendering an empty panel.
@@ -7009,5 +7086,6 @@ export const waxTreeActions={
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
   updateOnboarding,completeOnboarding,restartOnboarding,searchFavoriteCandidates,getRelatedFavorites,resolveFavoriteByName,getGenreSuggestions,
+  showDashboard,toggleSidebar,searchDashboardReleases,probeFavoriteTaste,getArtistCircle,getLabelRoster,
   supabase:sb,
 };

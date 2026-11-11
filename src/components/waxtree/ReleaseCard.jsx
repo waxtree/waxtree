@@ -74,7 +74,9 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
   const bandcampDirect = actions.findBcMatch(node.id, releaseTitle) || tracks.map(track => actions.findBcMatch(node.id, track.title)).find(Boolean) || actions.getBandcampDirect(releaseArtist, releaseLabel, releaseTitle);
 
   const exploreItem = item => {
-    if (item.id) actions.addNode(item.type, item.id, item.name, node.id, node.branchId, { background: true });
+    // From the dashboard (foregroundExplore) Explore must open the node and switch to digging;
+    // everywhere else it adds quietly in the background and the person stays on the page.
+    if (item.id) actions.addNode(item.type, item.id, item.name, node.id, node.branchId, { background: !node.foregroundExplore });
     else { actions.mutateState(value => { value.q = item.name; }); actions.doSearch(); }
     setExploreOpen(false);
   };

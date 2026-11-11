@@ -5,7 +5,7 @@ import { FavoritePicker } from '@/components/onboarding/FavoritePicker';
 import { OnboardingGate } from '@/components/onboarding/OnboardingGate';
 import { OnboardingLoading } from '@/components/onboarding/OnboardingLoading';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
-import { Content } from '@/components/waxtree/Content';
+import { CenterPanel } from '@/components/waxtree/CenterPanel';
 import { Header } from '@/components/waxtree/Header';
 import { Modal } from '@/components/waxtree/Modal';
 import { PlaylistDrop } from '@/components/waxtree/PlaylistDrop';
@@ -31,6 +31,9 @@ export const WaxTreeApp = ({ engine }) => {
   // drawer below the sm breakpoint instead of a fixed grid column — desktop
   // never sets or reads this, see Sidebar's own max-sm: classes.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  // True while the resize handle is being dragged: the columns follow the
+  // pointer directly, with no slide animation lagging behind it.
+  const [resizing, setResizing] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = state.theme;
@@ -67,10 +70,20 @@ export const WaxTreeApp = ({ engine }) => {
       <div className="flex h-dvh flex-col overflow-hidden" translate="no">
         <Header state={state} session={session} actions={actions} onMenuClick={() => setMobileSidebarOpen(value => !value)} />
         <RescanReminder session={session} actions={actions} />
-        <div style={{ '--wt-app-columns': `${sidebarWidth}px 4px minmax(0,1fr) 260px` }} className="grid min-h-0 flex-1 grid-cols-[var(--wt-app-columns)] overflow-hidden max-[900px]:grid-cols-[210px_3px_minmax(0,1fr)] max-sm:grid-cols-1">
-          <Sidebar state={state} actions={actions} mobileOpen={mobileSidebarOpen} onCloseMobile={() => setMobileSidebarOpen(false)} />
-          <SidebarResize width={sidebarWidth} onResize={setSidebarWidth} />
-          <Content state={state} actions={actions} />
+        {/* The branches column is a slide-out: closed it is a zero-width track
+            (the tracks keep their count, so the width can animate), open it is
+            the usual resizable column. The right column never moves. */}
+        <div
+          style={{
+            '--wt-sidebar-w': `${sidebarWidth}px`,
+            '--wt-app-columns': state.sidebarOpen ? `${sidebarWidth}px 4px minmax(0,1fr) 260px` : '0px 0px minmax(0,1fr) 260px',
+            '--wt-tablet-columns': state.sidebarOpen ? '210px 3px minmax(0,1fr)' : '0px 0px minmax(0,1fr)',
+          }}
+          className={`grid min-h-0 flex-1 grid-cols-[var(--wt-app-columns)] overflow-hidden max-[900px]:grid-cols-[var(--wt-tablet-columns)] max-sm:grid-cols-1 ${resizing ? '' : 'transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none'}`}
+        >
+          <Sidebar state={state} actions={actions} open={state.sidebarOpen} mobileOpen={mobileSidebarOpen} onCloseMobile={() => setMobileSidebarOpen(false)} />
+          <SidebarResize width={sidebarWidth} onResize={setSidebarWidth} onResizeStart={() => setResizing(true)} onResizeEnd={() => setResizing(false)} />
+          <CenterPanel state={state} actions={actions} />
           <RightPanel state={state} actions={actions} />
         </div>
       </div>
