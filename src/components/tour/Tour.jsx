@@ -4,7 +4,8 @@ import { TourSpotlight } from '@/components/tour/TourSpotlight';
 import { pickTourArtist, TOUR_STEPS } from '@/lib/tourSteps';
 import { useTargetRect } from '@/lib/useTargetRect';
 
-// Any of these open means a modal is up — the tour steps aside until it closes.
+// Any of these open means a modal is up — the tour steps aside until it closes
+// (unless it's the modal the current step opened to show it).
 const MODAL_FLAGS = ['playlistsModal', 'likesModal', 'historyModal', 'librariesModal', 'followsModal', 'profileModal', 'levelsModal', 'settingsModal', 'heroesModal', 'newReleasesModal', 'premiumModal'];
 
 const nodeIds = state => new Set(state.nodes.map(node => node.id));
@@ -32,7 +33,13 @@ export const Tour = ({ state, actions }) => {
   };
 
   useEffect(() => {
+    if (step.modal) actions.mutateState(value => { value[step.modal] = true; });
     step.onEnter?.({ actions, state, ctx });
+    // Runs when the step ends — moving on, skipping the tour or finishing it.
+    return () => {
+      if (step.modal) actions.mutateState(value => { value[step.modal] = false; });
+      step.onLeave?.({ actions });
+    };
     // Only when a step begins; state/ctx are read as they are at that moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index]);
@@ -44,7 +51,7 @@ export const Tour = ({ state, actions }) => {
     if (patch) goTo(index + 1, patch);
   });
 
-  if (MODAL_FLAGS.some(flag => state[flag])) return null;
+  if (MODAL_FLAGS.some(flag => state[flag] && flag !== step.modal)) return null;
 
   const wait = step.wait?.(state, ctx) ?? null;
   const next = () => (step.primary ? goTo(index + 1, step.primary.run({ actions, state, ctx })) : goTo(index + 1));

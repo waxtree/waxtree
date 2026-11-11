@@ -43,6 +43,7 @@ export const Header = ({ state, session, actions, onMenuClick }) => {
       <Search state={state} actions={actions} />
       <div className="flex-1 max-sm:hidden" />
       <Button
+        data-tour="playlists"
         variant="outline"
         className={`h-auto gap-1 rounded-full px-3 py-1 text-xs max-sm:hidden ${playlistCount ? 'border-primary text-primary' : 'text-muted-foreground'}`}
         onClick={() => actions.mutateState(value => { value.playlistsModal = true; })}
@@ -55,7 +56,7 @@ export const Header = ({ state, session, actions, onMenuClick }) => {
       <div className="relative">
         <Button variant="outline" size="icon" title="Profile" className="h-auto rounded-full p-1.5 text-muted-foreground" onClick={event => { event.stopPropagation(); actions.mutateState(value => { value.profileOpen = !value.profileOpen; }); }}><User className="size-3.5" /></Button>
         {state.profileOpen && (
-          <div className="absolute right-0 top-[calc(100%+6px)] z-[500] min-w-[185px] overflow-hidden rounded-[14px] border border-border bg-card p-1 shadow-[var(--wt-shadow)]">
+          <div data-tour="profile-menu" className="absolute right-0 top-[calc(100%+6px)] z-[500] min-w-[185px] overflow-hidden rounded-[14px] border border-border bg-card p-1 shadow-[var(--wt-shadow)]">
             <button
               type="button"
               onClick={() => actions.mutateState(value => { value.profileOpen = false; value.profileModal = true; })}

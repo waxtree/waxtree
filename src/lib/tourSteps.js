@@ -11,7 +11,9 @@
 //   interactive          the person has to do something; the step advances by
 //                        itself when done(state, ctx) returns a ctx patch
 //   wait(state, ctx)     'loading' (Next disabled) | 'error' | null
-//   onEnter({ actions, state, ctx })
+//   onEnter({ actions, state, ctx }) / onLeave({ actions })
+//   modal                a modal flag the step opens (and closes when it ends) to
+//                        show what's inside it — the modal itself is spotlit
 //   primary              { label(ctx), run({ actions, state, ctx }) → ctx patch }
 //   requiresArtist       left out when there's no Discogs favourite artist to dig from
 
@@ -33,6 +35,7 @@ const arrivedNode = (state, ctx, type) => state.nodes.find(node => node.type ===
   || null;
 
 const openSidebar = ({ actions }) => actions.mutateState(value => { value.sidebarOpen = true; });
+const setProfileMenu = open => ({ actions }) => actions.mutateState(value => { value.profileOpen = open; });
 
 // The favourite to dig from: a Discogs artist pick, preferring a smaller
 // catalogue (it loads faster) that still has a few releases.
@@ -49,7 +52,7 @@ export const TOUR_STEPS = [
   {
     id: 'welcome',
     title: 'Welcome to WaxTree',
-    body: 'A two-minute tour of the main buttons, then your first real dig: artist → label → artist. You can skip it, but it’s worth it.',
+    body: 'A short tour: the main buttons, your first real dig (artist → label → artist), then where your likes, playlists and settings live. You can skip it, but it’s worth it.',
     onEnter: ({ actions }) => actions.showDashboard(),
   },
   {
@@ -148,8 +151,56 @@ export const TOUR_STEPS = [
   {
     id: 'track-actions',
     target: () => '[data-tour="track-actions"]',
-    title: 'Play, like, save',
-    body: 'Play any track, ♥ like it (likes tune your Home page) or tag it into a playlist.',
+    title: 'Play anything',
+    body: 'Every track has a Play button: WaxTree finds a playable source for it — Bandcamp, Deezer, YouTube or a record store’s preview.',
+  },
+  {
+    id: 'like',
+    target: () => '[data-tour="track-like"]',
+    title: 'Like what you love',
+    body: '♥ a track to keep it. Likes are what your Home page learns from — the more you like, the better it digs for you.',
+  },
+  {
+    id: 'save',
+    target: () => '[data-tour="track-save"]',
+    title: 'Save it for later',
+    body: 'The tag button puts a track in Listen Later or in one of your playlists — or starts a new playlist right there.',
+  },
+  {
+    id: 'playlists-button',
+    target: () => '[data-tour="playlists"]',
+    title: 'Your playlists',
+    body: 'All your playlists are behind this button; the number counts the tracks you’ve saved.',
+    mobileBody: 'On a phone, your playlists are in the profile menu (top right).',
+  },
+  {
+    id: 'playlists',
+    modal: 'playlistsModal',
+    target: () => '[data-tour="modal"]',
+    title: 'Inside Playlists',
+    body: 'Listen Later is always here, and you can make as many playlists as you like — by genre, for a gig, anything. Play tracks straight from the list, move them between playlists, double-click a playlist to rename it.',
+  },
+  {
+    id: 'profile-menu',
+    target: () => '[data-tour="profile-menu"]',
+    title: 'Your profile menu',
+    body: 'Libraries: sync your Discogs collection and link your music folder — what you own gets tagged, and Home won’t suggest it. Likes: every track you ♥. Follows: the artists and labels you follow, with their new releases. History: everything you’ve played.',
+    onEnter: setProfileMenu(true),
+    onLeave: setProfileMenu(false),
+  },
+  {
+    id: 'likes',
+    modal: 'likesModal',
+    target: () => '[data-tour="modal"]',
+    title: 'Your likes',
+    body: 'Every track you’ve liked, grouped by genre. Play them again from here, find them on Bandcamp or Beatport, or remove one with ×.',
+  },
+  {
+    id: 'settings',
+    modal: 'settingsModal',
+    target: () => '[data-tour="modal"]',
+    title: 'Settings',
+    body: 'Change your password and profile photo; edit your taste profile — artists, labels, genres, how often you dig and your library sync, which reshapes your Home page; take this tour again; clear your listen history or delete your account. Find it in the profile menu.',
   },
   {
     id: 'player',
@@ -167,7 +218,7 @@ export const TOUR_STEPS = [
   {
     id: 'done',
     title: 'You’re ready',
-    body: 'Logo for Home, Explore to follow labels and artists, ♥ for what you love. You can take this tour again from Settings.',
+    body: 'Logo for Home, Explore to follow labels and artists, ♥ for what you love, Playlists for what you save. You can take this tour again from Settings.',
     primary: { label: () => 'Start digging', run: () => ({}) },
   },
 ];
