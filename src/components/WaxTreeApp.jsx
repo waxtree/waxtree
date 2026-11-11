@@ -4,6 +4,7 @@ import { CookieBanner, ThemeFrame } from '@/components/AppChrome';
 import { FavoritePicker } from '@/components/onboarding/FavoritePicker';
 import { OnboardingGate } from '@/components/onboarding/OnboardingGate';
 import { OnboardingLoading } from '@/components/onboarding/OnboardingLoading';
+import { Tour } from '@/components/tour/Tour';
 import { LabelIcon } from '@/components/waxtree/icons/LabelIcon';
 import { CenterPanel } from '@/components/waxtree/CenterPanel';
 import { Header } from '@/components/waxtree/Header';
@@ -88,6 +89,8 @@ export const WaxTreeApp = ({ engine }) => {
         </div>
       </div>
       <ModalLayer state={state} session={session} actions={actions} />
+      {/* The walkthrough, once per account after the onboarding (replayable from Settings). */}
+      {state.cloudSettled && !state.onboarding.tourDoneAt && <Tour state={state} actions={actions} />}
       {state.levelToast && (
         <div className="fixed bottom-20 left-1/2 z-[1000] flex min-w-[270px] -translate-x-1/2 items-center gap-3 rounded-[14px] border-[1.5px] border-primary bg-card px-[18px] py-3.5 shadow-[0_8px_32px_rgba(0,0,0,.6)]">
           <span className="text-[28px]">🌳</span>
@@ -490,6 +493,10 @@ const SettingsModal = ({ state, session, actions }) => {
       <div className="flex items-center justify-between py-3">
         <div><strong className="block text-[13px]">Your taste profile</strong><span className="text-[11px] text-muted-foreground">Change your artists, labels, genres, how often you dig, and your library sync</span></div>
         <button type="button" className={buttonSecondary} onClick={actions.restartOnboarding}>Edit</button>
+      </div>
+      <div className="flex items-center justify-between border-t border-border py-3">
+        <div><strong className="block text-[13px]">App tour</strong><span className="text-[11px] text-muted-foreground">The main buttons and the artist → label → artist dig, step by step</span></div>
+        <button type="button" className={buttonSecondary} onClick={actions.restartTour}>Take the tour</button>
       </div>
       <SectionHeader title="Data" />
       <div className="flex items-center justify-between py-3">

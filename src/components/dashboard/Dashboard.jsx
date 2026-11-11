@@ -59,10 +59,11 @@ export const Dashboard = ({ state, actions }) => {
           <button type="button" className={buttonSecondary} onClick={retry}>Try again</button>
         </div>
       )}
-      {!allFailed && rows.map(row => (
+      {!allFailed && rows.map((row, rowIndex) => (
         <DashboardRow
           key={row.id}
           row={row}
+          first={rowIndex === 0}
           openId={open?.rowId === row.id ? open.releaseId : null}
           onOpen={releaseId => setOpen(releaseId ? { rowId: row.id, releaseId } : null)}
           onRetry={retry}

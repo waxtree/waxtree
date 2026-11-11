@@ -15,7 +15,7 @@ export const Search = ({ state, actions }) => {
   const showResults = isTextMode && (state.loading || state.err || state.results.length > 0);
 
   return (
-    <div className="group relative min-w-0 shrink grow-[10] basis-0 max-w-[540px]">
+    <div data-tour="search" className="group relative min-w-0 shrink grow-[10] basis-0 max-w-[540px]">
       <div className="flex items-center gap-2 rounded-full border-[1.5px] border-border bg-background px-3.5 py-1.5 transition focus-within:border-primary focus-within:shadow-[0_0_0_3px_rgba(94,196,123,.12)]">
         <div className="relative shrink-0">
           <button type="button" onClick={() => setModeMenuOpen(value => !value)} className="flex items-center gap-0.5 rounded-full border border-primary px-2 py-px text-[10px] text-primary">

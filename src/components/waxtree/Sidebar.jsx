@@ -38,7 +38,7 @@ export const Sidebar = ({ state, actions, open, mobileOpen, onCloseMobile }) => 
       {/* Backdrop only exists in the DOM while the mobile drawer is open —
           zero desktop footprint (mobileOpen is always false there). */}
       {mobileOpen && <div className="fixed inset-0 z-40 bg-black/50 sm:hidden" onClick={onCloseMobile} />}
-      <aside className={`flex min-h-0 flex-col overflow-hidden border-r border-border bg-card sm:transition-[visibility] sm:duration-300 ${open ? '' : 'sm:invisible sm:border-r-0'} max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-50 max-sm:w-[82vw] max-sm:max-w-[300px] max-sm:shadow-2xl max-sm:transition-transform max-sm:duration-200 ${mobileOpen ? 'max-sm:translate-x-0' : 'max-sm:-translate-x-full'}`}>
+      <aside data-tour="sidebar" className={`flex min-h-0 flex-col overflow-hidden border-r border-border bg-card sm:transition-[visibility] sm:duration-300 ${open ? '' : 'sm:invisible sm:border-r-0'} max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-50 max-sm:w-[82vw] max-sm:max-w-[300px] max-sm:shadow-2xl max-sm:transition-transform max-sm:duration-200 ${mobileOpen ? 'max-sm:translate-x-0' : 'max-sm:-translate-x-full'}`}>
         {/* Fixed-width inner column: while the grid track slides open or shut the
             contents stay put and are revealed/clipped instead of reflowing. */}
         <div className="flex min-h-0 w-[var(--wt-sidebar-w)] flex-1 flex-col max-[900px]:w-[210px] max-sm:w-auto">

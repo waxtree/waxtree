@@ -3755,7 +3755,9 @@ async function searchBandcamp(q){
 // else — NOT in Supabase auth user_metadata, which is stamped into every
 // request's JWT (see the 414KB-JWT incident).
 function defaultOnboarding(){
-  return{step:0,role:null,frequency:null,genres:[],noLocalLibrary:false,signals:{},redo:false,updatedAt:0,completedAt:null};
+  // tourDoneAt: the walkthrough after the onboarding (finished or skipped) —
+  // kept in here so it rides the same cloud sync and shows once per account.
+  return{step:0,role:null,frequency:null,genres:[],noLocalLibrary:false,signals:{},redo:false,updatedAt:0,completedAt:null,tourDoneAt:null};
 }
 // Completed always beats in-progress, so a fresh device (or a stale tab) can
 // never push an empty/older copy over a finished onboarding and bring the
@@ -3782,6 +3784,16 @@ function completeOnboarding(){
 // mistaken for "never onboarded" by another one (see mergeOnboarding).
 function restartOnboarding(){
   st.onboarding={...st.onboarding,step:0,redo:true,updatedAt:Date.now()};
+  st.settingsModal=false;rr();
+}
+// The walkthrough: done (or skipped) once per account; Settings can replay it
+// (its first step brings the person back to Home).
+function finishTour(){
+  st.onboarding={...st.onboarding,tourDoneAt:new Date().toISOString(),updatedAt:Date.now()};
+  rr();
+}
+function restartTour(){
+  st.onboarding={...st.onboarding,tourDoneAt:null,updatedAt:Date.now()};
   st.settingsModal=false;rr();
 }
 // Discogs search for ONE entity type (artist or label), for the favourites
@@ -7086,7 +7098,7 @@ export const waxTreeActions={
   badgeListened,baseTitleKey,extractRemixCandidate,getCloneRelease,getDeejayRelease,getDeezerRelease,getDeezerPreviewUrl,getHardwaxAudioBlobUrl,getHardwaxAudioPreview,getHardwaxComment,getResolvedRemixArtist,getYoyakuRelease,matchCloneTrack,matchDeejayTrack,matchDeezerTrack,matchYoyakuTrack,normalizeStr,playDeezerPreview,
   freeNodeLimit:FREE_NODE_LIMIT,freeWoodLimit:FREE_WOOD_LIMIT,
   exploreStyles:EXPLORE_STYLES,exploreGenreYearMaxCombos:GENRE_YEAR_MAX_COMBOS,
-  updateOnboarding,completeOnboarding,restartOnboarding,searchFavoriteCandidates,getRelatedFavorites,resolveFavoriteByName,getGenreSuggestions,
+  updateOnboarding,completeOnboarding,restartOnboarding,finishTour,restartTour,searchFavoriteCandidates,getRelatedFavorites,resolveFavoriteByName,getGenreSuggestions,
   showDashboard,toggleSidebar,searchDashboardReleases,probeFavoriteTaste,getArtistCircle,getLabelRoster,
   supabase:sb,
 };

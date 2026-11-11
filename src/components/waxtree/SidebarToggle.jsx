@@ -7,6 +7,7 @@ export const SidebarToggle = ({ open, onClick }) => (
   <button
     type="button"
     onClick={onClick}
+    data-tour="sidebar-toggle"
     aria-expanded={open}
     aria-label={open ? 'Close branches' : 'Open branches'}
     title={open ? 'Close branches' : 'Open branches'}

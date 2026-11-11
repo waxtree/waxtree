@@ -127,7 +127,7 @@ export const ReleaseCard = ({ group, node, isLabel, state, actions }) => {
       </div>
       <div className="flex max-w-[370px] shrink-0 flex-col items-end gap-[5px] max-sm:max-w-none max-sm:basis-full max-sm:items-start">
         {explore.length > 0 && (
-          <div className="flex flex-wrap items-center justify-end gap-[5px] max-sm:justify-start">
+          <div data-tour="release-explore" className="flex flex-wrap items-center justify-end gap-[5px] max-sm:justify-start">
             {explore.length === 1 && <button type="button" onClick={() => exploreItem(explore[0])} className={`${actionButton} ${explore[0].highlighted ? exploreHighlighted : exploreDefault}`}>{explore[0].label} ›</button>}
             {explore.length > 1 && (
               <div ref={exploreRef} className="relative shrink-0">

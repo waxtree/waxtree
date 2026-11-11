@@ -49,6 +49,7 @@ export const SidebarNode = ({ node, depth, state, actions }) => {
         onDragLeave={() => setDropZone(null)}
         onDrop={handleDrop}
         onClick={() => actions.selectNode(node.id)}
+        data-tour-node={node.id}
         style={{ paddingLeft: 8 + depth * 14 }}
         className={`group relative flex cursor-pointer items-start gap-1.5 border-l-2 py-[7px] pr-2.5 ${node.justAdded ? 'animate-pulse border-primary bg-primary/20' : active ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'} ${dropZone === 'inside' ? 'outline-2 outline-dashed -outline-offset-2 outline-primary' : ''}`}
       >

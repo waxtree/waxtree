@@ -21,6 +21,7 @@ export const Header = ({ state, session, actions, onMenuClick }) => {
           stays underneath the digging workspace the whole time. */}
       <button
         type="button"
+        data-tour="home"
         onClick={actions.showDashboard}
         title="Home"
         aria-label="WaxTree home"

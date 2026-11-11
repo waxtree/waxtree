@@ -29,7 +29,7 @@ export const TrackRow = ({ track, node, isLabel, primaryArtist, state, actions, 
     : [];
 
   return (
-    <div className="relative flex min-w-0 items-center gap-[6px]">
+    <div data-tour="track-actions" className="relative flex min-w-0 items-center gap-[6px]">
       {/* One Play button per row. It plays the best available source
           (Deezer preview → Discogs/YouTube video → store preview); the
           icon is a headphone when that turns out to be a short audio

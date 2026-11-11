@@ -5,10 +5,10 @@ import { hScrollThin } from '@/lib/waxtreeUi';
 const SKELETON_TILES = 6;
 
 // One dashboard string: a title, a one-line reason, and a scroller of records.
-export const DashboardRow = ({ row, openId, onOpen, onRetry, state, actions }) => {
+export const DashboardRow = ({ row, first, openId, onOpen, onRetry, state, actions }) => {
   const openItem = row.items.find(item => item.id === openId);
   return (
-    <section aria-label={row.title} className="mb-8">
+    <section aria-label={row.title} data-tour={first ? 'dashboard-row' : undefined} className="mb-8">
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <h2 className="text-[17px] font-bold">{row.title}</h2>
         <p className="min-w-0 truncate text-xs text-muted-foreground">{row.subtitle}</p>
